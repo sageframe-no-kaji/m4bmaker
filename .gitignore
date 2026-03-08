@@ -1,0 +1,10 @@
+# Python cache & build artifacts — stub (full version added in Phase 4)
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.env
