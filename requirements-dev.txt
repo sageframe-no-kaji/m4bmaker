@@ -1,0 +1,17 @@
+# Development, linting, type-checking, and test dependencies
+-r requirements.txt
+
+# Testing
+pytest>=8.0
+pytest-cov>=5.0
+
+# Type checking
+mypy>=1.9
+types-natsort>=8.4
+
+# Linting & formatting
+black>=24.0
+flake8>=7.0
+
+# Cover image resolution comparison (used in cover.py and tests)
+Pillow>=10.0

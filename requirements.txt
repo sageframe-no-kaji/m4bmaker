@@ -1,0 +1,5 @@
+# Runtime dependencies
+# System requirement: ffmpeg >= 6.0 and ffprobe must be installed separately
+# (see README.md — Docker / system install instructions)
+mutagen>=1.47
+natsort>=8.4
