@@ -734,9 +734,20 @@ class MainWindow(QMainWindow):
             self._preflight_sample_rate = next(iter(a.sample_rates))  # type: ignore[union-attr]
         else:
             self._preflight_sample_rate = None  # mixed rates — let ffmpeg decide
-        # VBR sources: snap bitrate to safe default
-        if len(a.bit_rates) != 1:  # type: ignore[union-attr]
-            self._bitrate_combo.setCurrentText("96k")
+        # Snap bitrate to the closest available option matching the source
+        if a.bit_rates:  # type: ignore[union-attr]
+            dominant_bps = a.bit_rates.most_common(1)[0][0]  # type: ignore[union-attr]
+            dominant_kbps = dominant_bps // 1000
+            _avail = [int(r.rstrip("k")) for r in _BITRATES]
+            closest = min(_avail, key=lambda x: abs(x - dominant_kbps))
+            self._bitrate_combo.setCurrentText(f"{closest}k")
+        # Snap mono/stereo to match source channels
+        if len(a.channels) == 1:  # type: ignore[union-attr]
+            ch = next(iter(a.channels))  # type: ignore[union-attr]
+            if ch >= 2:
+                self._stereo_radio.setChecked(True)
+            else:
+                self._mono_radio.setChecked(True)
 
     def _on_chapter_selected(
         self, row: int, _col: int, _prev_row: int, _prev_col: int

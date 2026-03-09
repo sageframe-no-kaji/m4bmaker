@@ -564,6 +564,66 @@ class TestAnalysisSection:
             w._on_folder_changed(tmp_path)
         assert w._analysis_label.text() == "No analysis yet."
 
+    def test_preflight_snaps_bitrate_to_source(self, win):
+        from collections import Counter
+        from m4bmaker.preflight import AudioAnalysis
+
+        w, _ = win
+        # source is 32 kbps (32000 bps)
+        analysis = AudioAnalysis(
+            file_count=4,
+            sample_rates=Counter({22050: 4}),
+            channels=Counter({1: 4}),
+            bit_rates=Counter({32000: 4}),
+        )
+        w._on_preflight_finished(analysis)
+        assert w._bitrate_combo.currentText() == "32k"
+
+    def test_preflight_snaps_mono(self, win):
+        from collections import Counter
+        from m4bmaker.preflight import AudioAnalysis
+
+        w, _ = win
+        w._stereo_radio.setChecked(True)  # start on stereo
+        analysis = AudioAnalysis(
+            file_count=2,
+            sample_rates=Counter({44100: 2}),
+            channels=Counter({1: 2}),
+            bit_rates=Counter({64000: 2}),
+        )
+        w._on_preflight_finished(analysis)
+        assert w._mono_radio.isChecked()
+        assert not w._stereo_radio.isChecked()
+
+    def test_preflight_snaps_stereo(self, win):
+        from collections import Counter
+        from m4bmaker.preflight import AudioAnalysis
+
+        w, _ = win
+        analysis = AudioAnalysis(
+            file_count=2,
+            sample_rates=Counter({44100: 2}),
+            channels=Counter({2: 2}),
+            bit_rates=Counter({128000: 2}),
+        )
+        w._on_preflight_finished(analysis)
+        assert w._stereo_radio.isChecked()
+
+    def test_preflight_mixed_channels_leaves_selection_unchanged(self, win):
+        from collections import Counter
+        from m4bmaker.preflight import AudioAnalysis
+
+        w, _ = win
+        assert w._mono_radio.isChecked()  # default
+        analysis = AudioAnalysis(
+            file_count=3,
+            sample_rates=Counter({44100: 3}),
+            channels=Counter({1: 2, 2: 1}),  # mixed
+            bit_rates=Counter({96000: 3}),
+        )
+        w._on_preflight_finished(analysis)
+        assert w._mono_radio.isChecked()  # unchanged
+
 
 # ── Edit mode (m4b file) ──────────────────────────────────────────────────────
 
