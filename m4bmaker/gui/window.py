@@ -65,6 +65,9 @@ from m4bmaker.gui.worker import (
     PreflightWorker,
     SaveChaptersWorker,
 )
+from m4bmaker.gui.job import job_from_book
+from m4bmaker.gui.queue_manager import QueueManager
+from m4bmaker.gui.queue_window import QueueWindow
 from m4bmaker.preflight import format_preflight_summary
 try:
     from PySide6.QtSvg import QSvgRenderer as _QSvgRenderer
@@ -129,6 +132,8 @@ class MainWindow(QMainWindow):
         self._preflight_sample_rate: Optional[int] = None
         self._save_worker: Optional[SaveChaptersWorker] = None
         self._extra_windows: list["MainWindow"] = []
+        self._queue_manager = QueueManager()
+        self._queue_window: Optional[QueueWindow] = None
 
         self._build_menu_bar()
         self._build_ui()
@@ -157,6 +162,13 @@ class MainWindow(QMainWindow):
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(QApplication.quit)
         file_menu.addAction(quit_action)
+
+        # Queue action
+        queue_action = QAction("Show Encode Queue", self)
+        queue_action.setShortcut("Ctrl+Shift+Q")
+        queue_action.triggered.connect(self._show_queue_window)
+        file_menu.addSeparator()
+        file_menu.addAction(queue_action)
 
         # View menu
         view_menu = mb.addMenu("View")
@@ -205,6 +217,8 @@ class MainWindow(QMainWindow):
         QApplication.instance().setStyleSheet(get_stylesheet(self._dark_mode))
         if hasattr(self, "_dark_btn"):
             self._dark_btn.setText("☀️" if self._dark_mode else "🌙")
+        if self._queue_window is not None:
+            self._queue_window.apply_stylesheet(self._dark_mode)
 
     def _new_window(self) -> None:
         win = MainWindow()
@@ -494,7 +508,15 @@ class MainWindow(QMainWindow):
         self._convert_btn.setFixedHeight(44)
         self._convert_btn.setFixedWidth(210)
         self._convert_btn.clicked.connect(self._on_convert)
+
+        self._add_to_queue_btn = QPushButton("+ Queue")
+        self._add_to_queue_btn.setObjectName("addToQueueBtn")
+        self._add_to_queue_btn.setFixedHeight(44)
+        self._add_to_queue_btn.setToolTip("Add this book to the encode queue (⌘⇧Q to open queue)")
+        self._add_to_queue_btn.clicked.connect(self._on_add_to_queue)
+
         btn_row.addStretch()
+        btn_row.addWidget(self._add_to_queue_btn)
         btn_row.addWidget(self._convert_btn)
         btn_row.addStretch()
 
@@ -531,11 +553,17 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
-        if self._is_busy():
+        queue_busy = self._queue_manager.is_running
+        if self._is_busy() or queue_busy:
+            msg = (
+                "The encode queue is running.\nAre you sure you want to quit?"
+                if queue_busy
+                else "A conversion is in progress.\nAre you sure you want to quit?"
+            )
             reply = QMessageBox.question(
                 self,
                 "Cancel Conversion?",
-                "A conversion is in progress.\nAre you sure you want to quit?",
+                msg,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -549,6 +577,7 @@ class MainWindow(QMainWindow):
         busy = self._convert_worker is not None and self._convert_worker.isRunning()
         save_busy = self._save_worker is not None and self._save_worker.isRunning()
         self._convert_btn.setEnabled(has_book and not busy and not save_busy)
+        self._add_to_queue_btn.setEnabled(has_book and self._mode == "build")
         self._tabs.setTabEnabled(1, has_book)
         if self._mode == "edit":
             self._convert_btn.setText("Save Chapter Edits")
@@ -609,6 +638,37 @@ class MainWindow(QMainWindow):
         return book
 
     # ── Slots ─────────────────────────────────────────────────────────────────
+
+    def _collect_job(self):
+        """Snapshot current GUI state as a Job for the queue."""
+        book = self._collect_book_edits()
+        out = self._computed_output_path()
+        if out is None:
+            return None
+        return job_from_book(
+            book, out,
+            bitrate=self._bitrate_combo.currentText(),
+            stereo=self._stereo_radio.isChecked(),
+            sample_rate=self._preflight_sample_rate,
+        )
+
+    def _on_add_to_queue(self) -> None:
+        if self._book is None:
+            return
+        job = self._collect_job()
+        if job is None:
+            return
+        self._queue_manager.add(job)
+        self._show_queue_window()
+        self._set_status(f"Added \"{job.title}\" to queue  ({len(self._queue_manager.jobs)} job(s))")
+
+    def _show_queue_window(self) -> None:
+        if self._queue_window is None:
+            self._queue_window = QueueWindow(self._queue_manager)
+            self._queue_window.apply_stylesheet(self._dark_mode)
+        self._queue_window.show()
+        self._queue_window.raise_()
+        self._queue_window.activateWindow()
 
     def _on_folder_changed(self, p: Path) -> None:
         self._book = None

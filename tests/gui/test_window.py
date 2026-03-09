@@ -695,3 +695,100 @@ class TestChaptersTabPlayer:
             with patch.object(w._player, "load") as mock_load:
                 w._on_chapter_selected(0, 0, -1, 0)
         mock_load.assert_called_once()
+
+
+# ── Queue integration ─────────────────────────────────────────────────────────
+
+
+class TestQueueIntegration:
+    def test_add_to_queue_btn_exists(self, win):
+        w, _ = win
+        assert hasattr(w, "_add_to_queue_btn")
+
+    def test_add_to_queue_btn_disabled_initially(self, win):
+        w, _ = win
+        assert not w._add_to_queue_btn.isEnabled()
+
+    def test_add_to_queue_btn_enabled_after_load(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        assert w._add_to_queue_btn.isEnabled()
+
+    def test_add_to_queue_btn_disabled_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._mode = "edit"
+        w._update_controls()
+        assert not w._add_to_queue_btn.isEnabled()
+
+    def test_on_add_to_queue_adds_job(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._folder_zone._path = tmp_path
+        with patch.object(w, "_show_queue_window"):
+            w._on_add_to_queue()
+        assert len(w._queue_manager.jobs) == 1
+
+    def test_on_add_to_queue_shows_queue_window(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._folder_zone._path = tmp_path
+        with patch.object(w, "_show_queue_window") as mock_show:
+            w._on_add_to_queue()
+        mock_show.assert_called_once()
+
+    def test_on_add_to_queue_updates_status(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._folder_zone._path = tmp_path
+        with patch.object(w, "_show_queue_window"):
+            w._on_add_to_queue()
+        assert "queue" in w._status_label.text().lower()
+
+    def test_on_add_to_queue_noop_when_no_book(self, win):
+        w, _ = win
+        w._on_add_to_queue()  # should not raise
+        assert len(w._queue_manager.jobs) == 0
+
+    def test_show_queue_window_creates_window(self, win):
+        w, _ = win
+        assert w._queue_window is None
+        w._show_queue_window()
+        assert w._queue_window is not None
+
+    def test_show_queue_window_reuses_instance(self, win):
+        w, _ = win
+        w._show_queue_window()
+        first = w._queue_window
+        w._show_queue_window()
+        assert w._queue_window is first
+
+    def test_close_event_allowed_when_queue_idle(self, win):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QCloseEvent
+
+        w, _ = win
+        event = QCloseEvent()
+        w.closeEvent(event)
+        assert event.isAccepted()
+
+    def test_close_event_prompts_when_queue_running(self, win):
+        from unittest.mock import PropertyMock
+
+        from PySide6.QtGui import QCloseEvent
+        from PySide6.QtWidgets import QMessageBox
+
+        w, _ = win
+        event = QCloseEvent()
+        with patch.object(type(w._queue_manager), "is_running", new_callable=PropertyMock, return_value=True):
+            with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No):
+                w.closeEvent(event)
+        assert not event.isAccepted()
+
+    def test_toggle_dark_mode_syncs_queue_window(self, win):
+        w, _ = win
+        w._show_queue_window()
+        w._dark_action.setChecked(True)
+        with patch.object(w._queue_window, "apply_stylesheet") as mock_apply:
+            w._toggle_dark_mode()
+        mock_apply.assert_called_once_with(True)
