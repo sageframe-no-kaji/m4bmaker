@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QSize, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -387,6 +387,29 @@ class MainWindow(QMainWindow):
         return layout
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    # ── Close-while-running guard (Feature 5) ────────────────────────────────
+
+    def _is_busy(self) -> bool:
+        return (
+            self._convert_worker is not None and self._convert_worker.isRunning()
+        ) or (
+            self._save_worker is not None and self._save_worker.isRunning()
+        )
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
+        if self._is_busy():
+            reply = QMessageBox.question(
+                self,
+                "Cancel Conversion?",
+                "A conversion is in progress.\nAre you sure you want to quit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+        super().closeEvent(event)
 
     def _update_controls(self) -> None:
         has_book = self._book is not None

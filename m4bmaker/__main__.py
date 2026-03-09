@@ -16,6 +16,7 @@ from m4bmaker.metadata import extract_metadata, prompt_missing
 from m4bmaker.models import BookMetadata, Chapter
 from m4bmaker.pipeline import load_audiobook, run_pipeline
 from m4bmaker.preflight import format_preflight_report, run_preflight
+from m4bmaker.repair import apply_repair, format_repair_report, run_repair
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, log
 
 
@@ -256,7 +257,14 @@ def main() -> None:
         analysis = run_preflight(book.files, ffprobe)
         print(format_preflight_report(analysis))
 
-        # 3b. Override chapters from --chapters-file if supplied.
+        # 3c. Repair damaged / non-standard input files.
+        log("Checking for damaged audio files…")
+        repair_result = run_repair(book.files, tmp_dir, ffmpeg, ffprobe)
+        if repair_result.needed_repair:
+            print(format_repair_report(repair_result))
+            book.files = apply_repair(book.files, repair_result)
+
+        # 3d. Override chapters from --chapters-file if supplied.
         if args.chapters_file:
             book.chapters = load_chapters_file(args.chapters_file)
             log(

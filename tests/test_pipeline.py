@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from m4bmaker.models import Book, BookMetadata, Chapter, PipelineResult
 from m4bmaker.pipeline import load_audiobook, run_pipeline
 
@@ -120,6 +121,12 @@ class TestLoadAudiobook:
 
 
 class TestRunPipeline:
+    @pytest.fixture(autouse=True)
+    def _no_repair(self):
+        """Bypass the repair subprocess calls for all pipeline encoding tests."""
+        with patch("m4bmaker.repair.needs_repair", return_value=False):
+            yield
+
     def _make_book(self, tmp_path: Path) -> Book:
         stub = tmp_path / "01.mp3"
         stub.write_bytes(b"\x00")

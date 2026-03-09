@@ -156,6 +156,7 @@ def _run_pipeline(
         patch("m4bmaker.chapters.get_duration", return_value=duration),
         patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_ffmpeg_popen),
         patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
+        patch("m4bmaker.repair.needs_repair", return_value=False),
         patch("m4bmaker.__main__.parse_args", return_value=parsed),
     ):
         main()
@@ -244,6 +245,7 @@ class TestFullPipeline:
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
+            patch("m4bmaker.repair.needs_repair", return_value=False),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):
@@ -287,6 +289,7 @@ class TestFullPipeline:
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
+            patch("m4bmaker.repair.needs_repair", return_value=False),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):
@@ -875,6 +878,7 @@ class TestInteractiveChapterEdit:
             patch("m4bmaker.chapters.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
+            patch("m4bmaker.repair.needs_repair", return_value=False),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch("builtins.input", side_effect=inputs),
         ):
@@ -934,6 +938,7 @@ class TestChaptersFileIntegration:
             patch("m4bmaker.chapters.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
+            patch("m4bmaker.repair.needs_repair", return_value=False),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):

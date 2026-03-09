@@ -100,6 +100,8 @@ def run_pipeline(
         Inject a temporary directory (used in tests to inspect intermediate
         files without relying on :mod:`tempfile`).
     """
+    from m4bmaker.repair import apply_repair, run_repair
+
     effective_cover = cover if cover is not None else book.cover
     channels = 2 if stereo else 1
 
@@ -111,46 +113,71 @@ def run_pipeline(
 
     _cb("Scanning audio files…", 0.0)
 
-    # Compute total duration from chapter start_times + last file's duration.
-    if book.chapters:
-        last_ch = book.chapters[-1]
-        # Duration of the last source file is needed for total_duration_s.
-        # We approximate by probing the last file; the pipeline already has
-        # durations from build_chapters, so we re-derive total from the last
-        # chapter's start_time plus the last file's ffprobe duration.
-        from m4bmaker.chapters import get_duration
+    def _run(tmp_path: Path) -> PipelineResult:
+        # ── Repair pass ──────────────────────────────────────────────────
+        def _repair_cb(msg: str) -> None:
+            _cb(msg, 0.05)
 
-        if last_ch.source_file is not None:
-            last_duration = get_duration(last_ch.source_file, ffprobe)
-        else:
-            # Fallback: assume equal-length files (chapters-file case).
-            if len(book.chapters) > 1:
-                gap = book.chapters[1].start_time - book.chapters[0].start_time
+        repair_result = run_repair(
+            files=book.files,
+            tmp_dir=tmp_path,
+            ffmpeg=ffmpeg,
+            ffprobe=ffprobe,
+            progress_callback=_repair_cb,
+        )
+        active_files = apply_repair(book.files, repair_result)
+        if repair_result.needed_repair:
+            _cb(
+                f"Repaired {repair_result.repaired} file(s). Continuing…",
+                0.08,
+            )
+
+        # ── Compute total duration ────────────────────────────────────────
+        # Compute total duration from chapter start_times + last file's duration.
+        working_book = book
+        if repair_result.needed_repair:
+            from copy import deepcopy
+
+            working_book = deepcopy(book)
+            # Remap source_file references to cleaned copies
+            mapping = {orig: cleaned for orig, cleaned in repair_result.repaired_paths}
+            for ch in working_book.chapters:
+                if ch.source_file is not None:
+                    ch.source_file = mapping.get(ch.source_file, ch.source_file)
+
+        if working_book.chapters:
+            last_ch = working_book.chapters[-1]
+            from m4bmaker.chapters import get_duration
+
+            if last_ch.source_file is not None:
+                last_duration = get_duration(last_ch.source_file, ffprobe)
             else:
-                gap = 0.0
-            last_duration = gap
-        total_duration_s = last_ch.start_time + last_duration
-    else:
-        total_duration_s = 0.0
+                # Fallback: assume equal-length files (chapters-file case).
+                last_duration = (
+                    working_book.chapters[1].start_time - working_book.chapters[0].start_time
+                    if len(working_book.chapters) > 1
+                    else 0.0
+                )
+            total_duration_s = last_ch.start_time + last_duration
+        else:
+            total_duration_s = 0.0
 
-    total_ms = int(total_duration_s * 1000)
+        total_ms = int(total_duration_s * 1000)
 
-    def _make_tmp(base: Path) -> tuple[Path, Path]:
-        meta_file = base / "ffmetadata.txt"
-        concat_file = base / "concat.txt"
-        return meta_file, concat_file
+        # ── Chapter metadata & concat list ───────────────────────────────
+        _cb("Generating chapter markers…", 0.1)
+        meta_file = tmp_path / "ffmetadata.txt"
+        concat_file = tmp_path / "concat.txt"
+        write_ffmetadata(working_book.chapters, working_book.metadata, meta_file, total_duration_s)
+        write_concat_list(active_files, concat_file)
 
-    _cb("Generating chapter markers…", 0.1)
+        # ── Encode ───────────────────────────────────────────────────────
+        _cb(f"Encoding {len(active_files)} file(s) to M4B…", 0.2)
 
-    def _encode_progress(frac: float) -> None:
-        pct = int(frac * 100)
-        _cb(f"Encoding audiobook… {pct}%", 0.2 + 0.78 * frac)
+        def _encode_progress(frac: float) -> None:
+            pct = int(frac * 100)
+            _cb(f"Encoding audiobook… {pct}%", 0.2 + 0.78 * frac)
 
-    if _tmp_dir is not None:
-        meta_file, concat_file = _make_tmp(_tmp_dir)
-        write_ffmetadata(book.chapters, book.metadata, meta_file, total_duration_s)
-        write_concat_list(book.files, concat_file)
-        _cb(f"Encoding {len(book.files)} file(s) to M4B…", 0.2)
         encode(
             concat=concat_file,
             meta_file=meta_file,
@@ -162,29 +189,16 @@ def run_pipeline(
             total_ms=total_ms,
             progress_callback=_encode_progress,
         )
+
+        _cb("Done.", 1.0)
+        return PipelineResult(
+            output_file=output_path,
+            chapter_count=len(working_book.chapters),
+            duration_seconds=total_duration_s,
+        )
+
+    if _tmp_dir is not None:
+        return _run(_tmp_dir)
     else:
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            meta_file, concat_file = _make_tmp(tmp_path)
-            write_ffmetadata(book.chapters, book.metadata, meta_file, total_duration_s)
-            write_concat_list(book.files, concat_file)
-            _cb(f"Encoding {len(book.files)} file(s) to M4B…", 0.2)
-            encode(
-                concat=concat_file,
-                meta_file=meta_file,
-                cover=effective_cover,
-                output=output_path,
-                bitrate=bitrate,
-                channels=channels,
-                ffmpeg=ffmpeg,
-                total_ms=total_ms,
-                progress_callback=_encode_progress,
-            )
-
-    _cb("Done.", 1.0)
-
-    return PipelineResult(
-        output_file=output_path,
-        chapter_count=len(book.chapters),
-        duration_seconds=total_duration_s,
-    )
+            return _run(Path(tmp))
