@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QSize, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -66,11 +66,42 @@ from m4bmaker.gui.worker import (
     SaveChaptersWorker,
 )
 from m4bmaker.preflight import format_preflight_summary
+try:
+    from PySide6.QtSvg import QSvgRenderer as _QSvgRenderer
+    _HAS_SVG = True
+except ImportError:
+    _HAS_SVG = False
 
 _BITRATES = ["32k", "48k", "64k", "96k", "128k", "192k", "256k", "320k"]
 _DEFAULT_BITRATE = "96k"
 _DONATE_URL = "https://buymeacoffee.com/sageframe"
 _GITHUB_URL = "https://github.com/sageframe-no-kaji"
+
+# Sageframe brand SVG (embedded so the app has no file dependency)
+_SAGEFRAME_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 301 301">'
+    b'<defs><style>'
+    b'.s1{fill:none;stroke:#c45b35;stroke-linecap:square;stroke-miterlimit:10;stroke-width:23px}'
+    b'.s2{fill:#eae5dd}</style></defs>'
+    b'<circle class="s2" cx="150.5" cy="150.5" r="150.5"/>'
+    b'<line class="s1" x1="150.19" y1="52.98" x2="150.19" y2="257.92"/>'
+    b'<line class="s1" x1="86.88" y1="106.38" x2="182.15" y2="203.64"/>'
+    b'<line class="s1" x1="86.88" y1="236.27" x2="150.19" y2="172.97"/>'
+    b'<line class="s1" x1="150.19" y1="43.08" x2="214.12" y2="106.38"/>'
+    b'<line class="s1" x1="86.88" y1="106.38" x2="150.19" y2="43.08"/>'
+    b'</svg>'
+)
+
+
+def _sageframe_pixmap(size: int = 16) -> QPixmap:
+    pix = QPixmap(size, size)
+    pix.fill(Qt.GlobalColor.transparent)
+    if _HAS_SVG:
+        renderer = _QSvgRenderer(_SAGEFRAME_SVG)
+        painter = QPainter(pix)
+        renderer.render(painter)
+        painter.end()
+    return pix
 
 
 def _muted_label(text: str) -> QLabel:
@@ -158,9 +189,15 @@ class MainWindow(QMainWindow):
         self._status_label.setText(text)
         self._status_label.setVisible(bool(text))
 
+    def _on_dark_mode_btn(self) -> None:
+        self._dark_action.setChecked(not self._dark_action.isChecked())
+        self._toggle_dark_mode()
+
     def _toggle_dark_mode(self) -> None:
         self._dark_mode = self._dark_action.isChecked()
         QApplication.instance().setStyleSheet(get_stylesheet(self._dark_mode))
+        if hasattr(self, "_dark_btn"):
+            self._dark_btn.setText("☀️" if self._dark_mode else "🌙")
 
     def _new_window(self) -> None:
         win = MainWindow()
@@ -424,6 +461,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._status_label)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        # Dark mode toggle (far left)
+        self._dark_btn = QPushButton("🌙")
+        self._dark_btn.setObjectName("darkModeBtn")
+        self._dark_btn.setFixedSize(28, 28)
+        self._dark_btn.setToolTip("Toggle dark mode")
+        self._dark_btn.clicked.connect(self._on_dark_mode_btn)
+        btn_row.addWidget(self._dark_btn)
+
         self._convert_btn = QPushButton("Convert to M4B")
         self._convert_btn.setObjectName("convertBtn")
         self._convert_btn.setFixedHeight(44)
@@ -432,7 +479,19 @@ class MainWindow(QMainWindow):
         btn_row.addStretch()
         btn_row.addWidget(self._convert_btn)
         btn_row.addStretch()
+        # Sageframe icon + link
+        sf_icon_lbl = QLabel()
+        sf_icon_lbl.setPixmap(_sageframe_pixmap(14))
+        sf_icon_lbl.setStyleSheet("background: transparent;")
+        btn_row.addWidget(sf_icon_lbl)
 
+        sf_lbl = QLabel(
+            f'<a href="{_GITHUB_URL}" style="color: #7a7a7a; text-decoration: none;">'
+            "Sageframe</a>"
+        )
+        sf_lbl.setOpenExternalLinks(True)
+        sf_lbl.setStyleSheet("font-size: 11px; background: transparent;")
+        btn_row.addWidget(sf_lbl)
         donate_lbl = QLabel(
             f'<a href="{_DONATE_URL}" style="color: #c45a2d; text-decoration: none;">'
             "\u2665 Support</a>"

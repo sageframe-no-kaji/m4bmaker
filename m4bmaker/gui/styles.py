@@ -413,6 +413,35 @@ QPushButton#playerStopBtn:disabled {
 QDialogButtonBox QPushButton {
     min-width: 72px;
 }
+
+/* ── Cover Widget ────────────────────────────────────────────────────── */
+QFrame#coverWidget {
+    background-color: #faf8f4;
+    border: 1px solid #d0c9be;
+    border-radius: 4px;
+}
+
+QLabel#coverThumb {
+    background-color: #ebe6dd;
+    border: 1px solid #d0c9be;
+    border-radius: 3px;
+    color: #7a7a7a;
+    font-size: 11px;
+}
+
+/* ── Dark mode toggle button ─────────────────────────────────────────── */
+QPushButton#darkModeBtn {
+    background: transparent;
+    border: 1px solid #d0c9be;
+    border-radius: 5px;
+    font-size: 14px;
+    padding: 0;
+    color: #4a4a4a;
+}
+
+QPushButton#darkModeBtn:hover {
+    background-color: #ddd7cc;
+}
 """
 
 # ── Dark mode palette ─────────────────────────────────────────────────────────
@@ -823,6 +852,35 @@ QPushButton#playerStopBtn:disabled {
 /* ── Dialogs ─────────────────────────────────────────────────────────── */
 QDialogButtonBox QPushButton {
     min-width: 72px;
+}
+
+/* ── Cover Widget ────────────────────────────────────────────────────── */
+QFrame#coverWidget {
+    background-color: #242424;
+    border: 1px solid #333333;
+    border-radius: 4px;
+}
+
+QLabel#coverThumb {
+    background-color: #2e2e2e;
+    border: 1px solid #333333;
+    border-radius: 3px;
+    color: #888888;
+    font-size: 11px;
+}
+
+/* ── Dark mode toggle button ─────────────────────────────────────────── */
+QPushButton#darkModeBtn {
+    background: transparent;
+    border: 1px solid #333333;
+    border-radius: 5px;
+    font-size: 14px;
+    padding: 0;
+    color: #c8c2b8;
+}
+
+QPushButton#darkModeBtn:hover {
+    background-color: #2e2e2e;
 }
 """
 

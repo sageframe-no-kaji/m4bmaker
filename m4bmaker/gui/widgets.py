@@ -49,20 +49,8 @@ _ACCENT = "#c45a2d"
 _RULE = "#d0c9be"
 _INK_MUTED = "#7a7a7a"
 
-_THUMB_BASE = (
-    f"background-color: {_GROUND_WARM};"
-    f"border: 1px solid {_RULE};"
-    "border-radius: 3px;"
-    f"color: {_INK_MUTED};"
-    "font-size: 11px;"
-)
-_THUMB_DRAG = (
-    f"background-color: {_GROUND_WARM};"
-    f"border: 1px solid {_ACCENT};"
-    "border-radius: 3px;"
-    f"color: {_INK_MUTED};"
-    "font-size: 11px;"
-)
+_THUMB_BASE = ""  # clear drag highlight; normal look handled by QSS
+_THUMB_DRAG = f"border: 2px solid {_ACCENT};"  # drag-over accent border only
 
 
 # ── FolderDropZone ────────────────────────────────────────────────────────────
@@ -181,20 +169,17 @@ class CoverWidget(QFrame):
         self._build()
 
     def _build(self) -> None:
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(
-            "CoverWidget { background-color: #faf8f4; border: 1px solid #d0c9be;"
-            " border-radius: 4px; } "
-        )
+        self.setObjectName("coverWidget")
+        self.setFrameShape(QFrame.Shape.NoFrame)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         self._thumb = QLabel()
+        self._thumb.setObjectName("coverThumb")
         self._thumb.setFixedSize(self._SIZE, self._SIZE)
         self._thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._thumb.setStyleSheet(_THUMB_BASE)
         self._thumb.setText("Cover")
         layout.addWidget(self._thumb)
 
