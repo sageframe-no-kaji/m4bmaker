@@ -308,5 +308,5 @@ def main() -> None:
         log(f"Done. Created: {output}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

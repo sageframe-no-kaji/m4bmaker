@@ -816,3 +816,59 @@ class TestChapterTableInPipeline:
         _run_pipeline(tmp_path)
         captured = capsys.readouterr()
         assert "Edit chapter titles" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Interactive main() — chapter table + inline edit (lines 288-291)
+# ---------------------------------------------------------------------------
+
+
+class TestInteractiveChapterEdit:
+    def test_chapter_table_and_edit_shown_in_interactive_tty(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """With interactive=True and isatty=True, chapter table is printed and
+        the 'Edit chapter titles?' prompt is shown; answering 'y' triggers
+        _edit_chapters_inline through main()."""
+        import sys
+
+        from m4bmaker.__main__ import main
+        from m4bmaker.cli import parse_args as real_parse_args
+
+        _make_stub_mp3(tmp_path / "01 - Prologue.mp3")
+
+        # No --no-prompt → interactive=True
+        argv = [str(tmp_path), "--title", "T", "--author", "A", "--narrator", "N"]
+        parsed = real_parse_args(argv)
+
+        # Patch isatty on the live sys.stdout (capsys device) so the block
+        # `if interactive and sys.stdout.isatty()` evaluates to True.
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+        # Input sequence when interactive=True, isatty=True, no cover in dir:
+        #   1  _prompt_cover (no cover auto-detected) → "" skip
+        #   2  prompt_missing title    → "" keep "T"
+        #   3  prompt_missing author   → "" keep "A"
+        #   4  prompt_missing narrator → "" keep "N"
+        #   5  prompt_missing genre    → "" skip
+        #   6  _confirm_output         → "" keep proposed
+        #   7  "Edit chapter titles?"  → "y"
+        #   8  chapter 1 title edit    → "" keep "Prologue"
+        inputs = iter(["", "", "", "", "", "", "y", ""])
+
+        with (
+            patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("m4bmaker.chapters.get_duration", return_value=10.0),
+            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.__main__.parse_args", return_value=parsed),
+            patch("builtins.input", side_effect=inputs),
+        ):
+            main()
+
+        captured = capsys.readouterr()
+        # _print_chapter_table calls print() which capsys captures
+        assert "Chapters (1)" in captured.out
+        assert "Prologue" in captured.out

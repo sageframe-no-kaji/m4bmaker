@@ -223,3 +223,81 @@ class TestRunPipeline:
             run_pipeline(book, out, cover=cover, ffmpeg="ffmpeg", ffprobe="ffprobe")
 
         assert any(str(cover) in " ".join(cmd) for cmd in ffmpeg_cmds)
+
+    def test_empty_chapters_zero_total_duration(self, tmp_path: Path) -> None:
+        """book.chapters=[] → total_duration_s=0.0, no ffprobe call needed."""
+        stub = tmp_path / "01.mp3"
+        stub.write_bytes(b"\x00")
+        book = Book(
+            files=[stub],
+            chapters=[],
+            metadata=BookMetadata(title="T", author="A", narrator="N"),
+            cover=None,
+        )
+        out = tmp_path / "out.m4b"
+        with patch(
+            "m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()
+        ):
+            result = run_pipeline(book, out, ffmpeg="ffmpeg", ffprobe="ffprobe")
+        assert result.duration_seconds == 0.0
+        assert result.chapter_count == 0
+
+    def test_no_source_file_multi_chapter_uses_gap(self, tmp_path: Path) -> None:
+        """source_file=None with 2+ chapters → total derived from inter-chapter gap."""
+        stub = tmp_path / "01.mp3"
+        stub.write_bytes(b"\x00")
+        book = Book(
+            files=[stub],
+            chapters=[
+                Chapter(index=1, start_time=0.0, title="Ch1", source_file=None),
+                Chapter(index=2, start_time=15.0, title="Ch2", source_file=None),
+            ],
+            metadata=BookMetadata(title="T", author="A", narrator="N"),
+            cover=None,
+        )
+        out = tmp_path / "out.m4b"
+        with patch(
+            "m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()
+        ):
+            result = run_pipeline(book, out, ffmpeg="ffmpeg", ffprobe="ffprobe")
+        # total_duration_s = last_ch.start_time + gap = 15.0 + 15.0 = 30.0
+        assert abs(result.duration_seconds - 30.0) < 1e-6
+
+    def test_no_source_file_single_chapter_gap_is_zero(self, tmp_path: Path) -> None:
+        """source_file=None with only 1 chapter → gap=0.0, duration=start_time."""
+        stub = tmp_path / "01.mp3"
+        stub.write_bytes(b"\x00")
+        book = Book(
+            files=[stub],
+            chapters=[
+                Chapter(index=1, start_time=0.0, title="Only", source_file=None),
+            ],
+            metadata=BookMetadata(title="T", author="A", narrator="N"),
+            cover=None,
+        )
+        out = tmp_path / "out.m4b"
+        with patch(
+            "m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()
+        ):
+            result = run_pipeline(book, out, ffmpeg="ffmpeg", ffprobe="ffprobe")
+        assert result.duration_seconds == 0.0
+
+    def test_explicit_tmp_dir_used_directly(self, tmp_path: Path) -> None:
+        """Passing _tmp_dir skips TemporaryDirectory and writes files in-place."""
+        book = self._make_book(tmp_path)
+        out = tmp_path / "out.m4b"
+        tmp_dir = tmp_path / "explicit_tmp"
+        tmp_dir.mkdir()
+        with (
+            patch(
+                "m4bmaker.chapters.subprocess.run", return_value=self._mock_ffprobe()
+            ),
+            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+        ):
+            result = run_pipeline(
+                book, out, ffmpeg="ffmpeg", ffprobe="ffprobe", _tmp_dir=tmp_dir
+            )
+        assert isinstance(result, PipelineResult)
+        # ffmetadata and concat files written into the explicit tmp dir
+        assert (tmp_dir / "ffmetadata.txt").exists()
+        assert (tmp_dir / "concat.txt").exists()
