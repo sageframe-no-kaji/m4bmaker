@@ -6,14 +6,14 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from m4bmaker.gui.styles import STYLESHEET
+from m4bmaker.gui.styles import get_stylesheet
 from m4bmaker.gui.window import MainWindow
 
 
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("m4bmaker")
-    app.setStyleSheet(STYLESHEET)
+    app.setStyleSheet(get_stylesheet())
 
     window = MainWindow()
     window.show()

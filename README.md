@@ -1,257 +1,257 @@
 # m4bmaker
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+**A fast, modern tool for building audiobooks (.m4b) from folders of audio files.**
 
-Convert a directory of audio files into a single `.m4b` audiobook with chapters, cover art, and embedded metadata using **ffmpeg**.
-
-m4bmaker is a modern, scriptable alternative to older GUI tools such as AudioBookBinder. It is designed for reproducible audiobook creation from the command line and works well in scripts, containers, and automated workflows.
+m4bmaker converts a directory of audio files into a clean, chapterized **.m4b audiobook** with proper metadata and cover art — powered by ffmpeg and designed to be simple, reliable, and scriptable.
 
 ---
 
-## Features
-
-- **Auto-chapters** — probes each file with `ffprobe` and writes `[CHAPTER]` markers
-- **Metadata** — reads title/author from tags via `mutagen`; prompts for anything missing
-- **Cover art** — auto-selects the largest-resolution image in the directory; override with `--cover`
-- **Natural sort** — `01`, `02`, `10` ordered correctly, not lexicographically
-- **Batch-friendly** — `--no-prompt` + CLI flags for fully non-interactive pipelines and Docker
+⭐ **If this tool helped you, please star the repository!**
+☕ **Support development:** https://buymeacoffee.com/sageframe
 
 ---
 
-## Why m4bmaker?
+# Why This Exists
 
-Many audiobook creation tools are:
+Audiobook tools have historically been frustrating.
 
-- GUI-only and difficult to automate
-- no longer maintained
-- tied to specific platforms
+Many are:
 
-m4bmaker focuses on a simple design:
+• old GUI applications that are difficult to automate
+• fragile tools that fail on imperfect audio files
+• complicated ffmpeg command pipelines
+• abandoned software
 
-- **scriptable** — designed for command-line workflows
-- **reproducible** — deterministic output using ffmpeg
-- **cross-platform** — works anywhere Python and ffmpeg run
-- **automation-friendly** — easy to use in Docker, CI, or batch pipelines
+m4bmaker was created to provide a **modern, reliable audiobook builder** that works for both **command-line users and GUI users**.
+
+The goal is simple:
+
+> Turn a folder of audio files into a clean `.m4b` audiobook with minimal friction.
 
 ---
 
-## Requirements
+# Features
 
-| Dependency | Version | Notes |
-|---|---|---|
-| Python | >= 3.11 | |
-| ffmpeg | >= 6.0 | must be on `PATH` |
-| ffprobe | >= 6.0 | bundled with ffmpeg |
-| mutagen | >= 1.47 | installed automatically |
-| natsort | >= 8.4 | installed automatically |
-| Pillow | any | optional; enables cover resolution comparison |
+## 📚 Automatic Chapter Creation
 
-### macOS (Homebrew)
+Each audio file becomes a chapter automatically.
 
-```bash
-brew install ffmpeg
+Example input files:
 
-Debian / Ubuntu
+01 - Prologue.mp3
+02 - The Journey.mp3
+03 - Arrival.mp3
 
-apt-get install -y ffmpeg
+Chapters become:
 
+Prologue
+The Journey
+Arrival
 
-⸻
+Track numbers and prefixes are cleaned automatically.
 
-Installation
+---
 
-# Clone the repo
+## ✏️ Simple Chapter Editing
+
+Chapters are automatically generated, but **can be edited easily before encoding**.
+
+Features include:
+
+- rename chapters directly
+- edit titles inline
+- flatten the chapter list (no confusing nested menus)
+- bulk rename chapters
+
+The goal is **fast editing with minimal friction**.
+
+---
+
+## 🎧 Built-in Mini Chapter Player
+
+The GUI includes a **small preview player** so you can quickly listen to chapter boundaries.
+
+This helps users:
+
+- verify chapter positions
+- identify chapter names
+- rename chapters without leaving the app
+
+---
+
+## 🖼 Automatic Cover Detection
+
+The tool automatically selects the **largest image in the directory** as the audiobook cover.
+
+You can override with:
+
+–cover cover.jpg
+
+---
+
+## ⚙️ Clean, Scriptable CLI
+
+The command line interface is designed for **automation and scripting**.
+
+Example:
+
+m4bmaker ./Dune
+–title “Dune”
+–author “Frank Herbert”
+–narrator “Scott Brick”
+
+Batch workflows, Docker, and pipelines work cleanly.
+
+---
+
+## 🧱 Robust Audio Handling
+
+Many audiobook downloads contain messy files.
+
+m4bmaker automatically handles:
+
+- corrupted MP3 frames
+- missing headers
+- embedded artwork in tracks
+- inconsistent metadata
+- mixed audio formats
+
+Files are normalized before encoding so the final audiobook is stable.
+
+---
+
+## 🖥 Simple Desktop GUI
+
+For users who prefer a visual interface, the GUI provides:
+
+• folder selection
+• metadata editing
+• chapter editing
+• cover preview
+• progress display
+
+Everything happens in **one clean window**.
+
+---
+
+## 🚀 Multiple Encoding Jobs
+
+Run multiple audiobook builds simultaneously.
+
+You can simply open multiple windows and run separate encodes in parallel.
+
+This makes it easy to process large audiobook collections.
+
+---
+
+# Installation
+
+Clone the repository:
+
 git clone https://github.com/sageframe-no-kaji/m4bmaker.git
 cd m4bmaker
 
-# Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+Create a virtual environment:
 
-# Install runtime dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+
+Install dependencies:
+
 pip install -r requirements.txt
 
-# Optional: install as a command
+Install the command:
+
 pip install -e .
-
-
-⸻
-
-Quick Start
-
-# Interactive — prompts for any missing metadata
-make_m4b /path/to/audiobook/Dune
-
-# Supply all metadata up front
-make_m4b /path/to/audiobook/Dune \
-  --title "Dune" \
-  --author "Frank Herbert" \
-  --narrator "Scott Brick"
-
-# Stereo, higher bitrate, custom output path
-make_m4b /path/to/audiobook/Dune \
-  --bitrate 128k \
-  --stereo \
-  --output ~/Desktop/Dune.m4b
-
-# Fully non-interactive (scripts, CI, Docker)
-make_m4b /books/Dune \
-  --title "Dune" \
-  --author "Frank Herbert" \
-  --narrator "Scott Brick" \
-  --no-prompt
-
-By default the output file is placed in a structured subdirectory relative to
-the current directory and named:
-
-<Author>/<Title>/<Author> - <Title>.m4b
-
-Use `--output-dir DIR` to set a custom base directory, or `--flat` to skip the
-`Author/Title/` nesting and write the `.m4b` directly into the output directory.
-Use `--output PATH` to specify an exact path.
-
-If metadata is unavailable, the default name is:
-
-audiobook.m4b
-
-
-⸻
-
-Example
-
-Dune/
- ├── 01 - Arrakis.mp3
- ├── 02 - The Fremen.mp3
- ├── cover.jpg
-
-$ make_m4b Dune
-
-✔ Probing files
-✔ Generating chapter markers
-
-  Chapters (3)
-  ┌───┬──────────┬─────────────────────┐
-  │ # │  Start   │ Title               │
-  ├───┼──────────┼─────────────────────┤
-  │ 1 │ 0:00:00  │ Arrakis             │
-  │ 2 │ 0:22:14  │ The Fremen          │
-  │ 3 │ 0:48:03  │ The Desert          │
-  └───┴──────────┴─────────────────────┘
-
-  Edit chapter titles? [y/N]: N
-
-✔ Encoding with ffmpeg
-✔ Writing metadata
-
-Created: Frank Herbert/Dune/Frank Herbert - Dune.m4b
-
-
-⸻
-
-CLI Reference
-
-make_m4b [DIRECTORY] [options]
-
-Flag	Short	Default	Description
-DIRECTORY		cwd	Directory containing the audio files
---output PATH	-o	auto	Exact output .m4b path (overrides organized layout)
---output-dir DIR	-O	cwd	Base directory for organized `Author/Title/` output
---flat		off	Write .m4b directly into output-dir; skip sub-directories
---title TITLE	-t	from tags	Book title
---author AUTHOR	-a	from tags	Author name
---narrator NAME	-n	prompted	Narrator name
---genre GENRE	-g	Audiobook	Genre tag embedded in the .m4b
---cover IMAGE	-c	auto	Cover image path (.jpg/.png)
---bitrate RATE	-b	96k	Audio bitrate (e.g. 128k)
---stereo		mono	Encode in stereo (2 channels)
---no-prompt		off	Fail instead of prompting for missing fields
-
-
-⸻
-
-Chapter Preview
-
-After probing, m4bmaker prints a chapter preview table so you can review the
-automatically generated titles before encoding begins:
-
-  Chapters (3)
-  ┌───┬──────────┬─────────────────────┐
-  │ # │  Start   │ Title               │
-  ├───┼──────────┼─────────────────────┤
-  │ 1 │ 0:00:00  │ Arrakis             │
-  │ 2 │ 0:22:14  │ The Fremen          │
-  │ 3 │ 0:48:03  │ The Desert          │
-  └───┴──────────┴─────────────────────┘
-
-  Edit chapter titles? [y/N]:
-
-Type `y` and press Enter to rename titles one by one. Pressing Enter on any
-chapter keeps the existing name. The table and prompt are suppressed when
-`--no-prompt` is set.
 
 ---
 
-Chapter Timestamps
+# Quick Start
 
-Each audio file in the directory becomes one chapter. The chapter title is derived
-from the filename with leading track-number prefixes stripped:
+Convert a folder of audio files into an audiobook:
 
-Filename	Chapter title
-01 - Prologue.mp3	Prologue
-02_Part_One.flac	Part One
-03. The Desert.m4a	The Desert
-Introduction.mp3	Introduction
+m4bmaker ./MyBook
 
+Interactive prompts will guide you through metadata.
 
-⸻
+Or provide metadata directly:
 
-Supported Audio Formats
+m4bmaker ./MyBook
+–title “My Book”
+–author “Author Name”
+–narrator “Narrator Name”
 
-.mp3
-.m4a
-.aac
-.flac
-.wav
-.ogg
+---
 
+# Supported Audio Formats
 
-⸻
+mp3
+m4a
+aac
+flac
+wav
+ogg
 
-Docker
+Formats can be mixed in the same directory.
 
-See docs/docker.md for a ready-to-use Dockerfile and examples showing how to mount audiobook directories and run m4bmaker inside a container.
+---
 
-⸻
+# Requirements
 
-Architecture
+- Python 3.11+
+- ffmpeg
 
-See docs/architecture.md for the module dependency map and design decisions.
+Install ffmpeg on macOS:
 
-⸻
+brew install ffmpeg
 
-Development
+---
 
-See CONTRIBUTING.md for development setup, linting, and testing instructions.
+# Project Philosophy
 
-⸻
+m4bmaker is designed to be:
 
-Origin
+• simple
+• reliable
+• scriptable
+• predictable
 
-For many years the easiest way to convert a folder of audio files into a proper .m4b audiobook on macOS was a small GUI application called AudioBookBinder. It worked well, but like many niche utilities it gradually fell out of maintenance.
+It should work equally well for:
 
-Meanwhile the underlying tools — ffmpeg, ffprobe, and modern Python audio libraries — continued to improve. The core task of building an audiobook is straightforward: probe each file, generate chapter timestamps, and encode a single container with metadata and cover art. Yet many existing tools either require manual GUI workflows or are difficult to automate.
+- CLI users
+- audiobook collectors
+- automation workflows
+- GUI users
 
-m4bmaker began as a small personal utility to solve that problem: a clean command-line interface that turns a directory of audio files into a properly structured audiobook using ffmpeg.
+---
 
-The project focuses on doing one thing well:
-	•	generating reliable chapter markers
-	•	embedding metadata and cover art
-	•	producing consistent .m4b files
-	•	remaining simple enough to automate in scripts, Docker environments, and batch pipelines
+# Support Development
 
-⸻
+If m4bmaker saves you time or helps manage your audiobook library, consider supporting the project.
 
-License
+☕ **Buy me a coffee:**
+https://buymeacoffee.com/sageframe
 
-MIT © 2026 Andrew T. Marcus
+Even small donations help keep development active.
+
+---
+
+# Contributing
+
+Contributions are welcome.
+
+Helpful areas include:
+
+- testing on large audiobook collections
+- metadata improvements
+- GUI improvements
+- documentation
+- bug reports
+
+---
+
+# License
+
+MIT License
+
+© 2026 Andrew T. Marcus

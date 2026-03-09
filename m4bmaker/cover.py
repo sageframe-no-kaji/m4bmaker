@@ -75,10 +75,15 @@ def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
 
     Returns the path to the extracted image, or ``None`` if the file has no
     embedded cover or the extraction fails.
+
+    Tries ffmpeg first (works for files with a video/image stream), then falls
+    back to mutagen for .m4b/.m4a files where the art is stored in the iTunes
+    ``covr`` atom (which ffmpeg reports as a ``bin_data`` data stream).
     """
     import subprocess
     import tempfile as _tempfile
 
+    # Attempt 1: ffmpeg video-stream extraction (works for most containers)
     try:
         tmp_dir = Path(_tempfile.mkdtemp(prefix="m4bmaker_cover_"))
         dest = tmp_dir / "cover.jpg"
@@ -95,6 +100,22 @@ def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
             return dest
     except Exception:  # noqa: BLE001
         pass
+
+    # Attempt 2: mutagen — handles .m4b/.m4a with iTunes-style covr atom
+    try:
+        from mutagen.mp4 import MP4
+        audio = MP4(str(file))
+        covr = audio.tags.get("covr") if audio.tags else None
+        if covr:
+            cover_data = bytes(covr[0])
+            tmp_dir = Path(_tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+            dest = tmp_dir / "cover.jpg"
+            dest.write_bytes(cover_data)
+            if dest.stat().st_size > 100:
+                return dest
+    except Exception:  # noqa: BLE001
+        pass
+
     return None
 
 

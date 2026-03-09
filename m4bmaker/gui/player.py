@@ -169,6 +169,16 @@ class AudioPlayerWidget(QWidget):
     def is_playing(self) -> bool:
         return self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
 
+    @property
+    def current_position_ms(self) -> int:
+        """Current playback position in milliseconds."""
+        return self._player.position()
+
+    @property
+    def has_source(self) -> bool:
+        """True if a file is loaded."""
+        return not self._player.source().isEmpty()
+
     # ── internal slots ────────────────────────────────────────────────────────
 
     def _toggle_play(self) -> None:

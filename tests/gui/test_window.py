@@ -474,7 +474,7 @@ class TestMissingFfmpeg:
 class TestAnalysisSection:
     def test_analysis_box_hidden_initially(self, win):
         w, _ = win
-        assert not w._analysis_box.isVisible()
+        assert w._analysis_label.text() == "No analysis yet."
 
     def test_analysis_box_shown_after_preflight(self, win):
         from collections import Counter
@@ -487,7 +487,7 @@ class TestAnalysisSection:
             channels=Counter({2: 2}),
         )
         w._on_preflight_finished(analysis)
-        assert w._analysis_box.isVisible()
+        assert w._settings_tabs.currentIndex() == 0  # switched to Analysis tab
 
     def test_analysis_label_updated(self, win):
         from collections import Counter
@@ -509,14 +509,14 @@ class TestAnalysisSection:
         w, _ = win
         analysis = AudioAnalysis(file_count=1, sample_rates=Counter({44100: 1}))
         w._on_preflight_finished(analysis)
-        assert w._analysis_box.isVisible()
+        assert w._settings_tabs.currentIndex() == 0  # Analysis tab active
 
-        # Simulate folder changed — analysis box should hide
+        # Simulate folder changed — analysis label should reset
         with patch("m4bmaker.gui.window.LoadWorker") as MockLW:
             mock_worker = MagicMock()
             MockLW.return_value = mock_worker
             w._on_folder_changed(tmp_path)
-        assert not w._analysis_box.isVisible()
+        assert w._analysis_label.text() == "No analysis yet."
 
 
 # ── Edit mode (m4b file) ──────────────────────────────────────────────────────

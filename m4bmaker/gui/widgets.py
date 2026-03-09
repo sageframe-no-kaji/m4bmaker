@@ -388,6 +388,7 @@ class ChapterTable(QTableWidget):
             ti = QTableWidgetItem(ts)
             ti.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             ti.setForeground(QColor(_INK_MUTED))
+            ti.setData(Qt.ItemDataRole.UserRole, None)  # None = unmodified
             self.setItem(row, self.COL_TIME, ti)
 
             # Column 2 — title (editable)
@@ -407,6 +408,28 @@ class ChapterTable(QTableWidget):
             if item:
                 result.append(item.text())
         return result
+
+    def times_ms(self) -> list[int | None]:
+        """Return overridden start times in ms, or None if unmodified."""
+        result = []
+        for r in range(self.rowCount()):
+            item = self.item(r, self.COL_TIME)
+            result.append(item.data(Qt.ItemDataRole.UserRole) if item else None)
+        return result
+
+    def set_chapter_time(self, row: int, ms: int) -> None:
+        """Update the chapter start time display and store the ms value."""
+        if row < 0 or row >= self.rowCount():
+            return
+        t = ms / 1000.0
+        h = int(t // 3600)
+        m = int((t % 3600) // 60)
+        s = int(t % 60)
+        ts = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        item = self.item(row, self.COL_TIME)
+        if item:
+            item.setText(ts)
+            item.setData(Qt.ItemDataRole.UserRole, ms)
 
     # ── keyboard navigation ───────────────────────────────────────────────────
 

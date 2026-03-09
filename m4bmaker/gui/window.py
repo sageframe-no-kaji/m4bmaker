@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 
 from m4bmaker.models import Book, Chapter, PipelineResult
 from m4bmaker.gui.player import AudioPlayerWidget
+from m4bmaker.gui.styles import get_stylesheet
 from m4bmaker.gui.widgets import ChapterTable, CoverWidget, FolderDropZone
 from m4bmaker.gui.worker import (
     ConvertWorker,
@@ -83,8 +84,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("m4bmaker")
         self.setMinimumWidth(760)
-        self.setMinimumHeight(560)
-        self.resize(960, 760)
+        self.setMinimumHeight(520)
+        self.resize(880, 700)
+        self._dark_mode = False
 
         self._book: Optional[Book] = None
         self._mode: str = "build"  # "build" or "edit"
@@ -124,6 +126,13 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(QApplication.quit)
         file_menu.addAction(quit_action)
 
+        # View menu
+        view_menu = mb.addMenu("View")
+        self._dark_action = QAction("Dark Mode", self)
+        self._dark_action.setCheckable(True)
+        self._dark_action.triggered.connect(self._toggle_dark_mode)
+        view_menu.addAction(self._dark_action)
+
         # Help menu
         help_menu = mb.addMenu("Help")
 
@@ -144,6 +153,10 @@ class MainWindow(QMainWindow):
             lambda: QDesktopServices.openUrl(QUrl(_GITHUB_URL))
         )
         help_menu.addAction(github_action)
+
+    def _toggle_dark_mode(self) -> None:
+        self._dark_mode = self._dark_action.isChecked()
+        QApplication.instance().setStyleSheet(get_stylesheet(self._dark_mode))
 
     def _new_window(self) -> None:
         win = MainWindow()
@@ -207,9 +220,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
 
         layout.addWidget(self._build_meta_section())
-        layout.addWidget(self._build_analysis_section())
-        layout.addWidget(self._build_encoding_section())
-        layout.addWidget(self._build_output_section())
+        layout.addWidget(self._build_settings_tabs())
         layout.addStretch()
 
         scroll = QScrollArea()
@@ -218,18 +229,27 @@ class MainWindow(QMainWindow):
         scroll.setWidget(inner)
         return scroll
 
-    def _build_analysis_section(self) -> QGroupBox:
-        box = QGroupBox("Audio Analysis")
-        layout = QVBoxLayout(box)
-        layout.setContentsMargins(10, 14, 10, 10)
+    def _build_settings_tabs(self) -> QTabWidget:
+        """Compact horizontal tab strip for Analysis / Encoding / Output."""
+        self._settings_tabs = QTabWidget()
+        self._settings_tabs.addTab(self._build_analysis_tab_content(), "Analysis")
+        self._settings_tabs.addTab(self._build_encoding_tab_content(), "Encoding")
+        self._settings_tabs.addTab(self._build_output_tab_content(), "Output")
+        self._settings_tabs.setCurrentIndex(1)  # start on Encoding
+        return self._settings_tabs
 
+    def _build_analysis_tab_content(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(12, 12, 12, 12)
         self._analysis_label = QLabel("No analysis yet.")
         self._analysis_label.setWordWrap(True)
         layout.addWidget(self._analysis_label)
+        layout.addStretch()
+        return w
 
-        self._analysis_box = box
-        box.setVisible(False)
-        return box
+    def _build_analysis_section(self) -> None:  # kept for compat; unused
+        pass
 
     def _build_meta_section(self) -> QGroupBox:
         box = QGroupBox("Audiobook")
@@ -268,10 +288,10 @@ class MainWindow(QMainWindow):
         hbox.addLayout(grid, stretch=1)
         return box
 
-    def _build_encoding_section(self) -> QGroupBox:
-        box = QGroupBox("Encoding")
-        layout = QHBoxLayout(box)
-        layout.setContentsMargins(12, 20, 12, 12)
+    def _build_encoding_tab_content(self) -> QWidget:
+        w = QWidget()
+        layout = QHBoxLayout(w)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(14)
 
         layout.addWidget(_muted_label("Bitrate"))
@@ -294,12 +314,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._mono_radio)
         layout.addWidget(self._stereo_radio)
         layout.addStretch()
-        return box
+        return w
 
-    def _build_output_section(self) -> QGroupBox:
-        box = QGroupBox("Output Location")
-        layout = QVBoxLayout(box)
-        layout.setContentsMargins(12, 20, 12, 12)
+    def _build_encoding_section(self) -> None:  # kept for compat; unused
+        pass
+
+    def _build_output_tab_content(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
         self._out_group = QButtonGroup(self)
@@ -334,7 +357,10 @@ class MainWindow(QMainWindow):
         self._out_group.buttonClicked.connect(lambda _: self._update_output_preview())
 
         self._update_output_preview()
-        return box
+        return w
+
+    def _build_output_section(self) -> None:  # kept for compat; unused
+        pass
 
     # ── Chapters tab ──────────────────────────────────────────────────────────
 
@@ -356,6 +382,19 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color: #7a7a7a; font-size: 11px;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)
+
+        # Insert Time button — sets selected chapter start to player position
+        insert_row = QHBoxLayout()
+        insert_row.setContentsMargins(0, 0, 0, 0)
+        self._insert_time_btn = QPushButton("⇥ Insert Time")
+        self._insert_time_btn.setToolTip(
+            "Set selected chapter start time to current playback position"
+        )
+        self._insert_time_btn.setEnabled(False)
+        self._insert_time_btn.clicked.connect(self._on_insert_time)
+        insert_row.addStretch()
+        insert_row.addWidget(self._insert_time_btn)
+        layout.addLayout(insert_row)
 
         self._player = AudioPlayerWidget()
         layout.addWidget(self._player)
@@ -441,26 +480,7 @@ class MainWindow(QMainWindow):
             self._build_encoding_section_visibility(True)
 
     def _build_encoding_section_visibility(self, visible: bool) -> None:
-        # Build tab is wrapped in a QScrollArea; get the inner widget
-        scroll = self._tabs.widget(0)
-        if not isinstance(scroll, QScrollArea):
-            return
-        inner = scroll.widget()
-        if inner is None:
-            return
-        layout = inner.layout()
-        if layout is None:
-            return
-        for i in range(layout.count()):
-            item = layout.itemAt(i)
-            if item is None:
-                continue
-            w = item.widget()
-            if isinstance(w, QGroupBox) and w.title() in (
-                "Encoding",
-                "Output Location",
-            ):
-                w.setVisible(visible)
+        self._settings_tabs.setVisible(visible)
 
     def _update_output_preview(self) -> None:
         author = self._author_edit.text().strip() or "Author"
@@ -514,7 +534,7 @@ class MainWindow(QMainWindow):
 
     def _on_folder_changed(self, p: Path) -> None:
         self._book = None
-        self._analysis_box.setVisible(False)
+        self._analysis_label.setText("No analysis yet.")
         self._player.stop()
         self._update_controls()
         self._status_label.setText("Scanning…")
@@ -555,13 +575,15 @@ class MainWindow(QMainWindow):
     def _on_preflight_finished(self, analysis: object) -> None:
         summary = format_preflight_summary(analysis)  # type: ignore[arg-type]
         self._analysis_label.setText(summary)
-        self._analysis_box.setVisible(True)
+        self._settings_tabs.setCurrentIndex(0)  # switch to Analysis tab
 
     def _on_chapter_selected(
         self, row: int, _col: int, _prev_row: int, _prev_col: int
     ) -> None:
         if self._book is None or row < 0 or row >= len(self._book.chapters):
+            self._insert_time_btn.setEnabled(False)
             return
+        self._insert_time_btn.setEnabled(True)
         ch = self._book.chapters[row]
         start_ms = int(ch.start_time * 1000)
         # In edit mode the source is the .m4b itself; in build mode each chapter
@@ -577,6 +599,14 @@ class MainWindow(QMainWindow):
             else:
                 # Not playing — load and position but stay paused
                 self._player.load_paused(src, start_ms)
+
+    def _on_insert_time(self) -> None:
+        """Set the selected chapter's start time to the current player position."""
+        row = self._chapter_table.currentRow()
+        if row < 0:
+            return
+        ms = self._player.current_position_ms
+        self._chapter_table.set_chapter_time(row, ms)
 
     def _on_load_error(self, msg: str) -> None:
         self._progress_bar.setRange(0, 100)
@@ -658,8 +688,11 @@ class MainWindow(QMainWindow):
         from copy import deepcopy
 
         chapters = deepcopy(self._book.chapters)
-        for ch, new_title in zip(chapters, self._chapter_table.titles()):
+        times_ms = self._chapter_table.times_ms()
+        for i, (ch, new_title) in enumerate(zip(chapters, self._chapter_table.titles())):
             ch.title = new_title
+            if i < len(times_ms) and times_ms[i] is not None:
+                ch.start_time = times_ms[i] / 1000.0
         return chapters
 
     def _on_save_finished(self, dest: object) -> None:
