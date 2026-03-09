@@ -98,6 +98,14 @@ def _make_popen_mock() -> MagicMock:
     return proc
 
 
+def _fake_preflight_run(cmd: list[str], **kwargs: object) -> MagicMock:
+    """Simulated ffprobe response for preflight analysis."""
+    r = MagicMock()
+    r.returncode = 0
+    r.stdout = '{"streams": [{"sample_rate": "44100", "channels": 1}]}'
+    return r
+
+
 def _run_pipeline(
     tmp_path: Path,
     num_files: int = 3,
@@ -147,6 +155,7 @@ def _run_pipeline(
         patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
         patch("m4bmaker.chapters.get_duration", return_value=duration),
         patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_ffmpeg_popen),
+        patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
         patch("m4bmaker.__main__.parse_args", return_value=parsed),
     ):
         main()
@@ -234,6 +243,7 @@ class TestFullPipeline:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):
@@ -276,6 +286,7 @@ class TestFullPipeline:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):
@@ -863,6 +874,7 @@ class TestInteractiveChapterEdit:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch("builtins.input", side_effect=inputs),
         ):
@@ -921,6 +933,7 @@ class TestChaptersFileIntegration:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):

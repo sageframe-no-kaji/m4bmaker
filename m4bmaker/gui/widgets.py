@@ -65,12 +65,20 @@ _THUMB_DRAG = (
 
 
 class FolderDropZone(QFrame):
-    """Path line-edit + Browse button; also accepts drag-and-drop folders."""
+    """Path line-edit + Browse button; also accepts drag-and-drop.
 
-    folder_changed = Signal(object)  # Path
+    When *accept_m4b* is ``True`` (the default in the main window) the
+    widget also accepts ``.m4b`` files as well as folders so the user
+    can drag an existing audiobook in for chapter editing.
+    """
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    folder_changed = Signal(object)  # Path (folder or .m4b file)
+
+    def __init__(
+        self, parent: Optional[QWidget] = None, *, accept_m4b: bool = False
+    ) -> None:
         super().__init__(parent)
+        self._accept_m4b = accept_m4b
         self.setAcceptDrops(True)
         self._build()
 
@@ -80,7 +88,12 @@ class FolderDropZone(QFrame):
         layout.setSpacing(8)
 
         self._edit = QLineEdit()
-        self._edit.setPlaceholderText("Drag a folder here or click Browse…")
+        placeholder = (
+            "Drag a folder or .m4b file here, or click Browse…"
+            if self._accept_m4b
+            else "Drag a folder here or click Browse…"
+        )
+        self._edit.setPlaceholderText(placeholder)
         self._edit.setReadOnly(True)
         layout.addWidget(self._edit)
 
@@ -102,16 +115,31 @@ class FolderDropZone(QFrame):
     # ── actions ───────────────────────────────────────────────────────────────
 
     def _browse(self) -> None:
+        if self._accept_m4b:
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select Audiobook Folder or M4B File",
+                "",
+                "All supported (*.m4b *.M4B);; All files (*)",
+            )
+            if path:
+                p = Path(path)
+                if p.is_dir() or p.suffix.lower() == ".m4b":
+                    self.set_path(p)
+                    return
         folder = QFileDialog.getExistingDirectory(self, "Select Audiobook Folder")
         if folder:
             self.set_path(Path(folder))
 
     # ── drag-and-drop ─────────────────────────────────────────────────────────
 
+    def _is_accepted(self, p: Path) -> bool:
+        return p.is_dir() or (self._accept_m4b and p.suffix.lower() == ".m4b")
+
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if urls and Path(urls[0].toLocalFile()).is_dir():
+            if urls and self._is_accepted(Path(urls[0].toLocalFile())):
                 self._edit.setStyleSheet(f"QLineEdit {{ border-color: {_ACCENT}; }}")
                 event.acceptProposedAction()
                 return
@@ -125,7 +153,7 @@ class FolderDropZone(QFrame):
         urls = event.mimeData().urls()
         if urls:
             p = Path(urls[0].toLocalFile())
-            if p.is_dir():
+            if self._is_accepted(p):
                 self.set_path(p)
         event.acceptProposedAction()
 

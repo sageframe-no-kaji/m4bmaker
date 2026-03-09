@@ -15,6 +15,7 @@ from m4bmaker.encoder import _render_bar
 from m4bmaker.metadata import extract_metadata, prompt_missing
 from m4bmaker.models import BookMetadata, Chapter
 from m4bmaker.pipeline import load_audiobook, run_pipeline
+from m4bmaker.preflight import format_preflight_report, run_preflight
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, log
 
 
@@ -249,6 +250,11 @@ def main() -> None:
         log("Scanning audio files…")
         book = load_audiobook(directory, ffprobe, progress_fn=_probe_progress)
         log(f"Found {len(book.files)} audio file(s)")
+
+        # 3b. Audio preflight analysis.
+        log("Analysing audio formats…")
+        analysis = run_preflight(book.files, ffprobe)
+        print(format_preflight_report(analysis))
 
         # 3b. Override chapters from --chapters-file if supplied.
         if args.chapters_file:

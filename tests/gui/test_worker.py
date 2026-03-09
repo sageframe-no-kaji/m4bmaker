@@ -6,9 +6,15 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # noqa: E402
 
-from m4bmaker.gui.worker import ConvertWorker, LoadWorker  # noqa: E402
+from m4bmaker.gui.worker import (  # noqa: E402
+    ConvertWorker,
+    LoadWorker,
+    PreflightWorker,
+    LoadM4bWorker,
+    SaveChaptersWorker,
+)  # noqa: E402
 from m4bmaker.models import Book, BookMetadata, Chapter, PipelineResult  # noqa: E402
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -193,3 +199,140 @@ class TestConvertWorker:
             worker.wait(3000)
         qapp.processEvents()
         assert finished == []
+
+
+# ── PreflightWorker ───────────────────────────────────────────────────────────
+
+
+class TestPreflightWorker:
+    def test_finished_emits_analysis(self, qapp, tmp_path):
+        from collections import Counter
+        from m4bmaker.preflight import AudioAnalysis
+
+        analysis = AudioAnalysis(file_count=1, sample_rates=Counter({44100: 1}))
+        results = []
+
+        f = tmp_path / "t.mp3"
+        f.write_bytes(b"\x00")
+
+        with (
+            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffprobe"),
+            patch("m4bmaker.preflight.run_preflight", return_value=analysis),
+        ):
+            worker = PreflightWorker([f])
+            worker.finished.connect(results.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert len(results) == 1
+        assert results[0] is analysis
+
+    def test_error_on_exception(self, qapp, tmp_path):
+        errors = []
+        f = tmp_path / "t.mp3"
+        f.write_bytes(b"\x00")
+
+        with patch("m4bmaker.preflight.run_preflight", side_effect=RuntimeError("bad")):
+            worker = PreflightWorker([f])
+            worker.error.connect(errors.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert errors == ["bad"]
+
+
+# ── LoadM4bWorker ─────────────────────────────────────────────────────────────
+
+
+class TestLoadM4bWorker:
+    def test_finished_emits_book_and_duration(self, qapp, tmp_path):
+        p = tmp_path / "book.m4b"
+        p.write_bytes(b"\x00")
+        chapter = Chapter(index=1, start_time=0.0, title="Ch1", source_file=p)
+        results = []
+
+        with (
+            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffprobe"),
+            patch(
+                "m4bmaker.m4b_editor.load_m4b_chapters", return_value=([chapter], 120.0)
+            ),
+            patch(
+                "m4bmaker.metadata.extract_metadata",
+                return_value={"title": "T", "author": "A", "narrator": "N"},
+            ),
+        ):
+            worker = LoadM4bWorker(p)
+            worker.finished.connect(results.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert len(results) == 1
+        book, duration = results[0]
+        assert duration == 120.0
+        assert book.metadata.title == "T"
+
+    def test_error_on_exception(self, qapp, tmp_path):
+        p = tmp_path / "book.m4b"
+        p.write_bytes(b"\x00")
+        errors = []
+
+        with patch(
+            "m4bmaker.m4b_editor.load_m4b_chapters", side_effect=RuntimeError("fail")
+        ):
+            worker = LoadM4bWorker(p)
+            worker.error.connect(errors.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert errors == ["fail"]
+
+
+# ── SaveChaptersWorker ────────────────────────────────────────────────────────
+
+
+class TestSaveChaptersWorker:
+    def _chapters(self, tmp_path: Path) -> list[Chapter]:
+        f = tmp_path / "book.m4b"
+        f.write_bytes(b"\x00" * 32)
+        return [Chapter(index=1, start_time=0.0, title="Ch1", source_file=f)]
+
+    def test_finished_emits_dest(self, qapp, tmp_path):
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00")
+        dest = tmp_path / "out.m4b"
+        chapters = self._chapters(tmp_path)
+        results = []
+
+        with (
+            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("m4bmaker.m4b_editor.save_m4b_chapters"),
+        ):
+            worker = SaveChaptersWorker(source, chapters, 60.0, dest)
+            worker.finished.connect(results.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert results == [dest]
+
+    def test_error_on_exception(self, qapp, tmp_path):
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00")
+        dest = tmp_path / "out.m4b"
+        chapters = self._chapters(tmp_path)
+        errors = []
+
+        with patch(
+            "m4bmaker.m4b_editor.save_m4b_chapters", side_effect=RuntimeError("oops")
+        ):
+            worker = SaveChaptersWorker(source, chapters, 60.0, dest)
+            worker.error.connect(errors.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert errors == ["oops"]

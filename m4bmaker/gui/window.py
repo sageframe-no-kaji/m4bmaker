@@ -51,9 +51,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from m4bmaker.models import Book, PipelineResult
+from m4bmaker.models import Book, Chapter, PipelineResult
+from m4bmaker.gui.player import AudioPlayerWidget
 from m4bmaker.gui.widgets import ChapterTable, CoverWidget, FolderDropZone
-from m4bmaker.gui.worker import ConvertWorker, LoadWorker
+from m4bmaker.gui.worker import (
+    ConvertWorker,
+    LoadM4bWorker,
+    LoadWorker,
+    PreflightWorker,
+    SaveChaptersWorker,
+)
+from m4bmaker.preflight import format_preflight_summary
 
 _BITRATES = ["32k", "48k", "64k", "96k", "128k", "192k", "256k", "320k"]
 _DEFAULT_BITRATE = "96k"
@@ -73,8 +81,13 @@ class MainWindow(QMainWindow):
         self.resize(860, 720)
 
         self._book: Optional[Book] = None
+        self._mode: str = "build"  # "build" or "edit"
+        self._m4b_total_duration: float = 0.0
         self._load_worker: Optional[LoadWorker] = None
+        self._m4b_load_worker: Optional[LoadM4bWorker] = None
         self._convert_worker: Optional[ConvertWorker] = None
+        self._preflight_worker: Optional[PreflightWorker] = None
+        self._save_worker: Optional[SaveChaptersWorker] = None
 
         self._build_ui()
 
@@ -102,7 +115,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 14, 10, 10)
         layout.setSpacing(0)
 
-        self._folder_zone = FolderDropZone()
+        self._folder_zone = FolderDropZone(accept_m4b=True)
         self._folder_zone.folder_changed.connect(self._on_folder_changed)
         layout.addWidget(self._folder_zone)
         return box
@@ -124,10 +137,24 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
 
         layout.addWidget(self._build_meta_section())
+        layout.addWidget(self._build_analysis_section())
         layout.addWidget(self._build_encoding_section())
         layout.addWidget(self._build_output_section())
         layout.addStretch()
         return tab
+
+    def _build_analysis_section(self) -> QGroupBox:
+        box = QGroupBox("Audio Analysis")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 14, 10, 10)
+
+        self._analysis_label = QLabel("No analysis yet.")
+        self._analysis_label.setWordWrap(True)
+        layout.addWidget(self._analysis_label)
+
+        self._analysis_box = box
+        box.setVisible(False)
+        return box
 
     def _build_meta_section(self) -> QGroupBox:
         box = QGroupBox("Audiobook")
@@ -242,6 +269,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
 
         self._chapter_table = ChapterTable()
+        self._chapter_table.currentCellChanged.connect(self._on_chapter_selected)
         layout.addWidget(self._chapter_table, stretch=1)
 
         hint = QLabel(
@@ -252,6 +280,9 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color: #7a7a7a; font-size: 11px;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)
+
+        self._player = AudioPlayerWidget()
+        layout.addWidget(self._player)
         return tab
 
     # ── Bottom bar (progress + convert) ──────────────────────────────────────
@@ -290,8 +321,34 @@ class MainWindow(QMainWindow):
     def _update_controls(self) -> None:
         has_book = self._book is not None
         busy = self._convert_worker is not None and self._convert_worker.isRunning()
-        self._convert_btn.setEnabled(has_book and not busy)
+        save_busy = self._save_worker is not None and self._save_worker.isRunning()
+        self._convert_btn.setEnabled(has_book and not busy and not save_busy)
         self._tabs.setTabEnabled(1, has_book)
+        if self._mode == "edit":
+            self._convert_btn.setText("Save Chapter Edits")
+            self._build_encoding_section_visibility(False)
+        else:
+            self._convert_btn.setText("Convert to M4B")
+            self._build_encoding_section_visibility(True)
+
+    def _build_encoding_section_visibility(self, visible: bool) -> None:
+        # Find encoding and output group boxes by iterating the build tab layout
+        build_tab = self._tabs.widget(0)
+        if build_tab is None:
+            return
+        layout = build_tab.layout()
+        if layout is None:
+            return
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item is None:
+                continue
+            w = item.widget()
+            if isinstance(w, QGroupBox) and w.title() in (
+                "Encoding",
+                "Output Location",
+            ):
+                w.setVisible(visible)
 
     def _update_output_preview(self) -> None:
         author = self._author_edit.text().strip() or "Author"
@@ -345,21 +402,64 @@ class MainWindow(QMainWindow):
 
     def _on_folder_changed(self, p: Path) -> None:
         self._book = None
+        self._analysis_box.setVisible(False)
+        self._player.stop()
         self._update_controls()
         self._status_label.setText("Scanning…")
         self._progress_bar.setVisible(True)
         self._progress_bar.setRange(0, 0)  # indeterminate spinner
 
-        self._load_worker = LoadWorker(p)
-        self._load_worker.finished.connect(self._on_load_finished)
-        self._load_worker.error.connect(self._on_load_error)
-        self._load_worker.start()
+        if p.is_dir():
+            self._mode = "build"
+            self._load_worker = LoadWorker(p)
+            self._load_worker.finished.connect(self._on_load_finished)
+            self._load_worker.error.connect(self._on_load_error)
+            self._load_worker.start()
+        else:
+            self._mode = "edit"
+            self._m4b_load_worker = LoadM4bWorker(p)
+            self._m4b_load_worker.finished.connect(self._on_m4b_loaded)
+            self._m4b_load_worker.error.connect(self._on_load_error)
+            self._m4b_load_worker.start()
 
     def _on_load_finished(self, book: Book) -> None:
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
         self._apply_book_to_ui(book)
+        # Start preflight analysis in the background
+        self._preflight_worker = PreflightWorker(book.files)
+        self._preflight_worker.finished.connect(self._on_preflight_finished)
+        self._preflight_worker.start()
+
+    def _on_m4b_loaded(self, payload: object) -> None:
+        book, total_duration = payload  # type: ignore[misc]
+        self._m4b_total_duration = total_duration
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        self._progress_bar.setVisible(False)
+        self._apply_book_to_ui(book)
+
+    def _on_preflight_finished(self, analysis: object) -> None:
+        summary = format_preflight_summary(analysis)  # type: ignore[arg-type]
+        self._analysis_label.setText(summary)
+        self._analysis_box.setVisible(True)
+
+    def _on_chapter_selected(
+        self, row: int, _col: int, _prev_row: int, _prev_col: int
+    ) -> None:
+        if self._book is None or row < 0 or row >= len(self._book.chapters):
+            return
+        ch = self._book.chapters[row]
+        start_ms = int(ch.start_time * 1000)
+        # In edit mode the source is the .m4b itself; in build mode each chapter
+        # carries its own source_file.
+        if self._mode == "edit" and self._folder_zone.path() is not None:
+            src = self._folder_zone.path()
+        else:
+            src = ch.source_file
+        if src is not None:
+            self._player.load(src, start_ms)
 
     def _on_load_error(self, msg: str) -> None:
         self._progress_bar.setRange(0, 100)
@@ -384,6 +484,11 @@ class MainWindow(QMainWindow):
     def _on_convert(self) -> None:
         if not self._book:
             return
+
+        if self._mode == "edit":
+            self._do_save_chapters()
+            return
+
         out = self._computed_output_path()
         if not out:
             QMessageBox.warning(
@@ -410,6 +515,46 @@ class MainWindow(QMainWindow):
         self._convert_worker.finished.connect(self._on_convert_finished)
         self._convert_worker.error.connect(self._on_convert_error)
         self._convert_worker.start()
+
+    def _do_save_chapters(self) -> None:
+        source = self._folder_zone.path()
+        if source is None:
+            return
+        chapters = self._gather_chapters_from_table()
+        self._progress_bar.setVisible(True)
+        self._progress_bar.setRange(0, 0)
+        self._status_label.setText("Saving chapter edits…")
+        self._convert_btn.setEnabled(False)
+
+        self._save_worker = SaveChaptersWorker(
+            source=source,
+            chapters=chapters,
+            total_duration=self._m4b_total_duration,
+            dest=source,  # in-place edit
+        )
+        self._save_worker.finished.connect(self._on_save_finished)
+        self._save_worker.error.connect(self._on_convert_error)
+        self._save_worker.start()
+
+    def _gather_chapters_from_table(self) -> list[Chapter]:
+        assert self._book is not None
+        from copy import deepcopy
+
+        chapters = deepcopy(self._book.chapters)
+        for ch, new_title in zip(chapters, self._chapter_table.titles()):
+            ch.title = new_title
+        return chapters
+
+    def _on_save_finished(self, dest: object) -> None:
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(100)
+        self._status_label.setText(f"Saved — {Path(str(dest)).name}")
+        self._update_controls()
+        QMessageBox.information(
+            self,
+            "Done",
+            f"Chapter metadata saved to:\n{dest}",
+        )
 
     def _on_progress(self, msg: str, fraction: float) -> None:
         self._status_label.setText(msg)

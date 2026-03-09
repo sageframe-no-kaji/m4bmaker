@@ -464,3 +464,175 @@ class TestMissingFfmpeg:
         qapp.processEvents()
         assert errors
         assert "ffmpeg" in errors[0]
+
+
+# ── Audio Analysis section ────────────────────────────────────────────────────
+
+
+class TestAnalysisSection:
+    def test_analysis_box_hidden_initially(self, win):
+        w, _ = win
+        assert not w._analysis_box.isVisible()
+
+    def test_analysis_box_shown_after_preflight(self, win):
+        from collections import Counter
+        from m4bmaker.preflight import AudioAnalysis
+
+        w, _ = win
+        analysis = AudioAnalysis(
+            file_count=2,
+            sample_rates=Counter({44100: 2}),
+            channels=Counter({2: 2}),
+        )
+        w._on_preflight_finished(analysis)
+        assert w._analysis_box.isVisible()
+
+    def test_analysis_label_updated(self, win):
+        from collections import Counter
+        from m4bmaker.preflight import AudioAnalysis
+
+        w, _ = win
+        analysis = AudioAnalysis(
+            file_count=1,
+            sample_rates=Counter({44100: 1}),
+            channels=Counter({1: 1}),
+        )
+        w._on_preflight_finished(analysis)
+        assert "44100" in w._analysis_label.text()
+
+    def test_analysis_box_hidden_on_new_folder(self, win, tmp_path):
+        from collections import Counter
+        from m4bmaker.preflight import AudioAnalysis
+
+        w, _ = win
+        analysis = AudioAnalysis(file_count=1, sample_rates=Counter({44100: 1}))
+        w._on_preflight_finished(analysis)
+        assert w._analysis_box.isVisible()
+
+        # Simulate folder changed — analysis box should hide
+        with patch("m4bmaker.gui.window.LoadWorker") as MockLW:
+            mock_worker = MagicMock()
+            MockLW.return_value = mock_worker
+            w._on_folder_changed(tmp_path)
+        assert not w._analysis_box.isVisible()
+
+
+# ── Edit mode (m4b file) ──────────────────────────────────────────────────────
+
+
+class TestEditMode:
+    def test_mode_is_build_initially(self, win):
+        w, _ = win
+        assert w._mode == "build"
+
+    def test_folder_changed_with_m4b_sets_edit_mode(self, win, tmp_path):
+        w, _ = win
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+
+        with patch("m4bmaker.gui.window.LoadM4bWorker") as MockW:
+            mock_worker = MagicMock()
+            MockW.return_value = mock_worker
+            w._on_folder_changed(m4b)
+
+        assert w._mode == "edit"
+        MockW.assert_called_once_with(m4b)
+
+    def test_folder_changed_with_dir_sets_build_mode(self, win, tmp_path):
+        w, _ = win
+        with patch("m4bmaker.gui.window.LoadWorker") as MockW:
+            mock_worker = MagicMock()
+            MockW.return_value = mock_worker
+            w._on_folder_changed(tmp_path)
+        assert w._mode == "build"
+
+    def test_convert_btn_text_edit_mode(self, win, tmp_path):
+        w, _ = win
+        book = _make_book(tmp_path)
+        w._mode = "edit"
+        w._book = book
+        w._update_controls()
+        assert "Save" in w._convert_btn.text()
+
+    def test_convert_btn_text_build_mode(self, win, tmp_path):
+        w, _ = win
+        book = _make_book(tmp_path)
+        w._mode = "build"
+        w._book = book
+        w._update_controls()
+        assert "Convert" in w._convert_btn.text()
+
+    def test_on_m4b_loaded_applies_book(self, win, tmp_path):
+        w, _ = win
+        book = _make_book(tmp_path)
+        w._mode = "edit"
+        w._on_m4b_loaded((book, 120.0))
+        assert w._book is book
+        assert w._m4b_total_duration == 120.0
+        assert w._title_edit.text() == "My Book"
+
+    def test_save_chapters_worker_started_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        book = _make_book(tmp_path)
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        w._book = book
+        w._mode = "edit"
+        w._m4b_total_duration = 120.0
+        # Set the folder zone path directly via its text field (does not emit signal)
+        w._folder_zone._edit.setText(str(m4b))
+
+        with patch("m4bmaker.gui.window.SaveChaptersWorker") as MockW:
+            mock_worker = MagicMock()
+            mock_worker.isRunning.return_value = False
+            MockW.return_value = mock_worker
+            w._on_convert()
+
+        MockW.assert_called_once()
+
+    def test_on_save_finished_updates_status(self, win, tmp_path):
+        w, _ = win
+        dest = tmp_path / "book.m4b"
+        dest.write_bytes(b"\x00")
+        with patch("m4bmaker.gui.window.QMessageBox"):
+            w._on_save_finished(dest)
+        assert "book.m4b" in w._status_label.text()
+
+
+# ── Player in Chapters tab ────────────────────────────────────────────────────
+
+
+class TestChaptersTabPlayer:
+    def test_player_widget_present(self, win):
+        w, _ = win
+        from m4bmaker.gui.player import AudioPlayerWidget
+
+        assert isinstance(w._player, AudioPlayerWidget)
+
+    def test_chapter_selected_with_no_book_does_nothing(self, win):
+        w, _ = win
+        # Should not raise
+        w._on_chapter_selected(0, 0, -1, 0)
+
+    def test_chapter_selected_out_of_range_does_nothing(self, win, tmp_path):
+        w, _ = win
+        w._book = _make_book(tmp_path)
+        # Index 5 is out of range (book has 1 chapter)
+        w._on_chapter_selected(5, 0, -1, 0)  # should not raise
+
+    def test_chapter_selected_calls_player_load(self, win, tmp_path):
+        w, _ = win
+        book = _make_book(tmp_path)
+        w._book = book
+        w._mode = "build"
+        with patch.object(w._player, "load") as mock_load:
+            w._on_chapter_selected(0, 0, -1, 0)
+        mock_load.assert_called_once()
+        _, kwargs = (
+            mock_load.call_args
+            if mock_load.call_args.kwargs
+            else (mock_load.call_args[0], {})
+        )
+        # start_ms should be 0 (chapter starts at 0.0s)
+        pos_args = mock_load.call_args[0]
+        assert pos_args[1] == 0  # start_ms = 0

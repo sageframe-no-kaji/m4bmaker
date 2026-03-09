@@ -78,3 +78,97 @@ class ConvertWorker(QThread):
 
     def _on_progress(self, message: str, fraction: float) -> None:
         self.progress.emit(message, fraction)
+
+
+class PreflightWorker(QThread):
+    """Run audio preflight analysis off the UI thread."""
+
+    finished = Signal(object)  # AudioAnalysis
+    error = Signal(str)
+
+    def __init__(self, files: list) -> None:
+        super().__init__()
+        self._files = files
+
+    def run(self) -> None:
+        try:
+            ffprobe = shutil.which("ffprobe") or "ffprobe"
+            from m4bmaker.preflight import run_preflight
+
+            analysis = run_preflight(self._files, ffprobe)
+            self.finished.emit(analysis)
+        except SystemExit as exc:
+            self.error.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.error.emit(str(exc))
+
+
+class LoadM4bWorker(QThread):
+    """Load chapters and metadata from an existing .m4b file."""
+
+    finished = Signal(object)  # tuple (Book, float total_duration_s)
+    error = Signal(str)
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self._path = path
+
+    def run(self) -> None:
+        try:
+            ffprobe = shutil.which("ffprobe") or "ffprobe"
+            from m4bmaker.m4b_editor import load_m4b_chapters
+            from m4bmaker.metadata import extract_metadata
+            from m4bmaker.models import BookMetadata
+
+            chapters, total_duration = load_m4b_chapters(self._path, ffprobe)
+            raw_meta = extract_metadata(self._path)
+            metadata = BookMetadata(
+                title=raw_meta.get("title", ""),
+                author=raw_meta.get("author", ""),
+                narrator=raw_meta.get("narrator", ""),
+                genre=raw_meta.get("genre", ""),
+            )
+            book = Book(files=[self._path], chapters=chapters, metadata=metadata)
+            self.finished.emit((book, total_duration))
+        except SystemExit as exc:
+            self.error.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.error.emit(str(exc))
+
+
+class SaveChaptersWorker(QThread):
+    """Rewrite chapter metadata in an .m4b file without re-encoding."""
+
+    finished = Signal(object)  # Path (dest)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        source: Path,
+        chapters: list,
+        total_duration: float,
+        dest: Path,
+    ) -> None:
+        super().__init__()
+        self._source = source
+        self._chapters = chapters
+        self._total_duration = total_duration
+        self._dest = dest
+
+    def run(self) -> None:
+        try:
+            ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+            from m4bmaker.m4b_editor import save_m4b_chapters
+
+            save_m4b_chapters(
+                self._source,
+                self._chapters,
+                self._total_duration,
+                self._dest,
+                ffmpeg,
+            )
+            self.finished.emit(self._dest)
+        except SystemExit as exc:
+            self.error.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.error.emit(str(exc))
