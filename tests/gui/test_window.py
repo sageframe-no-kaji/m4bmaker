@@ -156,6 +156,52 @@ class TestFolderLoading:
             w._load_worker.wait(3000)
 
 
+# ── folder cleared ────────────────────────────────────────────────────────────
+
+
+class TestFolderCleared:
+    def test_cleared_resets_book(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        assert w._book is not None
+        w._on_folder_cleared()
+        assert w._book is None
+
+    def test_cleared_disables_convert(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._on_folder_cleared()
+        assert not w._convert_btn.isEnabled()
+
+    def test_cleared_resets_mode_to_build(self, win, tmp_path):
+        w, _ = win
+        w._mode = "edit"
+        w._on_folder_cleared()
+        assert w._mode == "build"
+
+    def test_cleared_resets_mode_badge(self, win, tmp_path):
+        w, _ = win
+        w._mode_badge.setText("Edit")
+        w._on_folder_cleared()
+        assert w._mode_badge.text() == "Build"
+
+    def test_folder_changed_build_badge(self, win, tmp_path):
+        w, _ = win
+        with patch("m4bmaker.gui.window.LoadWorker") as MockLW:
+            MockLW.return_value = MagicMock()
+            w._on_folder_changed(tmp_path)
+        assert w._mode_badge.text() == "Build"
+
+    def test_folder_changed_edit_badge(self, win, tmp_path):
+        w, _ = win
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        with patch("m4bmaker.gui.window.LoadM4bWorker") as MockW:
+            MockW.return_value = MagicMock()
+            w._on_folder_changed(m4b)
+        assert w._mode_badge.text() == "Edit"
+
+
 # ── metadata auto-fill ────────────────────────────────────────────────────────
 
 

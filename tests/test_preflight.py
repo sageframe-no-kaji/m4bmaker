@@ -263,3 +263,49 @@ class TestFormatPreflightSummary:
         )
         s = format_preflight_summary(a)
         assert "6-ch" in s
+
+    def test_codec_shown_in_summary(self):
+        a = AudioAnalysis(
+            file_count=2,
+            sample_rates=Counter({44100: 2}),
+            channels=Counter({1: 2}),
+            codecs=Counter({"mp3": 2}),
+        )
+        s = format_preflight_summary(a)
+        assert "MP3" in s
+
+    def test_bitrate_shown_in_summary(self):
+        a = AudioAnalysis(
+            file_count=1,
+            sample_rates=Counter({44100: 1}),
+            channels=Counter({1: 1}),
+            bit_rates=Counter({128000: 1}),
+        )
+        s = format_preflight_summary(a)
+        assert "128kbps" in s
+
+    def test_mixed_bitrate_warning_in_summary(self):
+        a = AudioAnalysis(
+            file_count=2,
+            sample_rates=Counter({44100: 2}),
+            channels=Counter({1: 2}),
+            bit_rates=Counter({96000: 1, 192000: 1}),
+        )
+        s = format_preflight_summary(a)
+        assert "96" in s and "192" in s
+
+    def test_codec_name_returned_by_probe_file(self, tmp_path):
+        import json
+        from unittest.mock import MagicMock, patch
+        from m4bmaker.preflight import probe_file
+
+        p = tmp_path / "t.mp3"
+        p.write_bytes(b"\x00")
+        out = json.dumps({"streams": [{"sample_rate": "44100", "channels": 2,
+                                        "bit_rate": "128000", "codec_name": "mp3"}]})
+        r = MagicMock()
+        r.returncode = 0
+        r.stdout = out
+        with patch("subprocess.run", return_value=r):
+            info = probe_file(p, "ffprobe")
+        assert info.codec_name == "mp3"

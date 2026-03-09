@@ -442,6 +442,35 @@ QPushButton#darkModeBtn {
 QPushButton#darkModeBtn:hover {
     background-color: #ddd7cc;
 }
+
+/* ── Clear button ────────────────────────────────────────────────────── */
+QPushButton#clearBtn {
+    background: transparent;
+    border: 1px solid #d0c9be;
+    border-radius: 3px;
+    color: #7a7a7a;
+    font-size: 10px;
+    padding: 0;
+}
+
+QPushButton#clearBtn:hover {
+    background-color: #e8e1d8;
+    color: #4a4a4a;
+    border-color: #b5ae9e;
+}
+
+/* ── Mode badge ──────────────────────────────────────────────────────── */
+QLabel#modeBadge {
+    color: #7a7a7a;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border: 1px solid #d0c9be;
+    border-radius: 3px;
+    background-color: #ebe6dd;
+}
 """
 
 # ── Dark mode palette ─────────────────────────────────────────────────────────
@@ -881,6 +910,35 @@ QPushButton#darkModeBtn {
 
 QPushButton#darkModeBtn:hover {
     background-color: #2e2e2e;
+}
+
+/* ── Clear button ────────────────────────────────────────────────────── */
+QPushButton#clearBtn {
+    background: transparent;
+    border: 1px solid #333333;
+    border-radius: 3px;
+    color: #888888;
+    font-size: 10px;
+    padding: 0;
+}
+
+QPushButton#clearBtn:hover {
+    background-color: #2e2e2e;
+    color: #c8c2b8;
+    border-color: #444444;
+}
+
+/* ── Mode badge ──────────────────────────────────────────────────────── */
+QLabel#modeBadge {
+    color: #888888;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border: 1px solid #333333;
+    border-radius: 3px;
+    background-color: #242424;
 }
 """
 

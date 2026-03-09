@@ -64,6 +64,7 @@ class FolderDropZone(QFrame):
     """
 
     folder_changed = Signal(object)  # Path (folder or .m4b file)
+    folder_cleared = Signal()
 
     def __init__(
         self, parent: Optional[QWidget] = None, *, accept_m4b: bool = False
@@ -88,6 +89,14 @@ class FolderDropZone(QFrame):
         self._edit.setReadOnly(True)
         layout.addWidget(self._edit)
 
+        self._clear_btn = QPushButton("✕")
+        self._clear_btn.setFixedSize(26, 26)
+        self._clear_btn.setObjectName("clearBtn")
+        self._clear_btn.setToolTip("Clear")
+        self._clear_btn.setVisible(False)
+        self._clear_btn.clicked.connect(self._on_clear_clicked)
+        layout.addWidget(self._clear_btn)
+
         btn = QPushButton("Browse")
         btn.setFixedWidth(80)
         btn.setFixedHeight(34)
@@ -102,26 +111,20 @@ class FolderDropZone(QFrame):
 
     def set_path(self, p: Path) -> None:
         self._edit.setText(str(p))
+        self._clear_btn.setVisible(True)
         self.folder_changed.emit(p)
 
     # ── actions ───────────────────────────────────────────────────────────────
 
     def _browse(self) -> None:
-        if self._accept_m4b:
-            path, _ = QFileDialog.getOpenFileName(
-                self,
-                "Select Audiobook Folder or M4B File",
-                "",
-                "All supported (*.m4b *.M4B);; All files (*)",
-            )
-            if path:
-                p = Path(path)
-                if p.is_dir() or p.suffix.lower() == ".m4b":
-                    self.set_path(p)
-                    return
         folder = QFileDialog.getExistingDirectory(self, "Select Audiobook Folder")
         if folder:
             self.set_path(Path(folder))
+
+    def _on_clear_clicked(self) -> None:
+        self._edit.setText("")
+        self._clear_btn.setVisible(False)
+        self.folder_cleared.emit()
 
     # ── drag-and-drop ─────────────────────────────────────────────────────────
 

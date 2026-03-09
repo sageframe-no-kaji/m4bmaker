@@ -242,12 +242,22 @@ class MainWindow(QMainWindow):
     def _build_folder_section(self) -> QGroupBox:
         box = QGroupBox("Source")
         layout = QVBoxLayout(box)
-        layout.setContentsMargins(12, 20, 12, 12)
-        layout.setSpacing(0)
+        layout.setContentsMargins(12, 20, 12, 8)
+        layout.setSpacing(4)
 
         self._folder_zone = FolderDropZone(accept_m4b=True)
         self._folder_zone.folder_changed.connect(self._on_folder_changed)
+        self._folder_zone.folder_cleared.connect(self._on_folder_cleared)
         layout.addWidget(self._folder_zone)
+
+        badge_row = QHBoxLayout()
+        badge_row.setContentsMargins(4, 0, 4, 0)
+        badge_row.addStretch()
+        self._mode_badge = QLabel("Build")
+        self._mode_badge.setObjectName("modeBadge")
+        badge_row.addWidget(self._mode_badge)
+        layout.addLayout(badge_row)
+
         return box
 
     # ── Tab widget ────────────────────────────────────────────────────────────
@@ -610,16 +620,29 @@ class MainWindow(QMainWindow):
 
         if p.is_dir():
             self._mode = "build"
+            self._mode_badge.setText("Build")
             self._load_worker = LoadWorker(p)
             self._load_worker.finished.connect(self._on_load_finished)
             self._load_worker.error.connect(self._on_load_error)
             self._load_worker.start()
         else:
             self._mode = "edit"
+            self._mode_badge.setText("Edit")
             self._m4b_load_worker = LoadM4bWorker(p)
             self._m4b_load_worker.finished.connect(self._on_m4b_loaded)
             self._m4b_load_worker.error.connect(self._on_load_error)
             self._m4b_load_worker.start()
+
+    def _on_folder_cleared(self) -> None:
+        self._book = None
+        self._mode = "build"
+        self._mode_badge.setText("Build")
+        self._analysis_label.setText("No analysis yet.")
+        self._chapter_table.populate([])
+        self._player.stop()
+        self._progress_bar.setVisible(False)
+        self._set_status("")
+        self._update_controls()
 
     def _on_load_finished(self, book: Book) -> None:
         self._progress_bar.setRange(0, 100)

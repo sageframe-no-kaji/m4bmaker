@@ -24,6 +24,7 @@ class FileInfo:
     sample_rate: int | None  # Hz; None if unavailable
     channels: int | None  # 1 = mono, 2 = stereo, …
     bit_rate: int | None  # bits/sec; None if unavailable
+    codec_name: str | None = None  # e.g. "mp3", "aac", "flac"
 
 
 @dataclass
@@ -34,6 +35,7 @@ class AudioAnalysis:
     sample_rates: Counter = field(default_factory=Counter)  # {rate_hz: count}
     channels: Counter = field(default_factory=Counter)  # {n_channels: count}
     bit_rates: Counter = field(default_factory=Counter)  # {bps: count}
+    codecs: Counter = field(default_factory=Counter)  # {codec_name: count}
 
     @property
     def has_mismatches(self) -> bool:
@@ -66,6 +68,7 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
     sample_rate: int | None = None
     channels: int | None = None
     bit_rate: int | None = None
+    codec_name: str | None = None
 
     if result.returncode == 0:
         try:
@@ -79,11 +82,17 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
                     channels = int(s["channels"])
                 if "bit_rate" in s:
                     bit_rate = int(s["bit_rate"])
+                if "codec_name" in s:
+                    codec_name = s["codec_name"]
         except (KeyError, ValueError, json.JSONDecodeError):
             pass
 
     return FileInfo(
-        path=path, sample_rate=sample_rate, channels=channels, bit_rate=bit_rate
+        path=path,
+        sample_rate=sample_rate,
+        channels=channels,
+        bit_rate=bit_rate,
+        codec_name=codec_name,
     )
 
 
@@ -92,6 +101,7 @@ def run_preflight(files: list[Path], ffprobe: str) -> AudioAnalysis:
     sample_rates: Counter = Counter()
     channels: Counter = Counter()
     bit_rates: Counter = Counter()
+    codecs: Counter = Counter()
 
     for path in files:
         info = probe_file(path, ffprobe)
@@ -101,12 +111,15 @@ def run_preflight(files: list[Path], ffprobe: str) -> AudioAnalysis:
             channels[info.channels] += 1
         if info.bit_rate is not None:
             bit_rates[info.bit_rate] += 1
+        if info.codec_name is not None:
+            codecs[info.codec_name] += 1
 
     return AudioAnalysis(
         file_count=len(files),
         sample_rates=sample_rates,
         channels=channels,
         bit_rates=bit_rates,
+        codecs=codecs,
     )
 
 
@@ -152,6 +165,12 @@ def format_preflight_summary(analysis: AudioAnalysis) -> str:
     """Return a compact single-line summary suitable for a GUI label."""
     parts: list[str] = []
 
+    if analysis.codecs:
+        if len(analysis.codecs) == 1:
+            parts.append(next(iter(analysis.codecs)).upper())
+        else:
+            parts.append("\u26a0 mixed codecs")
+
     if analysis.sample_rates:
         if len(analysis.sample_rates) == 1:
             sr = next(iter(analysis.sample_rates))
@@ -166,5 +185,14 @@ def format_preflight_summary(analysis: AudioAnalysis) -> str:
             parts.append("mono" if n == 1 else "stereo" if n == 2 else f"{n}-ch")
         else:
             parts.append("\u26a0 mixed channels")
+
+    if analysis.bit_rates:
+        if len(analysis.bit_rates) == 1:
+            bps = next(iter(analysis.bit_rates))
+            parts.append(f"{bps // 1000}kbps")
+        else:
+            lo = min(analysis.bit_rates) // 1000
+            hi = max(analysis.bit_rates) // 1000
+            parts.append(f"\u26a0 {lo}\u2013{hi}kbps")
 
     return "  ·  ".join(parts) if parts else "—"

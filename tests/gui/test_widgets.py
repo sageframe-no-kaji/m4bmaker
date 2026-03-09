@@ -125,8 +125,21 @@ class TestFolderDropZone:
         self.w.dropEvent(event)
         assert self.w.path() == tmp_path
 
+    def test_clear_btn_hidden_initially(self):
+        assert not self.w._clear_btn.isVisible()
 
-# ── CoverWidget ───────────────────────────────────────────────────────────────
+    def test_clear_btn_visible_after_set_path(self, tmp_path: Path):
+        self.w.set_path(tmp_path)
+        assert self.w._clear_btn.isVisibleTo(self.w)
+
+    def test_clear_emits_folder_cleared(self, tmp_path: Path):
+        received = []
+        self.w.folder_cleared.connect(lambda: received.append(True))
+        self.w.set_path(tmp_path)
+        self.w._on_clear_clicked()
+        assert received == [True]
+        assert self.w.path() is None
+        assert not self.w._clear_btn.isVisible()
 
 
 class TestCoverWidget:
