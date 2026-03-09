@@ -42,37 +42,48 @@ def encode(
     """
     cmd: list[str] = [
         ffmpeg,
-        "-y",                          # overwrite without asking
-        "-f", "concat",
-        "-safe", "0",
-        "-i", str(concat),             # input 0: audio concat list
-        "-i", str(meta_file),          # input 1: FFMETADATA chapters
+        "-y",  # overwrite without asking
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat),  # input 0: audio concat list
+        "-i",
+        str(meta_file),  # input 1: FFMETADATA chapters
     ]
 
-    input_count = 2
-
     if cover is not None:
-        cmd += ["-i", str(cover)]      # input 2: cover art
-        input_count = 3
+        cmd += ["-i", str(cover)]  # input 2: cover art
 
     cmd += [
-        "-map_metadata", "1",          # apply global tags + chapters from input 1
-        "-map_chapters", "1",          # apply chapter markers from input 1
-        "-map", "0:a",                 # map audio from input 0
+        "-map_metadata",
+        "1",  # apply global tags + chapters from input 1
+        "-map_chapters",
+        "1",  # apply chapter markers from input 1
+        "-map",
+        "0:a",  # map audio from input 0
     ]
 
     if cover is not None:
         cmd += [
-            "-map", "2:v",             # map cover image from input 2
-            "-c:v", "copy",
-            "-disposition:v", "attached_pic",
+            "-map",
+            "2:v",  # map cover image from input 2
+            "-c:v",
+            "copy",
+            "-disposition:v",
+            "attached_pic",
         ]
 
     cmd += [
-        "-c:a", "aac",
-        "-b:a", bitrate,
-        "-ac", str(channels),
-        "-movflags", "+faststart",     # optimise for streaming
+        "-c:a",
+        "aac",
+        "-b:a",
+        bitrate,
+        "-ac",
+        str(channels),
+        "-movflags",
+        "+faststart",  # optimise for streaming
         str(output),
     ]
 

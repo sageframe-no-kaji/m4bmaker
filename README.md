@@ -212,5 +212,4 @@ The project focuses on doing one thing well:
 
 License
 
-MIT © 2026 sageframe-no-kaji
-
+MIT © 2026 Andrew T. Marcus

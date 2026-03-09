@@ -22,7 +22,9 @@ def _output_path(directory: Path, meta: dict[str, str]) -> Path:
 
     if title and author:
         # Sanitise characters that are illegal in filenames on macOS/Linux.
-        safe = lambda s: s.replace("/", "-").replace("\x00", "")
+        def safe(s: str) -> str:
+            return s.replace("/", "-").replace("\x00", "")
+
         name = f"{safe(title)} - {safe(author)}.m4b"
     elif title:
         name = f"{title.replace('/', '-')}.m4b"
@@ -66,7 +68,9 @@ def main() -> None:
     )
 
     # 5. Resolve output path.
-    output: Path = args.output.resolve() if args.output else _output_path(directory, meta)
+    output: Path = (
+        args.output.resolve() if args.output else _output_path(directory, meta)
+    )
     log(f"Output: {output}")
 
     # 6. Build chapter list and write FFMETADATA.

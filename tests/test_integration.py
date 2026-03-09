@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-import m4bmaker.__main__
 from m4bmaker.__main__ import _output_path, main
-
 
 # ---------------------------------------------------------------------------
 # _output_path helpers
 # ---------------------------------------------------------------------------
+
 
 class TestOutputPath:
     def test_title_and_author(self, tmp_path: Path) -> None:
@@ -46,6 +42,7 @@ class TestOutputPath:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_stub_mp3(path: Path) -> Path:
     path.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 128)
@@ -83,12 +80,19 @@ def _run_pipeline(
     for i in range(1, num_files + 1):
         _make_stub_mp3(tmp_path / f"0{i} - Chapter {i}.mp3")
 
-    argv = [str(tmp_path)] + (extra_argv or []) + [
-        "--title", title,
-        "--author", author,
-        "--narrator", narrator,
-        "--no-prompt",
-    ]
+    argv = (
+        [str(tmp_path)]
+        + (extra_argv or [])
+        + [
+            "--title",
+            title,
+            "--author",
+            author,
+            "--narrator",
+            narrator,
+            "--no-prompt",
+        ]
+    )
     parsed = real_parse_args(argv)
 
     ffmpeg_cmds: list[list[str]] = []
@@ -112,6 +116,7 @@ def _run_pipeline(
 # ---------------------------------------------------------------------------
 # Full pipeline integration
 # ---------------------------------------------------------------------------
+
 
 class TestFullPipeline:
     def test_ffmpeg_called_exactly_once(self, tmp_path: Path) -> None:
@@ -154,13 +159,24 @@ class TestFullPipeline:
         for i in range(1, num_files + 1):
             _make_stub_mp3(tmp_path / f"0{i}.mp3")
 
-        argv = [str(tmp_path), "--title", "T", "--author", "A", "--narrator", "N", "--no-prompt"]
+        argv = [
+            str(tmp_path),
+            "--title",
+            "T",
+            "--author",
+            "A",
+            "--narrator",
+            "N",
+            "--no-prompt",
+        ]
         parsed = real_parse_args(argv)
 
         written: list[str] = []
         _orig = Path.write_text
 
-        def _capture(self_path: Path, text: str, *args: object, **kwargs: object) -> None:
+        def _capture(
+            self_path: Path, text: str, *args: object, **kwargs: object
+        ) -> None:
             if "ffmetadata" in str(self_path):
                 written.append(text)
             _orig(self_path, text, *args, **kwargs)  # type: ignore[call-arg]
@@ -185,13 +201,24 @@ class TestFullPipeline:
             _make_stub_mp3(tmp_path / f"0{i}.mp3") for i in range(1, num_files + 1)
         ]
 
-        argv = [str(tmp_path), "--title", "T", "--author", "A", "--narrator", "N", "--no-prompt"]
+        argv = [
+            str(tmp_path),
+            "--title",
+            "T",
+            "--author",
+            "A",
+            "--narrator",
+            "N",
+            "--no-prompt",
+        ]
         parsed = real_parse_args(argv)
 
         written: list[str] = []
         _orig = Path.write_text
 
-        def _capture(self_path: Path, text: str, *args: object, **kwargs: object) -> None:
+        def _capture(
+            self_path: Path, text: str, *args: object, **kwargs: object
+        ) -> None:
             if "concat" in str(self_path):
                 written.append(text)
             _orig(self_path, text, *args, **kwargs)  # type: ignore[call-arg]

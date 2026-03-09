@@ -9,10 +9,10 @@ import pytest
 
 from m4bmaker.cover import _image_area, find_cover
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def write_image(path: Path) -> Path:
     """Write a minimal PNG-like stub (real Pillow won't open it, but path exists)."""
@@ -23,6 +23,7 @@ def write_image(path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # _image_area
 # ---------------------------------------------------------------------------
+
 
 class TestImageArea:
     def test_returns_pixel_area_via_pillow(self, tmp_path: Path) -> None:
@@ -58,13 +59,13 @@ class TestImageArea:
         with patch.dict(sys.modules, {"PIL": None, "PIL.Image": None}):
             area = _image_area(img)
 
-
         assert area == 0
 
 
 # ---------------------------------------------------------------------------
 # CLI override
 # ---------------------------------------------------------------------------
+
 
 class TestCliOverride:
     def test_override_path_returned_directly(self, tmp_path: Path) -> None:
@@ -88,6 +89,7 @@ class TestCliOverride:
 # No images
 # ---------------------------------------------------------------------------
 
+
 class TestNoImages:
     def test_returns_none_when_no_images(self, tmp_path: Path) -> None:
         (tmp_path / "track.mp3").write_bytes(b"\x00")
@@ -102,6 +104,7 @@ class TestNoImages:
 # ---------------------------------------------------------------------------
 # Single image
 # ---------------------------------------------------------------------------
+
 
 class TestSingleImage:
     def test_single_jpg_returned(self, tmp_path: Path) -> None:
@@ -130,6 +133,7 @@ class TestSingleImage:
 # Multiple images — largest resolution auto-picked
 # ---------------------------------------------------------------------------
 
+
 class TestMultipleImages:
     def test_largest_by_pillow_area_is_chosen(self, tmp_path: Path) -> None:
         small = write_image(tmp_path / "small.jpg")
@@ -144,8 +148,8 @@ class TestMultipleImages:
         assert result == large
 
     def test_tie_broken_by_filename(self, tmp_path: Path) -> None:
-        """When areas are equal, the file with the lexicographically larger name wins."""
-        a = write_image(tmp_path / "a_cover.jpg")
+        """Equal areas: the lexicographically larger filename wins."""
+        write_image(tmp_path / "a_cover.jpg")
         b = write_image(tmp_path / "b_cover.jpg")
 
         with patch("m4bmaker.cover._image_area", return_value=500):

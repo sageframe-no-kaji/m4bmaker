@@ -31,8 +31,10 @@ def get_duration(file: Path, ffprobe: str) -> float:
     """Return the duration of *file* in seconds using ffprobe JSON output."""
     cmd = [
         ffprobe,
-        "-v", "quiet",
-        "-print_format", "json",
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
         "-show_format",
         str(file),
     ]
@@ -54,9 +56,7 @@ def get_duration(file: Path, ffprobe: str) -> float:
         data = json.loads(result.stdout)
         duration = float(data["format"]["duration"])
     except (KeyError, ValueError, json.JSONDecodeError) as exc:
-        sys.exit(
-            f"Error: could not parse ffprobe output for '{file}': {exc}"
-        )
+        sys.exit(f"Error: could not parse ffprobe output for '{file}': {exc}")
 
     return duration
 
@@ -82,9 +82,7 @@ def build_chapters(files: list[Path], ffprobe: str) -> list[Chapter]:
     return chapters
 
 
-def write_ffmetadata(
-    chapters: list[Chapter], meta: dict[str, str], dest: Path
-) -> None:
+def write_ffmetadata(chapters: list[Chapter], meta: dict[str, str], dest: Path) -> None:
     """Write an FFMETADATA1 file with global tags and chapter markers to *dest*."""
     lines: list[str] = [";FFMETADATA1\n"]
 

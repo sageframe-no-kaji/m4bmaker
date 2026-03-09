@@ -9,10 +9,10 @@ import pytest
 
 from m4bmaker.encoder import encode, write_concat_list
 
-
 # ---------------------------------------------------------------------------
 # write_concat_list
 # ---------------------------------------------------------------------------
+
 
 class TestWriteConcatList:
     def test_writes_all_files(self, tmp_path: Path) -> None:
@@ -71,6 +71,7 @@ class TestWriteConcatList:
 # ---------------------------------------------------------------------------
 # encode — command construction
 # ---------------------------------------------------------------------------
+
 
 def _make_paths(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     concat = tmp_path / "concat.txt"
@@ -179,7 +180,9 @@ class TestEncodeCommandConstruction:
             result.returncode = 0
             return result
 
-        with patch("m4bmaker.encoder.subprocess.run", side_effect=_fake_run) as mock_run:
+        with patch(
+            "m4bmaker.encoder.subprocess.run", side_effect=_fake_run
+        ) as mock_run:
             encode(concat, meta, None, output, "96k", 1, "ffmpeg")
             called_cmd = mock_run.call_args[0][0]
 
@@ -189,6 +192,7 @@ class TestEncodeCommandConstruction:
 # ---------------------------------------------------------------------------
 # encode — error handling
 # ---------------------------------------------------------------------------
+
 
 class TestEncodeErrorHandling:
     def test_nonzero_returncode_exits(self, tmp_path: Path) -> None:

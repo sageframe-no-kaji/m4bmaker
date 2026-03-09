@@ -10,10 +10,10 @@ import pytest
 
 from m4bmaker.metadata import extract_metadata, prompt_missing
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _args(**kwargs: object) -> Namespace:
     """Build a Namespace with sensible defaults for all CLI fields."""
@@ -37,16 +37,19 @@ def _mock_audio(tags: dict[str, list[str]] | None) -> MagicMock:
 # extract_metadata
 # ---------------------------------------------------------------------------
 
+
 class TestExtractMetadata:
     def test_reads_title_author_narrator(self, tmp_path: Path) -> None:
         stub = tmp_path / "track.mp3"
         stub.write_bytes(b"\x00")
 
-        audio = _mock_audio({
-            "title": ["My Book"],
-            "artist": ["Jane Smith"],
-            "composer": ["Bob Reader"],
-        })
+        audio = _mock_audio(
+            {
+                "title": ["My Book"],
+                "artist": ["Jane Smith"],
+                "composer": ["Bob Reader"],
+            }
+        )
 
         with patch("mutagen.File", return_value=audio):
             meta = extract_metadata(stub)
@@ -58,10 +61,12 @@ class TestExtractMetadata:
     def test_prefers_artist_over_albumartist(self, tmp_path: Path) -> None:
         stub = tmp_path / "track.mp3"
         stub.write_bytes(b"\x00")
-        audio = _mock_audio({
-            "artist": ["Primary Artist"],
-            "albumartist": ["Album Artist"],
-        })
+        audio = _mock_audio(
+            {
+                "artist": ["Primary Artist"],
+                "albumartist": ["Album Artist"],
+            }
+        )
         with patch("mutagen.File", return_value=audio):
             meta = extract_metadata(stub)
         assert meta["author"] == "Primary Artist"
@@ -127,6 +132,7 @@ class TestExtractMetadata:
 # prompt_missing — CLI override path
 # ---------------------------------------------------------------------------
 
+
 class TestPromptMissingCliOverrides:
     def test_cli_title_applied(self) -> None:
         meta = {"title": "", "author": "Author", "narrator": "Narrator"}
@@ -152,7 +158,11 @@ class TestPromptMissingCliOverrides:
         assert result == {"title": "T", "author": "A", "narrator": "N"}
 
     def test_existing_tags_not_overwritten_when_no_cli(self) -> None:
-        meta = {"title": "Tag Title", "author": "Tag Author", "narrator": "Tag Narrator"}
+        meta = {
+            "title": "Tag Title",
+            "author": "Tag Author",
+            "narrator": "Tag Narrator",
+        }
         result = prompt_missing(meta, _args())
         assert result["title"] == "Tag Title"
         assert result["author"] == "Tag Author"
@@ -162,6 +172,7 @@ class TestPromptMissingCliOverrides:
 # ---------------------------------------------------------------------------
 # prompt_missing — interactive prompt path
 # ---------------------------------------------------------------------------
+
 
 class TestPromptMissingInteractive:
     def test_prompts_for_missing_title(self) -> None:
@@ -193,6 +204,7 @@ class TestPromptMissingInteractive:
 # ---------------------------------------------------------------------------
 # prompt_missing — --no-prompt path
 # ---------------------------------------------------------------------------
+
 
 class TestPromptMissingNoPrompt:
     def test_no_prompt_missing_title_exits(self) -> None:

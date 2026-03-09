@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 import sys
 
-
 _INSTALL_HINT = (
     "  macOS (Homebrew): brew install ffmpeg\n"
     "  Ubuntu/Debian:    sudo apt install ffmpeg\n"

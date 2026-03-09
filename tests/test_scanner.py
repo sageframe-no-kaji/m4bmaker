@@ -8,10 +8,10 @@ import pytest
 
 from m4bmaker.scanner import AUDIO_EXTENSIONS, scan_audio_files
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def touch(directory: Path, name: str) -> Path:
     p = directory / name
@@ -22,6 +22,7 @@ def touch(directory: Path, name: str) -> Path:
 # ---------------------------------------------------------------------------
 # Extension filtering
 # ---------------------------------------------------------------------------
+
 
 class TestExtensionFiltering:
     def test_finds_mp3(self, tmp_path: Path) -> None:
@@ -64,6 +65,7 @@ class TestExtensionFiltering:
 # Natural sort order
 # ---------------------------------------------------------------------------
 
+
 class TestNaturalSort:
     def test_natural_sort_not_lexicographic(self, tmp_path: Path) -> None:
         """01, 02, 10 — NOT 01, 10, 02 (lexicographic)."""
@@ -81,7 +83,11 @@ class TestNaturalSort:
             touch(tmp_path, n)
         result = scan_audio_files(tmp_path)
         assert [p.name for p in result] == [
-            "1.mp3", "2.mp3", "9.mp3", "10.mp3", "100.mp3"
+            "1.mp3",
+            "2.mp3",
+            "9.mp3",
+            "10.mp3",
+            "100.mp3",
         ]
 
     def test_single_file_returned_as_list(self, tmp_path: Path) -> None:
@@ -93,6 +99,7 @@ class TestNaturalSort:
 # ---------------------------------------------------------------------------
 # Error conditions
 # ---------------------------------------------------------------------------
+
 
 class TestErrorConditions:
     def test_empty_directory_exits(self, tmp_path: Path) -> None:

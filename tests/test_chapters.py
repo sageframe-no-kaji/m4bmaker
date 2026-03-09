@@ -17,10 +17,10 @@ from m4bmaker.chapters import (
     write_ffmetadata,
 )
 
-
 # ---------------------------------------------------------------------------
 # _strip_chapter_prefix
 # ---------------------------------------------------------------------------
+
 
 class TestStripChapterPrefix:
     @pytest.mark.parametrize(
@@ -33,8 +33,8 @@ class TestStripChapterPrefix:
             ("10-Finale", "Finale"),
             ("NoPrefix", "NoPrefix"),
             ("Just Text", "Just Text"),
-            ("01", "01"),          # pure number → fall back to original
-            ("01 ", "01 "),        # trailing space after strip leaves empty -> fallback
+            ("01", "01"),  # pure number → fall back to original
+            ("01 ", "01 "),  # trailing space after strip leaves empty -> fallback
         ],
     )
     def test_strip(self, stem: str, expected: str) -> None:
@@ -44,6 +44,7 @@ class TestStripChapterPrefix:
 # ---------------------------------------------------------------------------
 # get_duration
 # ---------------------------------------------------------------------------
+
 
 def _ffprobe_stdout(duration: float) -> str:
     return json.dumps({"format": {"duration": str(duration)}})
@@ -99,6 +100,7 @@ class TestGetDuration:
 # ---------------------------------------------------------------------------
 # build_chapters
 # ---------------------------------------------------------------------------
+
 
 class TestBuildChapters:
     def _patch_duration(self, duration: float) -> MagicMock:
@@ -159,7 +161,7 @@ class TestBuildChapters:
         assert chapters[0].title == "Introduction"
 
     def test_long_audiobook_no_integer_overflow(self, tmp_path: Path) -> None:
-        """20 hours of audio: 20 * 3600 * 1000 ms = 72_000_000 — well within int range."""
+        """20 h: 20 * 3600 * 1000 ms = 72_000_000 — well within int range."""
         stub = tmp_path / "marathon.mp3"
         stub.write_bytes(b"\x00")
 
@@ -177,6 +179,7 @@ class TestBuildChapters:
 # ---------------------------------------------------------------------------
 # write_ffmetadata
 # ---------------------------------------------------------------------------
+
 
 class TestWriteFFMetadata:
     def _make_chapters(self) -> list[Chapter]:
@@ -224,7 +227,9 @@ class TestWriteFFMetadata:
 
     def test_empty_meta_fields_omitted(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        write_ffmetadata(self._make_chapters(), {"title": "", "author": "", "narrator": ""}, dest)
+        write_ffmetadata(
+            self._make_chapters(), {"title": "", "author": "", "narrator": ""}, dest
+        )
         content = dest.read_text()
         assert "title=" not in content.split("\n")[1]  # line 1 after ;FFMETADATA1
         assert "artist=" not in content

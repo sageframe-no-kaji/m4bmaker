@@ -9,10 +9,10 @@ import pytest
 
 from m4bmaker.cli import parse_args
 
-
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
+
 
 class TestDefaults:
     def test_no_args_directory_defaults_to_cwd(self) -> None:
@@ -56,6 +56,7 @@ class TestDefaults:
 # Positional argument
 # ---------------------------------------------------------------------------
 
+
 class TestDirectoryArg:
     def test_directory_parsed_as_path(self, tmp_path: Path) -> None:
         args = parse_args([str(tmp_path)])
@@ -69,6 +70,7 @@ class TestDirectoryArg:
 # ---------------------------------------------------------------------------
 # Flag parsing
 # ---------------------------------------------------------------------------
+
 
 class TestFlags:
     def test_output_long(self, tmp_path: Path) -> None:
@@ -142,6 +144,7 @@ class TestFlags:
 # ---------------------------------------------------------------------------
 # Error cases
 # ---------------------------------------------------------------------------
+
 
 class TestErrorCases:
     def test_unknown_flag_exits(self) -> None:

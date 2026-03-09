@@ -10,7 +10,7 @@ IMAGE_EXTENSIONS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png"})
 def _image_area(path: Path) -> int:
     """Return pixel area (width * height) for *path*, 0 on any error."""
     try:
-        from PIL import Image  # type: ignore[import-untyped]
+        from PIL import Image
 
         with Image.open(path) as img:
             w, h = img.size

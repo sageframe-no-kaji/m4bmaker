@@ -28,9 +28,9 @@ def extract_metadata(first_file: Path) -> dict[str, str]:
     meta: dict[str, str] = {"title": "", "author": "", "narrator": ""}
 
     try:
-        import mutagen  # type: ignore[import-untyped]
+        from mutagen import File as MutagenFile  # type: ignore[attr-defined]
 
-        audio = mutagen.File(str(first_file), easy=True)
+        audio = MutagenFile(str(first_file), easy=True)
         if audio is None or audio.tags is None:
             return meta
 

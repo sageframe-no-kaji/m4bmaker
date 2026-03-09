@@ -32,4 +32,4 @@ def scan_audio_files(directory: Path) -> list[Path]:
             f"Supported formats: {', '.join(sorted(AUDIO_EXTENSIONS))}"
         )
 
-    return natsorted(files, key=lambda p: p.name)  # type: ignore[no-any-return]
+    return natsorted(files, key=lambda p: p.name)

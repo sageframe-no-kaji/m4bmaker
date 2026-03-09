@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_stub_mp3(path: Path) -> Path:
     """Write a minimal valid-looking (but audio-less) stub file at *path*."""
@@ -24,10 +24,15 @@ def make_stub_mp3(path: Path) -> Path:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def tmp_audio_dir(tmp_path: Path) -> Path:
     """A tmp directory pre-populated with three stub .mp3 files in numeric order."""
-    for name in ("01 - Chapter One.mp3", "02 - Chapter Two.mp3", "10 - Chapter Ten.mp3"):
+    for name in (
+        "01 - Chapter One.mp3",
+        "02 - Chapter Two.mp3",
+        "10 - Chapter Ten.mp3",
+    ):
         make_stub_mp3(tmp_path / name)
     return tmp_path
 
