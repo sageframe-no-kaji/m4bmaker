@@ -1,11 +1,52 @@
-# Python cache & build artifacts — stub (full version added in Phase 4)
+# Python cache & build artifacts
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 *.egg-info/
+*.egg
 dist/
 build/
+
+# Testing & coverage
 .pytest_cache/
-.mypy_cache/
 .coverage
+coverage.xml
+htmlcov/
+
+# Type checking
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+SDIST/
+wheels/
+*.whl
+*.tar.gz
+
+# Environment / secrets
 .env
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Man page compiled output (keep source, not groff output)
+*.gz
+
+# Temporary ffmpeg working files that might escape the temp dir
+ffmetadata.txt
+concat.txt

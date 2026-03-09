@@ -1,0 +1,127 @@
+.TH MAKE_M4B 1 "March 2026" "make_m4b 0.1.0" "User Commands"
+.SH NAME
+make_m4b \- convert a directory of audio files into a single .m4b audiobook
+.SH SYNOPSIS
+.B make_m4b
+[\fIDIRECTORY\fR]
+[\fB\-o\fR \fIPATH\fR]
+[\fB\-t\fR \fITITLE\fR]
+[\fB\-a\fR \fIAUTHOR\fR]
+[\fB\-n\fR \fINARRATOR\fR]
+[\fB\-c\fR \fIIMAGE\fR]
+[\fB\-b\fR \fIBITRATE\fR]
+[\fB\-\-stereo\fR]
+[\fB\-\-no\-prompt\fR]
+.SH DESCRIPTION
+.B make_m4b
+scans \fIDIRECTORY\fR for audio files (MP3, M4A, AAC, FLAC, WAV, OGG),
+sorts them in natural order, builds chapter markers from their durations
+using \fBffprobe\fR(1), and encodes everything into a single
+\fI.m4b\fR audiobook file using \fBffmpeg\fR(1).
+.PP
+Metadata (title, author, narrator) is read from the first audio file via
+\fBmutagen\fR. Any missing fields are either supplied via command-line flags
+or prompted interactively. Pass \fB\-\-no\-prompt\fR to disable interactive
+prompts and fail immediately if required metadata is absent.
+.PP
+Cover art is auto-detected from image files in \fIDIRECTORY\fR; when multiple
+candidates exist the one with the largest pixel area is chosen.
+Use \fB\-c\fR to specify a cover image path explicitly.
+.PP
+The output filename defaults to \fI<Title> \- <Author>.m4b\fR inside
+\fIDIRECTORY\fR. Use \fB\-o\fR to override this.
+.SH OPTIONS
+.TP
+.B DIRECTORY
+Directory containing the audio files.
+Defaults to the current working directory.
+.TP
+\fB\-o\fR, \fB\-\-output\fR \fIPATH\fR
+Output \fI.m4b\fR file path.
+If omitted, the filename is derived as
+\fI<Title> \- <Author>.m4b\fR inside \fIDIRECTORY\fR,
+or \fIaudiobook.m4b\fR if metadata is unavailable.
+.TP
+\fB\-t\fR, \fB\-\-title\fR \fITITLE\fR
+Book title. Overrides tag extraction and skips the interactive title prompt.
+.TP
+\fB\-a\fR, \fB\-\-author\fR \fIAUTHOR\fR
+Author name. Overrides tag extraction and skips the interactive author prompt.
+.TP
+\fB\-n\fR, \fB\-\-narrator\fR \fINARRATOR\fR
+Narrator name. Overrides tag extraction and skips the interactive narrator prompt.
+.TP
+\fB\-c\fR, \fB\-\-cover\fR \fIIMAGE\fR
+Path to a cover image (\fI.jpg\fR, \fI.jpeg\fR, or \fI.png\fR).
+Bypasses automatic cover detection.
+The file must exist; an error is raised if it does not.
+.TP
+\fB\-b\fR, \fB\-\-bitrate\fR \fIBITRATE\fR
+Audio bitrate passed to \fBffmpeg\fR as \fI\-b:a\fR.
+Default: \fB96k\fR.
+.TP
+.B \-\-stereo
+Encode in stereo (2 channels). Default is mono (1 channel).
+.TP
+.B \-\-no\-prompt
+Disable all interactive prompts.
+Missing required metadata (title, author, narrator) will cause an immediate
+error exit with a descriptive message.
+Combine with \fB\-t\fR, \fB\-a\fR, and \fB\-n\fR for fully non-interactive
+batch processing.
+.SH EXAMPLES
+.TP
+Simplest usage — process current directory interactively:
+.B make_m4b
+.TP
+Specify directory, supply metadata up front:
+.B make_m4b /audiobooks/Dune \-t \(aqDune\(aq \-a \(aqFrank Herbert\(aq \-n \(aqScott Brick\(aq
+.TP
+Stereo output at 128 kbps:
+.B make_m4b /books/Dune \-\-bitrate 128k \-\-stereo
+.TP
+Custom output path:
+.B make_m4b /books/Dune \-o ~/Desktop/Dune.m4b
+.TP
+Fully non-interactive (suitable for scripts and Docker):
+.B make_m4b /books/Dune \-t Dune \-a \(aqFrank Herbert\(aq \-n \(aqScott Brick\(aq \-\-no\-prompt
+.SH FILES
+.TP
+.I <DIRECTORY>/<Title> \- <Author>.m4b
+Default output path when title and author are both known.
+.TP
+.I <DIRECTORY>/audiobook.m4b
+Fallback output path when title is unavailable.
+.TP
+.I /tmp/make_m4b_*/ffmetadata.txt
+Temporary FFMETADATA file holding chapter timestamps; removed after encoding.
+.TP
+.I /tmp/make_m4b_*/concat.txt
+Temporary ffmpeg concat demuxer input list; removed after encoding.
+.SH REQUIREMENTS
+.TP
+.B ffmpeg >= 6.0
+Required for encoding. Must be on \fIPATH\fR.
+Install on macOS: \fBbrew install ffmpeg\fR
+Install on Debian/Ubuntu: \fBapt-get install ffmpeg\fR
+.TP
+.B ffprobe >= 6.0
+Bundled with ffmpeg. Used to probe audio file durations.
+.TP
+.B Python >= 3.11
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Error. A descriptive message is printed to \fIstderr\fR.
+Common causes: ffmpeg not found, no audio files in directory, missing required
+metadata with \fB\-\-no\-prompt\fR, or an ffmpeg encoding failure.
+.SH BUGS
+Report bugs at \fIhttps://github.com/sageframe-no-kaji/m4bmaker/issues\fR
+.SH AUTHOR
+sageframe-no-kaji <https://github.com/sageframe-no-kaji>
+.SH SEE ALSO
+.BR ffmpeg (1),
+.BR ffprobe (1)
