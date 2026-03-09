@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,12 +62,19 @@ def get_duration(file: Path, ffprobe: str) -> float:
     return duration
 
 
-def build_chapters(files: list[Path], ffprobe: str) -> list[Chapter]:
+def build_chapters(
+    files: list[Path],
+    ffprobe: str,
+    progress_fn: Callable[[int, int, str], None] | None = None,
+) -> list[Chapter]:
     """Build a Chapter list from *files* using ffprobe for durations."""
     chapters: list[Chapter] = []
     cursor_ms = 0
+    total = len(files)
 
-    for path in files:
+    for i, path in enumerate(files, 1):
+        if progress_fn is not None:
+            progress_fn(i, total, path.name)
         duration_sec = get_duration(path, ffprobe)
         duration_ms = round(duration_sec * 1000)
         title = _strip_chapter_prefix(path.stem)

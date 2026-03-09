@@ -48,12 +48,20 @@ def extract_metadata(first_file: Path) -> dict[str, str]:
     return meta
 
 
-def prompt_missing(meta: dict[str, str], args: Namespace) -> dict[str, str]:
+def prompt_missing(
+    meta: dict[str, str],
+    args: Namespace,
+    hints: dict[str, str] | None = None,
+) -> dict[str, str]:
     """Fill in missing metadata fields from CLI flags or interactive prompts.
+
+    *hints* is an optional dict of pre-filled defaults (e.g. derived from the
+    directory name) shown as ``[default]`` in the prompt.  Pressing Enter
+    accepts the hint.  When ``--no-prompt`` is set and a hint is available it
+    is used silently; when no hint is available the process exits.
 
     - title, author: prompted if missing and not supplied via CLI.
     - narrator: always prompted unless --narrator CLI flag is set.
-    - If --no-prompt is set and fields are still missing, exits with an error.
 
     Returns a new dict with all three fields populated.
     """
@@ -70,13 +78,19 @@ def prompt_missing(meta: dict[str, str], args: Namespace) -> dict[str, str]:
     no_prompt: bool = getattr(args, "no_prompt", False)
 
     def _prompt(field: str, label: str) -> str:
+        hint = (hints or {}).get(field, "")
         if no_prompt:
+            if hint:
+                return hint
             sys.exit(
                 f"Error: '{field}' is required but was not found in tags and "
                 f"--no-prompt is set. Pass --{field} <value> to supply it."
             )
-        value = input(f"{label}: ").strip()
+        prompt_str = f"{label} [{hint}]: " if hint else f"{label}: "
+        value = input(prompt_str).strip()
         if not value:
+            if hint:
+                return hint
             sys.exit(f"Error: '{field}' cannot be empty.")
         return value
 

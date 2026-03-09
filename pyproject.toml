@@ -7,7 +7,8 @@ name = "m4bmaker"
 version = "0.1.0"
 description = "Convert a directory of audio files into a single .m4b audiobook with chapters, cover art, and metadata"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "mutagen>=1.47",
@@ -20,6 +21,9 @@ m4bmaker = "m4bmaker.__main__:main"
 [project.urls]
 Homepage = "https://github.com/sageframe-no-kaji/m4bmaker"
 Repository = "https://github.com/sageframe-no-kaji/m4bmaker"
+
+[tool.setuptools.packages.find]
+include = ["m4bmaker*"]
 
 [tool.black]
 line-length = 88

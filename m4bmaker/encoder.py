@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+import itertools
 import subprocess
 import sys
+import threading
 from pathlib import Path
+
+
+def _spin(label: str, done: threading.Event) -> None:
+    """Animate a simple CLI spinner until *done* is set."""
+    width = len(label) + 6
+    for ch in itertools.cycle(r"|/-\\"):
+        if done.is_set():
+            break
+        sys.stdout.write(f"\r  {ch}  {label}")
+        sys.stdout.flush()
+        done.wait(0.1)
+    sys.stdout.write("\r" + " " * width + "\r")
+    sys.stdout.flush()
 
 
 def write_concat_list(files: list[Path], dest: Path) -> None:
@@ -87,10 +102,20 @@ def encode(
         str(output),
     ]
 
+    done = threading.Event()
+    spin: threading.Thread | None = None
+    if sys.stdout.isatty():
+        spin = threading.Thread(target=_spin, args=("Encoding", done), daemon=True)
+        spin.start()
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
     except FileNotFoundError:
         sys.exit(f"Error: ffmpeg executable not found at '{ffmpeg}'.")
+    finally:
+        done.set()
+        if spin is not None:
+            spin.join()
 
     if result.returncode != 0:
         sys.exit(

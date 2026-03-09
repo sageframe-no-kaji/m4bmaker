@@ -1,4 +1,4 @@
-"""make_m4b — entry point: wire all modules and drive the conversion pipeline."""
+"""m4bmaker — entry point: wire all modules and drive the conversion pipeline."""
 
 from __future__ import annotations
 
@@ -34,11 +34,20 @@ def _output_path(directory: Path, meta: dict[str, str]) -> Path:
     return directory / name
 
 
+def _hints_from_dirname(directory: Path) -> dict[str, str]:
+    """Extract title/author hints from an 'Author - Title' directory name."""
+    name = directory.name
+    if " - " in name:
+        author, _, title = name.partition(" - ")
+        return {"author": author.strip(), "title": title.strip()}
+    return {"title": name.strip()}
+
+
 def main() -> None:
     args = parse_args()
     directory: Path = args.directory.resolve()
 
-    log(f"make_m4b {__version__}")
+    log(f"m4bmaker {__version__}")
     log(f"Working directory: {directory}")
 
     # 1. Detect tool locations (exits early if missing).
@@ -61,7 +70,8 @@ def main() -> None:
     # 4. Read and complete metadata.
     log("Reading metadata...")
     meta = extract_metadata(files[0])
-    meta = prompt_missing(meta, args)
+    hints = _hints_from_dirname(directory)
+    meta = prompt_missing(meta, args, hints=hints)
     log(
         f"Title: {meta['title']} | Author: {meta['author']} "
         f"| Narrator: {meta['narrator']}"
@@ -80,7 +90,11 @@ def main() -> None:
         meta_file = tmp_dir / "ffmetadata.txt"
         concat_file = tmp_dir / "concat.txt"
 
-        chapters = build_chapters(files, ffprobe)
+        chapters = build_chapters(
+            files,
+            ffprobe,
+            progress_fn=lambda i, n, name: log(f"  [{i}/{n}] {name}"),
+        )
         write_ffmetadata(chapters, meta, meta_file)
         log(f"Generated {len(chapters)} chapter(s)")
 
