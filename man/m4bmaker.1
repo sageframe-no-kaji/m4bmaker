@@ -1,8 +1,8 @@
-.TH MAKE_M4B 1 "March 2026" "make_m4b 0.1.0" "User Commands"
+.TH M4BMAKER 1 "March 2026" "m4bmaker 0.1.0" "User Commands"
 .SH NAME
-make_m4b \- convert a directory of audio files into a single .m4b audiobook
+m4bmaker \- convert a directory of audio files into a single .m4b audiobook
 .SH SYNOPSIS
-.B make_m4b
+.B m4bmaker
 [\fIDIRECTORY\fR]
 [\fB\-o\fR \fIPATH\fR]
 [\fB\-t\fR \fITITLE\fR]
@@ -13,7 +13,7 @@ make_m4b \- convert a directory of audio files into a single .m4b audiobook
 [\fB\-\-stereo\fR]
 [\fB\-\-no\-prompt\fR]
 .SH DESCRIPTION
-.B make_m4b
+.B m4bmaker
 scans \fIDIRECTORY\fR for audio files (MP3, M4A, AAC, FLAC, WAV, OGG),
 sorts them in natural order, builds chapter markers from their durations
 using \fBffprobe\fR(1), and encodes everything into a single
@@ -33,6 +33,8 @@ The output filename defaults to \fI<Title> \- <Author>.m4b\fR inside
 .SH OPTIONS
 .TP
 .B DIRECTORY
+Directory containing the audio files.
+Defaults to the current working directory.
 Directory containing the audio files.
 Defaults to the current working directory.
 .TP
@@ -72,19 +74,19 @@ batch processing.
 .SH EXAMPLES
 .TP
 Simplest usage — process current directory interactively:
-.B make_m4b
+.B m4bmaker
 .TP
 Specify directory, supply metadata up front:
-.B make_m4b /audiobooks/Dune \-t \(aqDune\(aq \-a \(aqFrank Herbert\(aq \-n \(aqScott Brick\(aq
+.B m4bmaker /audiobooks/Dune \-t \(aqDune\(aq \-a \(aqFrank Herbert\(aq \-n \(aqScott Brick\(aq
 .TP
 Stereo output at 128 kbps:
-.B make_m4b /books/Dune \-\-bitrate 128k \-\-stereo
+.B m4bmaker /books/Dune \-\-bitrate 128k \-\-stereo
 .TP
 Custom output path:
-.B make_m4b /books/Dune \-o ~/Desktop/Dune.m4b
+.B m4bmaker /books/Dune \-o ~/Desktop/Dune.m4b
 .TP
 Fully non-interactive (suitable for scripts and Docker):
-.B make_m4b /books/Dune \-t Dune \-a \(aqFrank Herbert\(aq \-n \(aqScott Brick\(aq \-\-no\-prompt
+.B m4bmaker /books/Dune \-t Dune \-a \(aqFrank Herbert\(aq \-n \(aqScott Brick\(aq \-\-no\-prompt
 .SH FILES
 .TP
 .I <DIRECTORY>/<Title> \- <Author>.m4b
@@ -93,10 +95,10 @@ Default output path when title and author are both known.
 .I <DIRECTORY>/audiobook.m4b
 Fallback output path when title is unavailable.
 .TP
-.I /tmp/make_m4b_*/ffmetadata.txt
+.I /tmp/m4bmaker_*/ffmetadata.txt
 Temporary FFMETADATA file holding chapter timestamps; removed after encoding.
 .TP
-.I /tmp/make_m4b_*/concat.txt
+.I /tmp/m4bmaker_*/concat.txt
 Temporary ffmpeg concat demuxer input list; removed after encoding.
 .SH REQUIREMENTS
 .TP

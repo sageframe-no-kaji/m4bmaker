@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`make_m4b.py`** — thin entry point wiring all modules with progress logging.
 - **`tests/`** — comprehensive `pytest` suite (143 tests, 99% coverage) covering all
   eight modules and a full integration pipeline with mocked subprocess calls.
-- **`man/make_m4b.1`** — troff/groff man page with NAME, SYNOPSIS, DESCRIPTION,
+- **`man/m4bmaker.1`** — troff/groff man page with NAME, SYNOPSIS, DESCRIPTION,
   OPTIONS, EXAMPLES, FILES, REQUIREMENTS, EXIT STATUS, BUGS, AUTHOR, SEE ALSO.
 - **`README.md`** — installation guide, quick-start examples, full CLI reference table,
   chapter-title stripping rules, Docker pointer.

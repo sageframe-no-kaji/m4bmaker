@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-make_m4b = "make_m4b:main"
+m4bmaker = "make_m4b:main"
 
 [project.urls]
 Homepage = "https://github.com/sageframe-no-kaji/m4bmaker"

@@ -9,7 +9,7 @@ from pathlib import Path
 def build_parser() -> argparse.ArgumentParser:
     """Return the configured ArgumentParser for make_m4b."""
     parser = argparse.ArgumentParser(
-        prog="make_m4b",
+        prog="m4bmaker",
         description=(
             "Convert a directory of audio files into a single .m4b audiobook "
             "with chapters, cover art, and embedded metadata."

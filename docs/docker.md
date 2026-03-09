@@ -1,6 +1,6 @@
 # Docker Usage Guide
 
-Running `make_m4b` inside a container is useful for:
+Running `m4bmaker` inside a container is useful for:
 - Reproducible builds with a pinned `ffmpeg` version.
 - Batch-processing audiobooks in CI or on a server without a GUI.
 - Distributing the tool without requiring users to install ffmpeg locally.
@@ -29,13 +29,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+COPY requirements.txt pyproject.toml make_m4b.py ./
 COPY m4bmaker/ m4bmaker/
-COPY make_m4b.py .
 
-ENTRYPOINT ["python", "make_m4b.py"]
+RUN pip install --no-cache-dir .
+
+ENTRYPOINT ["m4bmaker"]
 ```
 
 Build the image:
@@ -56,7 +55,7 @@ The output `.m4b` file is written into the same mounted directory.
 ```bash
 docker run --rm -it \
   -v /path/to/audiobook/Dune:/books \
-  m4bmaker /books
+  m4bmaker-img /books
 ```
 
 ### Fully non-interactive
@@ -64,7 +63,7 @@ docker run --rm -it \
 ```bash
 docker run --rm \
   -v /path/to/audiobook/Dune:/books \
-  m4bmaker /books \
+  m4bmaker-img /books \
     --title "Dune" \
     --author "Frank Herbert" \
     --narrator "Scott Brick" \
@@ -79,7 +78,7 @@ Mount a separate output directory to keep the source files clean:
 docker run --rm \
   -v /path/to/audiobook/Dune:/books:ro \
   -v /path/to/output:/out \
-  m4bmaker /books \
+  m4bmaker-img /books \
     --title "Dune" \
     --author "Frank Herbert" \
     --narrator "Scott Brick" \
@@ -98,7 +97,7 @@ for book_dir in /audiobooks/*/; do
   title=$(basename "$book_dir")
   docker run --rm \
     -v "$book_dir":/books \
-    m4bmaker /books \
+    m4bmaker-img /books \
       --title "$title" \
       --no-prompt
 done

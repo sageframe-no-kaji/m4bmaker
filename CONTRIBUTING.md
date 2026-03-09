@@ -78,7 +78,7 @@ No separate `.mypy.ini` or `.flake8` files.
 To verify the man page renders correctly:
 
 ```bash
-man ./man/make_m4b.1
+man ./man/m4bmaker.1
 ```
 
 ---
