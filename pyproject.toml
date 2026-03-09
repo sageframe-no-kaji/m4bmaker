@@ -37,3 +37,9 @@ target-version = ["py311"]
 testpaths = ["tests"]
 addopts = "-v"
 pythonpath = ["."]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]

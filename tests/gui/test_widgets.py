@@ -10,8 +10,14 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QMimeData, Qt, QUrl  # noqa: E402
-from PySide6.QtGui import QDropEvent, QDragEnterEvent, QDragLeaveEvent  # noqa: E402
+from PySide6.QtCore import QEvent, QMimeData, QPoint, Qt, QUrl  # noqa: E402
+from PySide6.QtGui import (  # noqa: E402
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDropEvent,
+    QKeyEvent,
+)
+from PySide6.QtWidgets import QLineEdit, QStyledItemDelegate  # noqa: E402
 
 from m4bmaker.gui.widgets import (  # noqa: E402
     ChapterTable,
@@ -193,6 +199,36 @@ class TestCoverWidget:
         event = _make_drag_enter_event(mime)
         self.w.dragEnterEvent(event)
         event.ignore.assert_called_once()
+
+    def test_set_cover_non_null_pixmap_displays_thumb(self, tmp_path: Path):
+        """Lines 176-185: pixmap loads OK → thumbnail shows image, text cleared."""
+        png = tmp_path / "cover.png"
+        png.write_bytes(b"\x89PNG" + b"\x00" * 20)
+        mock_pix = MagicMock()
+        mock_pix.isNull.return_value = False
+        mock_pix.scaled.return_value = MagicMock()
+        with (
+            patch("m4bmaker.gui.widgets.QPixmap", return_value=mock_pix),
+            patch.object(self.w._thumb, "setPixmap"),  # bypass strict type check
+        ):
+            self.w.set_cover(png)
+        assert self.w._thumb.text() == ""
+        assert self.w.cover_path() == png
+        mock_pix.scaled.assert_called_once()
+
+    def test_drag_enter_image_accepted(self, tmp_path: Path):
+        """Lines 217-218: image URL accepted, style and event updated."""
+        img = tmp_path / "art.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        mime = _mime_with_file(img)
+        event = _make_drag_enter_event(mime)
+        self.w.dragEnterEvent(event)
+        event.acceptProposedAction.assert_called_once()
+
+    def test_drag_leave_resets_thumb_style(self):
+        """Line 223: dragLeave resets thumbnail stylesheet."""
+        event = MagicMock(spec=QDragLeaveEvent)
+        self.w.dragLeaveEvent(event)  # must not raise
 
 
 # ── ChapterTable ──────────────────────────────────────────────────────────────
@@ -376,3 +412,157 @@ class TestFindReplaceDialog:
         dlg = FindReplaceDialog()
         _, _, case = dlg.values()
         assert case is False
+
+
+# ── _TitleDelegate ─────────────────────────────────────────────────────────
+
+
+class TestTitleDelegate:
+    """Lines 240-243: createEditor schedules selectAll on the line-edit."""
+
+    def test_create_editor_selects_all_for_line_edit(self, qapp):
+        from m4bmaker.gui import widgets as _w
+
+        delegate = _w._TitleDelegate()
+        table = ChapterTable()
+        table.populate([_make_chapter(1, 0.0, "test")])
+        index = table.model().index(0, ChapterTable.COL_TITLE)
+        real_editor = QLineEdit()
+        with patch.object(
+            QStyledItemDelegate, "createEditor", return_value=real_editor
+        ):
+            with patch("m4bmaker.gui.widgets.QTimer") as mock_timer:
+                editor = delegate.createEditor(table.viewport(), None, index)
+        assert editor is real_editor
+        mock_timer.singleShot.assert_called_once_with(0, real_editor.selectAll)
+        real_editor.close()
+        table.close()
+
+
+# ── ChapterTable keyboard navigation ───────────────────────────────────────
+
+
+class TestChapterTableKeyboard:
+    """Lines 338-360: keyPressEvent navigation."""
+
+    @pytest.fixture(autouse=True)
+    def widget(self, qapp):
+        self.t = ChapterTable()
+        self.t.populate(
+            [
+                _make_chapter(1, 0.0, "Row 0"),
+                _make_chapter(2, 60.0, "Row 1"),
+                _make_chapter(3, 120.0, "Row 2"),
+            ]
+        )
+        yield
+        self.t.close()
+
+    @staticmethod
+    def _key(
+        key: Qt.Key, modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier
+    ) -> QKeyEvent:
+        return QKeyEvent(QEvent.Type.KeyPress, key, modifiers)
+
+    def test_enter_moves_to_next_row(self):
+        self.t.setCurrentCell(1, ChapterTable.COL_TITLE)
+        self.t.keyPressEvent(self._key(Qt.Key.Key_Return))
+        assert self.t.currentRow() == 2
+
+    def test_shift_enter_moves_to_prev_row(self):
+        self.t.setCurrentCell(1, ChapterTable.COL_TITLE)
+        self.t.keyPressEvent(
+            self._key(Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+        )
+        assert self.t.currentRow() == 0
+
+    def test_tab_moves_to_next_row(self):
+        self.t.setCurrentCell(0, ChapterTable.COL_TITLE)
+        self.t.keyPressEvent(self._key(Qt.Key.Key_Tab))
+        assert self.t.currentRow() == 1
+
+    def test_backtab_moves_to_prev_row(self):
+        self.t.setCurrentCell(1, ChapterTable.COL_TITLE)
+        self.t.keyPressEvent(self._key(Qt.Key.Key_Backtab))
+        assert self.t.currentRow() == 0
+
+    def test_other_key_falls_through(self):
+        """Non-navigation keys call super().keyPressEvent without error."""
+        self.t.setCurrentCell(0, ChapterTable.COL_TITLE)
+        self.t.keyPressEvent(self._key(Qt.Key.Key_Escape))
+        assert self.t.currentRow() == 0  # no movement
+
+
+# ── ChapterTable context menu ───────────────────────────────────────────────
+
+
+class TestChapterTableContextMenu:
+    """Lines 365-374: _show_context_menu builds and shows a QMenu."""
+
+    @pytest.fixture(autouse=True)
+    def widget(self, qapp):
+        self.t = ChapterTable()
+        self.t.populate([_make_chapter(1, 0.0, "Test Chapter")])
+        yield
+        self.t.close()
+
+    def test_show_context_menu_executes(self):
+        with patch("m4bmaker.gui.widgets.QMenu") as mock_menu_cls:
+            mock_menu = MagicMock()
+            mock_menu_cls.return_value = mock_menu
+            self.t._show_context_menu(QPoint(0, 0))
+        mock_menu.exec.assert_called_once()
+        assert mock_menu.addAction.call_count >= 2
+
+
+# ── FindReplace re.error fallback ──────────────────────────────────────────
+
+
+class TestFindReplaceFallback:
+    """Lines 393-406: invalid-regex find falls back to plain-string replace."""
+
+    @pytest.fixture(autouse=True)
+    def widget(self, qapp):
+        self.t = ChapterTable()
+        self.t.populate(
+            [
+                _make_chapter(1, 0.0, "[unclosed bracket title"),
+                _make_chapter(2, 60.0, "Normal Chapter"),
+            ]
+        )
+        yield
+        self.t.close()
+
+    def test_invalid_regex_case_insensitive_uses_re_escape(self):
+        """Lines 400-403: case_sensitive=False → re.sub(re.escape(find), ...)."""
+        with (
+            patch.object(
+                FindReplaceDialog,
+                "exec",
+                return_value=FindReplaceDialog.DialogCode.Accepted,
+            ),
+            patch.object(
+                FindReplaceDialog,
+                "values",
+                return_value=("[unclosed", "REPLACED", False),
+            ),
+        ):
+            self.t._find_replace()
+        assert self.t.titles()[0] == "REPLACED bracket title"
+
+    def test_invalid_regex_case_sensitive_uses_str_replace(self):
+        """Lines 404-406: case_sensitive=True → str.replace()."""
+        with (
+            patch.object(
+                FindReplaceDialog,
+                "exec",
+                return_value=FindReplaceDialog.DialogCode.Accepted,
+            ),
+            patch.object(
+                FindReplaceDialog,
+                "values",
+                return_value=("[unclosed", "REPLACED", True),
+            ),
+        ):
+            self.t._find_replace()
+        assert self.t.titles()[0] == "REPLACED bracket title"

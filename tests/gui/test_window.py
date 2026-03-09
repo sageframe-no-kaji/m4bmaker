@@ -284,6 +284,28 @@ class TestOutputPath:
         w._title_edit.setText("New Title")
         assert "New Title" in w._out_nested.text()
 
+    def test_browse_custom_output_sets_path(self, win, tmp_path):
+        """Lines 376-382: browse dialog sets custom output path."""
+        w, _ = win
+        dest = str(tmp_path / "my book.m4b")
+        with patch(
+            "m4bmaker.gui.window.QFileDialog.getSaveFileName",
+            return_value=(dest, ""),
+        ):
+            w._browse_custom_output()
+        assert w._custom_path_edit.text() == dest
+
+    def test_browse_custom_output_appends_extension(self, win, tmp_path):
+        """Line 381: path without .m4b extension gets it appended."""
+        w, _ = win
+        dest = str(tmp_path / "my book")
+        with patch(
+            "m4bmaker.gui.window.QFileDialog.getSaveFileName",
+            return_value=(dest, ""),
+        ):
+            w._browse_custom_output()
+        assert w._custom_path_edit.text() == dest + ".m4b"
+
 
 # ── encoding flow ─────────────────────────────────────────────────────────────
 
