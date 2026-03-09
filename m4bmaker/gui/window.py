@@ -113,10 +113,10 @@ def _muted_label(text: str) -> QLabel:
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("m4bmaker")
+        self.setWindowTitle("m4Bookmaker")
         self.setMinimumWidth(760)
         self.setMinimumHeight(520)
-        self.resize(880, 700)
+        self.resize(775, 800)
         self._dark_mode = False
 
         self._book: Optional[Book] = None
@@ -152,7 +152,7 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        quit_action = QAction("Quit m4bmaker", self)
+        quit_action = QAction("Quit m4Bookmaker", self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(QApplication.quit)
         file_menu.addAction(quit_action)
@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
         # Help menu
         help_menu = mb.addMenu("Help")
 
-        about_action = QAction("About m4bmaker", self)
+        about_action = QAction("About m4Bookmaker", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
@@ -213,8 +213,8 @@ class MainWindow(QMainWindow):
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
-            "About m4bmaker",
-            "<b>m4bmaker</b><br>"
+            "About m4Bookmaker",
+            "<b>m4Bookmaker</b><br>"
             "Convert audio files to M4B audiobooks.<br><br>"
             "Uses ffmpeg for encoding and chapter metadata.<br><br>"
             f'<a href="{_GITHUB_URL}"> GitHub</a> &nbsp;&nbsp; '
@@ -487,13 +487,21 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self._convert_btn)
         btn_row.addStretch()
 
+        sf_lbl = QLabel(
+            f'<a href="{_GITHUB_URL}" style="color: #7a7a7a; text-decoration: none;">'
+            "Sageframe</a>"
+        )
+        sf_lbl.setOpenExternalLinks(True)
+        sf_lbl.setStyleSheet("font-size: 11px; background: transparent;")
+        btn_row.addWidget(sf_lbl)
+
         donate_lbl = QLabel(
             f'<a href="{_DONATE_URL}" style="color: #c45a2d; text-decoration: none;">'
-            "\u2665 Support</a>"
+            "♥ Support</a>"
         )
         donate_lbl.setOpenExternalLinks(True)
         donate_lbl.setStyleSheet("font-size: 11px; background: transparent;")
-        donate_lbl.setToolTip("Support m4bmaker development")
+        donate_lbl.setToolTip("Support m4Bookmaker development")
         btn_row.addWidget(donate_lbl)
 
         layout.addLayout(btn_row)
