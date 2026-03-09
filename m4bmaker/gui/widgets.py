@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from PySide6.QtCore import Qt, QPoint, QTimer, Signal
 from PySide6.QtGui import QColor, QDragEnterEvent, QDragLeaveEvent, QDropEvent, QPixmap
+from PySide6.QtWidgets import QLineEdit as _QLineEdit  # for selectAll cast
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -237,7 +238,7 @@ class _TitleDelegate(QStyledItemDelegate):
 
     def createEditor(self, parent, option, index):  # type: ignore[no-untyped-def]  # noqa: E501
         editor = super().createEditor(parent, option, index)
-        if editor is not None and hasattr(editor, "selectAll"):
+        if isinstance(editor, _QLineEdit):
             QTimer.singleShot(0, editor.selectAll)
         return editor
 
