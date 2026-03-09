@@ -196,14 +196,14 @@ class CoverWidget(QFrame):
         self._thumb.setText("Cover")
         layout.addWidget(self._thumb)
 
-        btn_width = self._SIZE + 20
+        btn_width = self._SIZE
         btn = QPushButton("Choose…")
-        btn.setMinimumWidth(btn_width)
+        btn.setFixedWidth(btn_width)
         btn.clicked.connect(self._browse)
         layout.addWidget(btn)
 
         url_btn = QPushButton("URL…")
-        url_btn.setMinimumWidth(btn_width)
+        url_btn.setFixedWidth(btn_width)
         url_btn.setToolTip("Set cover art from a web URL")
         url_btn.clicked.connect(self._browse_url)
         layout.addWidget(url_btn)
