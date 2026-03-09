@@ -226,3 +226,38 @@ class TestEncodeErrorHandling:
         ):
             with pytest.raises(SystemExit, match="not found"):
                 encode(concat, meta, None, output, "96k", 1, "/nonexistent/ffmpeg")
+
+
+# ---------------------------------------------------------------------------
+# _spin / spinner thread
+# ---------------------------------------------------------------------------
+
+
+class TestSpinner:
+    def test_spin_exits_when_done_is_preset(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """_spin returns immediately when done is already set (covers lines 14-22)."""
+        import threading
+
+        from m4bmaker.encoder import _spin
+
+        done = threading.Event()
+        done.set()  # pre-set: loop body exits on first check
+        _spin("Test", done)  # must not hang
+        # A clear-line sequence should have been written.
+        captured = capsys.readouterr()
+        assert "\r" in captured.out
+
+    def test_encode_starts_spinner_on_tty(self, tmp_path: Path) -> None:
+        """Spinner thread is created and joined when isatty() is True."""
+        concat, meta, _, output = _make_paths(tmp_path)
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with (
+            patch("m4bmaker.encoder.subprocess.run", return_value=mock_result),
+            patch("sys.stdout.isatty", return_value=True),
+        ):
+            encode(concat, meta, None, output, "96k", 1, "ffmpeg")
+        # If we reach here, the spinner was created and joined without hanging.

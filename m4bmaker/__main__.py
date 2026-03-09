@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
 
 from m4bmaker import __version__
 from m4bmaker.chapters import build_chapters, write_ffmetadata
 from m4bmaker.cli import parse_args
-from m4bmaker.cover import find_cover
+from m4bmaker.cover import download_cover, find_cover, is_url
 from m4bmaker.encoder import encode, write_concat_list
 from m4bmaker.metadata import extract_metadata, prompt_missing
 from m4bmaker.scanner import scan_audio_files
@@ -43,9 +44,89 @@ def _hints_from_dirname(directory: Path) -> dict[str, str]:
     return {"title": name.strip()}
 
 
+def _resolve_cover(
+    cover_arg: str | None,
+    directory: Path,
+    tmp_dir: Path,
+    interactive: bool,
+) -> Path | None:
+    """Resolve the cover image from CLI argument, directory scan, or user prompt.
+
+    Resolution order:
+    1. *cover_arg* provided — URL: download (retry interactively on failure);
+       local path: passed directly to :func:`find_cover`.
+    2. Auto-detect a single image file in *directory*.
+    3. If *interactive*, prompt the user for a URL or local path.
+    """
+    if cover_arg is not None:
+        if is_url(cover_arg):
+            return _fetch_cover_url(cover_arg, tmp_dir, interactive)
+        return find_cover(directory, cli_override=Path(cover_arg).expanduser())
+
+    cover = find_cover(directory)
+    if cover is not None:
+        return cover
+
+    if interactive:
+        return _prompt_cover(tmp_dir)
+    return None
+
+
+def _fetch_cover_url(url: str, tmp_dir: Path, interactive: bool) -> Path | None:
+    """Download a cover image URL.
+
+    On failure, prompt for retry if *interactive*; otherwise exit.
+    """
+    pending: str | None = url
+    while True:
+        if pending is not None:
+            try:
+                return download_cover(pending, tmp_dir)
+            except Exception as exc:
+                log(f"Cover download failed: {exc}")
+        if not interactive:
+            sys.exit(1)
+        source = input(
+            "Enter a different URL or local path (or press Enter to skip): "
+        ).strip()
+        if not source:
+            return None
+        if is_url(source):
+            pending = source
+        else:
+            path = Path(source).expanduser()
+            if path.is_file():
+                return path
+            log(f"File not found: {path} — please try again.")
+            pending = None
+
+
+def _prompt_cover(tmp_dir: Path) -> Path | None:
+    """Interactively prompt for a cover image URL or local path.
+
+    Loops until a valid source is provided or the user presses Enter to skip.
+    """
+    while True:
+        source = input(
+            "Enter URL or local path for cover art (or press Enter to skip): "
+        ).strip()
+        if not source:
+            return None
+        try:
+            if is_url(source):
+                return download_cover(source, tmp_dir)
+            path = Path(source).expanduser()
+            if path.is_file():
+                return path
+            log(f"File not found: {path} — please try again.")
+        except Exception as exc:
+            log(f"Cover error: {exc} — please try again.")
+
+
 def main() -> None:
     args = parse_args()
     directory: Path = args.directory.resolve()
+    interactive = not args.no_prompt
 
     log(f"m4bmaker {__version__}")
     log(f"Working directory: {directory}")
@@ -59,34 +140,35 @@ def main() -> None:
     files = scan_audio_files(directory)
     log(f"Found {len(files)} audio file(s)")
 
-    # 3. Locate cover image.
-    log("Looking for cover art...")
-    cover = find_cover(directory, cli_override=args.cover)
-    if cover:
-        log(f"Cover art: {cover.name}")
-    else:
-        log("No cover art found — skipping")
-
-    # 4. Read and complete metadata.
-    log("Reading metadata...")
-    meta = extract_metadata(files[0])
-    hints = _hints_from_dirname(directory)
-    meta = prompt_missing(meta, args, hints=hints)
-    log(
-        f"Title: {meta['title']} | Author: {meta['author']} "
-        f"| Narrator: {meta['narrator']}"
-    )
-
-    # 5. Resolve output path.
-    output: Path = (
-        args.output.resolve() if args.output else _output_path(directory, meta)
-    )
-    log(f"Output: {output}")
-
-    # 6. Build chapter list and write FFMETADATA.
-    log("Generating chapter markers...")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
+
+        # 3. Locate cover image (URL download, auto-detect, or interactive prompt).
+        log("Looking for cover art...")
+        cover = _resolve_cover(args.cover, directory, tmp_dir, interactive)
+        if cover:
+            log(f"Cover art: {cover.name}")
+        else:
+            log("No cover art found — skipping")
+
+        # 4. Read and complete metadata.
+        log("Reading metadata...")
+        meta = extract_metadata(files[0])
+        hints = _hints_from_dirname(directory)
+        meta = prompt_missing(meta, args, hints=hints)
+        log(
+            f"Title: {meta['title']} | Author: {meta['author']} "
+            f"| Narrator: {meta['narrator']}"
+        )
+
+        # 5. Resolve output path.
+        output: Path = (
+            args.output.resolve() if args.output else _output_path(directory, meta)
+        )
+        log(f"Output: {output}")
+
+        # 6. Build chapter list and write FFMETADATA.
+        log("Generating chapter markers...")
         meta_file = tmp_dir / "ffmetadata.txt"
         concat_file = tmp_dir / "concat.txt"
 

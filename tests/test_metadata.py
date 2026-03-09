@@ -227,3 +227,46 @@ class TestPromptMissingNoPrompt:
         args = _args(title="T", author="A", narrator="N", no_prompt=True)
         result = prompt_missing(meta, args)
         assert result == {"title": "T", "author": "A", "narrator": "N"}
+
+
+# ---------------------------------------------------------------------------
+# prompt_missing — hints
+# ---------------------------------------------------------------------------
+
+
+class TestPromptMissingHints:
+    def test_no_prompt_uses_hint_silently(self) -> None:
+        """--no-prompt with a hint uses the hint without exiting (line 84)."""
+        meta = {"title": "", "author": "A", "narrator": "N"}
+        result = prompt_missing(
+            meta, _args(no_prompt=True), hints={"title": "Hinted Title"}
+        )
+        assert result["title"] == "Hinted Title"
+
+    def test_empty_input_accepts_hint(self) -> None:
+        """Pressing Enter with a hint available accepts the hint (line 93)."""
+        meta = {"title": "", "author": "A", "narrator": "N"}
+        with patch("builtins.input", return_value=""):
+            result = prompt_missing(meta, _args(), hints={"title": "Hinted Title"})
+        assert result["title"] == "Hinted Title"
+
+    def test_hint_shown_in_prompt_text(self) -> None:
+        """Prompt string should contain the hint in brackets."""
+        meta = {"title": "", "author": "A", "narrator": "N"}
+        prompts: list[str] = []
+
+        def _capture(p: str) -> str:
+            prompts.append(p)
+            return "custom value"
+
+        with patch("builtins.input", side_effect=_capture):
+            prompt_missing(meta, _args(), hints={"title": "My Book"})
+
+        assert any("[My Book]" in p for p in prompts)
+
+    def test_explicit_value_overrides_hint(self) -> None:
+        """Typing a value takes priority over the hint."""
+        meta = {"title": "", "author": "A", "narrator": "N"}
+        with patch("builtins.input", return_value="Typed Title"):
+            result = prompt_missing(meta, _args(), hints={"title": "Ignored Hint"})
+        assert result["title"] == "Typed Title"

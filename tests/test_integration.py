@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from m4bmaker.__main__ import _output_path, main
 
 # ---------------------------------------------------------------------------
@@ -241,3 +243,223 @@ class TestFullPipeline:
         meta = {"title": "", "author": "A", "narrator": "N"}
         p = _output_path(tmp_path, meta)
         assert p.name == "audiobook.m4b"
+
+
+# ---------------------------------------------------------------------------
+# _hints_from_dirname
+# ---------------------------------------------------------------------------
+
+
+class TestHintsDirname:
+    def test_author_title_pattern(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _hints_from_dirname
+
+        d = tmp_path / "Frank Herbert - Dune"
+        d.mkdir()
+        hints = _hints_from_dirname(d)
+        assert hints["author"] == "Frank Herbert"
+        assert hints["title"] == "Dune"
+
+    def test_title_only_when_no_separator(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _hints_from_dirname
+
+        d = tmp_path / "Just A Name"
+        d.mkdir()
+        hints = _hints_from_dirname(d)
+        assert hints["title"] == "Just A Name"
+        assert "author" not in hints
+
+    def test_strips_whitespace_around_separator(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _hints_from_dirname
+
+        d = tmp_path / "Author Name  -  Book Title"
+        d.mkdir()
+        hints = _hints_from_dirname(d)
+        assert hints["author"] == "Author Name"
+        assert hints["title"] == "Book Title"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_cover
+# ---------------------------------------------------------------------------
+
+
+class TestResolveCover:
+    def test_url_arg_downloads_cover(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _resolve_cover
+
+        expected = tmp_path / "cover.jpg"
+        with patch("m4bmaker.__main__.download_cover", return_value=expected):
+            result = _resolve_cover(
+                "https://example.com/c.jpg", tmp_path, tmp_path, False
+            )
+        assert result == expected
+
+    def test_local_path_arg_calls_find_cover(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _resolve_cover
+
+        img = tmp_path / "cover.jpg"
+        img.write_bytes(b"\x00")
+        with patch("m4bmaker.__main__.find_cover", return_value=img) as mock_fc:
+            result = _resolve_cover(str(img), tmp_path, tmp_path, False)
+        mock_fc.assert_called_once()
+        assert result == img
+
+    def test_auto_detects_when_no_arg(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _resolve_cover
+
+        img = tmp_path / "cover.jpg"
+        img.write_bytes(b"\x00")
+        with patch("m4bmaker.__main__.find_cover", return_value=img):
+            result = _resolve_cover(None, tmp_path, tmp_path, False)
+        assert result == img
+
+    def test_interactive_prompts_when_no_cover_found(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _resolve_cover
+
+        expected = tmp_path / "prompted.jpg"
+        with (
+            patch("m4bmaker.__main__.find_cover", return_value=None),
+            patch("m4bmaker.__main__._prompt_cover", return_value=expected) as mock_p,
+        ):
+            result = _resolve_cover(None, tmp_path, tmp_path, True)
+        mock_p.assert_called_once_with(tmp_path)
+        assert result == expected
+
+    def test_non_interactive_returns_none_when_no_cover(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _resolve_cover
+
+        with patch("m4bmaker.__main__.find_cover", return_value=None):
+            result = _resolve_cover(None, tmp_path, tmp_path, False)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _fetch_cover_url
+# ---------------------------------------------------------------------------
+
+
+class TestFetchCoverUrl:
+    def test_downloads_successfully(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _fetch_cover_url
+
+        expected = tmp_path / "d.jpg"
+        with patch("m4bmaker.__main__.download_cover", return_value=expected):
+            result = _fetch_cover_url("https://example.com/c.jpg", tmp_path, False)
+        assert result == expected
+
+    def test_non_interactive_exits_on_failure(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _fetch_cover_url
+
+        with patch(
+            "m4bmaker.__main__.download_cover", side_effect=ValueError("not image")
+        ):
+            with pytest.raises(SystemExit):
+                _fetch_cover_url("https://example.com/c.html", tmp_path, False)
+
+    def test_interactive_accepts_local_path_on_retry(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _fetch_cover_url
+
+        local = tmp_path / "cover.jpg"
+        local.write_bytes(b"\x00")
+        with (
+            patch("m4bmaker.__main__.download_cover", side_effect=ValueError("bad")),
+            patch("builtins.input", return_value=str(local)),
+        ):
+            result = _fetch_cover_url("https://fail.com/x.html", tmp_path, True)
+        assert result == local
+
+    def test_interactive_skips_on_empty_input(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _fetch_cover_url
+
+        with (
+            patch("m4bmaker.__main__.download_cover", side_effect=ValueError("bad")),
+            patch("builtins.input", return_value=""),
+        ):
+            result = _fetch_cover_url("https://fail.com/x.html", tmp_path, True)
+        assert result is None
+
+    def test_interactive_retries_new_url(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _fetch_cover_url
+
+        expected = tmp_path / "d.jpg"
+        call_count = [0]
+
+        def _dl(url: str, dest: Path) -> Path:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise ValueError("first fail")
+            return expected
+
+        with (
+            patch("m4bmaker.__main__.download_cover", side_effect=_dl),
+            patch("builtins.input", return_value="https://example.com/new.jpg"),
+        ):
+            result = _fetch_cover_url("https://example.com/first.jpg", tmp_path, True)
+        assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# _prompt_cover
+# ---------------------------------------------------------------------------
+
+
+class TestPromptCover:
+    def test_skips_on_empty_input(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _prompt_cover
+
+        with patch("builtins.input", return_value=""):
+            result = _prompt_cover(tmp_path)
+        assert result is None
+
+    def test_returns_existing_local_path(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _prompt_cover
+
+        img = tmp_path / "cover.jpg"
+        img.write_bytes(b"\x00")
+        with patch("builtins.input", return_value=str(img)):
+            result = _prompt_cover(tmp_path)
+        assert result == img
+
+    def test_downloads_url(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _prompt_cover
+
+        expected = tmp_path / "d.jpg"
+        with (
+            patch("builtins.input", return_value="https://example.com/c.jpg"),
+            patch("m4bmaker.__main__.download_cover", return_value=expected),
+        ):
+            result = _prompt_cover(tmp_path)
+        assert result == expected
+
+    def test_download_error_prompts_again_then_skip(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _prompt_cover
+
+        inputs = iter(["https://example.com/c.jpg", ""])
+        with (
+            patch("builtins.input", side_effect=inputs),
+            patch("m4bmaker.__main__.download_cover", side_effect=ValueError("bad")),
+        ):
+            result = _prompt_cover(tmp_path)
+        assert result is None
+
+    def test_nonexistent_path_prompts_again_then_skip(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _prompt_cover
+
+        inputs = iter([str(tmp_path / "nope.jpg"), ""])
+        with patch("builtins.input", side_effect=inputs):
+            result = _prompt_cover(tmp_path)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Full pipeline — cover image in directory
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineWithCover:
+    def test_cover_in_directory_is_embedded(self, tmp_path: Path) -> None:
+        """Cover image auto-detected in directory appears in ffmpeg command."""
+        (tmp_path / "cover.jpg").write_bytes(b"\x00")
+        cmd, _ = _run_pipeline(tmp_path)
+        assert str(tmp_path / "cover.jpg") in cmd

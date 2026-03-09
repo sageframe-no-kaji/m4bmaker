@@ -7,7 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from m4bmaker.cover import _image_area, find_cover
+from m4bmaker.cover import (
+    _ext_from_content_type,
+    _image_area,
+    download_cover,
+    find_cover,
+    is_url,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -179,3 +185,101 @@ class TestMultipleImages:
         with patch("m4bmaker.cover._image_area", side_effect=lambda p: imgs[p]):
             result = find_cover(tmp_path)
         assert result == large
+
+
+# ---------------------------------------------------------------------------
+# is_url
+# ---------------------------------------------------------------------------
+
+
+class TestIsUrl:
+    def test_http_url(self) -> None:
+        assert is_url("http://example.com/cover.jpg") is True
+
+    def test_https_url(self) -> None:
+        assert is_url("https://example.com/cover.jpg") is True
+
+    def test_local_path_false(self) -> None:
+        assert is_url("/tmp/cover.jpg") is False
+
+    def test_ftp_false(self) -> None:
+        assert is_url("ftp://example.com/cover.jpg") is False
+
+    def test_empty_string_false(self) -> None:
+        assert is_url("") is False
+
+
+# ---------------------------------------------------------------------------
+# _ext_from_content_type
+# ---------------------------------------------------------------------------
+
+
+class TestExtFromContentType:
+    def test_jpeg(self) -> None:
+        assert _ext_from_content_type("image/jpeg") == ".jpg"
+
+    def test_png(self) -> None:
+        assert _ext_from_content_type("image/png") == ".png"
+
+    def test_gif(self) -> None:
+        assert _ext_from_content_type("image/gif") == ".gif"
+
+    def test_webp(self) -> None:
+        assert _ext_from_content_type("image/webp") == ".webp"
+
+    def test_unknown_returns_empty(self) -> None:
+        assert _ext_from_content_type("image/bmp") == ""
+
+    def test_strips_charset_parameter(self) -> None:
+        assert _ext_from_content_type("image/jpeg; charset=utf-8") == ".jpg"
+
+
+# ---------------------------------------------------------------------------
+# download_cover
+# ---------------------------------------------------------------------------
+
+
+def _mock_url_response(
+    content_type: str, body: bytes = b"fake image data"
+) -> MagicMock:
+    """Build a mock context-manager response for urllib.request.urlopen."""
+    resp = MagicMock()
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    resp.headers.get.return_value = content_type
+    resp.read.return_value = body
+    return resp
+
+
+class TestDownloadCover:
+    def test_saves_jpeg_to_dest_dir(self, tmp_path: Path) -> None:
+        resp = _mock_url_response("image/jpeg")
+        with patch("urllib.request.urlopen", return_value=resp):
+            path = download_cover("https://example.com/c.jpg", tmp_path)
+        assert path.exists()
+        assert path.suffix == ".jpg"
+        assert path.read_bytes() == b"fake image data"
+
+    def test_saves_png_extension_from_content_type(self, tmp_path: Path) -> None:
+        resp = _mock_url_response("image/png", b"png data")
+        with patch("urllib.request.urlopen", return_value=resp):
+            path = download_cover("https://example.com/img", tmp_path)
+        assert path.suffix == ".png"
+
+    def test_raises_value_error_for_non_image(self, tmp_path: Path) -> None:
+        resp = _mock_url_response("text/html", b"<html/>")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(ValueError, match="did not return an image"):
+                download_cover("https://example.com/page.html", tmp_path)
+
+    def test_falls_back_to_url_extension_for_unknown_mime(self, tmp_path: Path) -> None:
+        resp = _mock_url_response("image/x-custom", b"data")
+        with patch("urllib.request.urlopen", return_value=resp):
+            path = download_cover("https://example.com/cover.jpg", tmp_path)
+        assert path.suffix == ".jpg"  # from URL path
+
+    def test_falls_back_to_jpg_when_no_extension_in_url(self, tmp_path: Path) -> None:
+        resp = _mock_url_response("image/x-custom", b"data")
+        with patch("urllib.request.urlopen", return_value=resp):
+            path = download_cover("https://example.com/cover", tmp_path)
+        assert path.suffix == ".jpg"  # hard-coded fallback

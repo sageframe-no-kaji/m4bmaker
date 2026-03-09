@@ -67,10 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cover",
         "-c",
-        type=Path,
+        type=str,
         default=None,
-        metavar="IMAGE",
-        help="Path to cover image (.jpg/.jpeg/.png). Bypasses auto-detection.",
+        metavar="IMAGE_OR_URL",
+        help=(
+            "Path or URL to a cover image (.jpg/.jpeg/.png). "
+            "Bypasses auto-detection."
+        ),
     )
     parser.add_argument(
         "--bitrate",

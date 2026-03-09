@@ -2,9 +2,60 @@
 
 from __future__ import annotations
 
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png"})
+
+_MAX_DOWNLOAD_BYTES: int = 20 * 1024 * 1024  # 20 MB safety cap
+
+
+def is_url(s: str) -> bool:
+    """Return ``True`` if *s* looks like an http or https URL."""
+    return s.startswith("http://") or s.startswith("https://")
+
+
+def _ext_from_content_type(content_type: str) -> str:
+    """Map a MIME type to a file extension (with leading dot).
+
+    Returns an empty string for unrecognised types.
+    """
+    ct = content_type.split(";")[0].strip().lower()
+    return {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+    }.get(ct, "")
+
+
+def download_cover(url: str, dest_dir: Path) -> Path:
+    """Download the image at *url* to *dest_dir* and return the local path.
+
+    Validates that the server reports an ``image/*`` Content-Type.
+
+    Raises:
+        ValueError: If the server returns a non-image Content-Type.
+        urllib.error.URLError: On network or HTTP errors.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": "m4bmaker/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+        content_type: str = resp.headers.get("Content-Type", "")
+        if not content_type.startswith("image/"):
+            raise ValueError(
+                f"URL did not return an image "
+                f"(Content-Type: {content_type!r}): {url}"
+            )
+        ext = (
+            _ext_from_content_type(content_type)
+            or Path(urllib.parse.urlparse(url).path).suffix
+            or ".jpg"
+        )
+        dest = dest_dir / f"downloaded_cover{ext}"
+        dest.write_bytes(resp.read(_MAX_DOWNLOAD_BYTES))
+    return dest
 
 
 def _image_area(path: Path) -> int:

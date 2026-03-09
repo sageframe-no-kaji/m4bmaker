@@ -107,16 +107,21 @@ class TestFlags:
         args = parse_args(["-n", "Bob Smith"])
         assert args.narrator == "Bob Smith"
 
-    def test_cover_long_is_path(self, tmp_path: Path) -> None:
-        img = tmp_path / "cover.jpg"
-        args = parse_args(["--cover", str(img)])
+    def test_cover_long_is_str(self, tmp_path: Path) -> None:
+        img = str(tmp_path / "cover.jpg")
+        args = parse_args(["--cover", img])
         assert args.cover == img
-        assert isinstance(args.cover, Path)
+        assert isinstance(args.cover, str)
 
-    def test_cover_short_is_path(self, tmp_path: Path) -> None:
-        img = tmp_path / "cover.jpg"
-        args = parse_args(["-c", str(img)])
+    def test_cover_short_is_str(self, tmp_path: Path) -> None:
+        img = str(tmp_path / "cover.jpg")
+        args = parse_args(["-c", img])
         assert args.cover == img
+
+    def test_cover_accepts_url(self) -> None:
+        url = "https://example.com/cover.jpg"
+        args = parse_args(["--cover", url])
+        assert args.cover == url
 
     def test_bitrate_long(self) -> None:
         args = parse_args(["--bitrate", "128k"])
