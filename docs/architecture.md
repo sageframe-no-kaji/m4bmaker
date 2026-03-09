@@ -3,7 +3,7 @@
 ## Module Dependency Map
 
 ```
-make_m4b.py
+make_m4b.py → m4bmaker/__main__.py
     ├── m4bmaker/cli.py          parse_args()          → argparse.Namespace
     ├── m4bmaker/utils.py        find_ffmpeg()         → str (path)
     │                            find_ffprobe()        → str (path)
@@ -20,7 +20,7 @@ make_m4b.py
 ```
 
 No module imports from another module — all cross-module communication happens
-through `make_m4b.py`. This keeps each module independently testable.
+through `m4bmaker/__main__.py`. This keeps each module independently testable.
 
 ---
 
@@ -83,11 +83,11 @@ the size of stereo at the same perceived quality. Users who need stereo pass
 `--stereo`.
 
 ### Temporary directory for intermediate files
-`make_m4b.py` creates one `tempfile.TemporaryDirectory()` for the session and
+`m4bmaker/__main__.py` creates one `tempfile.TemporaryDirectory()` for the session and
 writes both `ffmetadata.txt` and `concat.txt` inside it. The directory is
 automatically deleted when the `with` block exits, even on failure.
 
 ### Single entry point
-`make_m4b.py` is intentionally thin — it contains only wiring and logging, no
+`m4bmaker/__main__.py` is intentionally thin — it contains only wiring and logging, no
 business logic. This keeps each module independently importable and testable
 without invoking the full pipeline.

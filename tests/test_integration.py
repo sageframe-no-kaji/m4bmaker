@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import make_m4b
-from make_m4b import _output_path, main
+import m4bmaker.__main__
+from m4bmaker.__main__ import _output_path, main
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ def _run_pipeline(
         patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
         patch("m4bmaker.chapters.get_duration", return_value=duration),
         patch("m4bmaker.encoder.subprocess.run", side_effect=_fake_ffmpeg_run),
-        patch("make_m4b.parse_args", return_value=parsed),
+        patch("m4bmaker.__main__.parse_args", return_value=parsed),
     ):
         main()
 
@@ -169,7 +169,7 @@ class TestFullPipeline:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.run", return_value=_ffmpeg_result()),
-            patch("make_m4b.parse_args", return_value=parsed),
+            patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):
             main()
@@ -200,7 +200,7 @@ class TestFullPipeline:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.run", return_value=_ffmpeg_result()),
-            patch("make_m4b.parse_args", return_value=parsed),
+            patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):
             main()

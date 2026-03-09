@@ -37,7 +37,7 @@ pip install -r requirements-dev.txt
 
 ```bash
 # All tests with coverage report
-pytest tests/ --cov=m4bmaker --cov=make_m4b --cov-report=term-missing
+pytest tests/ --cov=m4bmaker --cov-report=term-missing
 
 # A single test file
 pytest tests/test_chapters.py -v
@@ -62,10 +62,10 @@ black .
 black --check .
 
 # Lint
-flake8 m4bmaker/ make_m4b.py tests/
+flake8 m4bmaker/ tests/
 
 # Type check (strict)
-mypy m4bmaker/ make_m4b.py
+mypy m4bmaker/
 ```
 
 Configuration lives in `pyproject.toml` (black) and `setup.cfg` (flake8, mypy).
@@ -126,7 +126,7 @@ tests/             # pytest test suite (mirrors package 1:1)
 docs/              # long-form documentation
 man/               # troff/groff man page
 devlog/            # original prompt spec and living plan (not imported)
-make_m4b.py        # CLI entry point
+m4bmaker/          # production source package (includes __main__.py entry point)
 pyproject.toml     # build system + tool config (black, pytest)
 setup.cfg          # flake8 + mypy config
 requirements.txt   # runtime deps

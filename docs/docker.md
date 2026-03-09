@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt pyproject.toml make_m4b.py ./
+COPY requirements.txt pyproject.toml ./
 COPY m4bmaker/ m4bmaker/
 
 RUN pip install --no-cache-dir .

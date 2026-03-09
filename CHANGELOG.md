@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`m4bmaker/cli.py`** — `argparse` parser with flags: `directory`, `--output`,
   `--title`, `--author`, `--narrator`, `--cover`, `--bitrate`, `--stereo`,
   `--no-prompt`.
-- **`make_m4b.py`** — thin entry point wiring all modules with progress logging.
+- **`m4bmaker/__main__.py`** — thin entry point wiring all modules with progress logging.
+  Enables both `m4bmaker` (installed command) and `python -m m4bmaker`.
 - **`tests/`** — comprehensive `pytest` suite (143 tests, 99% coverage) covering all
   eight modules and a full integration pipeline with mocked subprocess calls.
 - **`man/m4bmaker.1`** — troff/groff man page with NAME, SYNOPSIS, DESCRIPTION,
