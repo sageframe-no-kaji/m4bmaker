@@ -872,3 +872,65 @@ class TestInteractiveChapterEdit:
         # _print_chapter_table calls print() which capsys captures
         assert "Chapters (1)" in captured.out
         assert "Prologue" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# --chapters-file integration
+# ---------------------------------------------------------------------------
+
+
+class TestChaptersFileIntegration:
+    def test_chapters_file_overrides_auto_chapters(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--chapters-file replaces the auto-detected chapters in main()."""
+        from m4bmaker.__main__ import main
+        from m4bmaker.cli import parse_args as real_parse_args
+
+        _make_stub_mp3(tmp_path / "01.mp3")
+        chapters_file = tmp_path / "chapters.txt"
+        chapters_file.write_text(
+            "00:00 Custom Intro\n05:00 Custom Middle\n", encoding="utf-8"
+        )
+
+        argv = [
+            str(tmp_path),
+            "--title",
+            "T",
+            "--author",
+            "A",
+            "--narrator",
+            "N",
+            "--no-prompt",
+            "--chapters-file",
+            str(chapters_file),
+        ]
+        parsed = real_parse_args(argv)
+
+        written: list[str] = []
+        _orig = Path.write_text
+
+        def _capture(
+            self_path: Path, text: str, *args: object, **kwargs: object
+        ) -> None:
+            if "ffmetadata" in str(self_path):
+                written.append(text)
+            _orig(self_path, text, *args, **kwargs)  # type: ignore[call-arg]
+
+        with (
+            patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("m4bmaker.chapters.get_duration", return_value=10.0),
+            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.__main__.parse_args", return_value=parsed),
+            patch.object(Path, "write_text", _capture),
+        ):
+            main()
+
+        assert written, "ffmetadata was never written"
+        assert "Custom Intro" in written[0]
+        assert "Custom Middle" in written[0]
+        # Two chapters from file, not one from the single audio file
+        assert written[0].count("[CHAPTER]") == 2
+
+        out = capsys.readouterr().out
+        assert "Loaded 2 chapter(s) from chapters.txt" in out

@@ -116,6 +116,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Encode in stereo (2 channels). Default is mono (1 channel).",
     )
     parser.add_argument(
+        "--chapters-file",
+        dest="chapters_file",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Path to a plain-text chapter list. "
+            "Each non-blank line must be: TIMESTAMP TITLE\n"
+            "where TIMESTAMP is MM:SS or H:MM:SS. "
+            "When supplied, overrides the auto-generated chapter markers."
+        ),
+    )
+    parser.add_argument(
         "--no-prompt",
         dest="no_prompt",
         action="store_true",

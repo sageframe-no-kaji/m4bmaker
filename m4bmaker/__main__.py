@@ -8,6 +8,7 @@ from pathlib import Path
 
 from m4bmaker import __version__
 from m4bmaker.chapters import format_chapter_table
+from m4bmaker.chapters_file import load_chapters_file
 from m4bmaker.cli import parse_args
 from m4bmaker.cover import download_cover, find_cover, is_url
 from m4bmaker.encoder import _render_bar
@@ -248,7 +249,15 @@ def main() -> None:
         log("Scanning audio files…")
         book = load_audiobook(directory, ffprobe, progress_fn=_probe_progress)
         log(f"Found {len(book.files)} audio file(s)")
-        log(f"Generated {len(book.chapters)} chapter(s)")
+
+        # 3b. Override chapters from --chapters-file if supplied.
+        if args.chapters_file:
+            book.chapters = load_chapters_file(args.chapters_file)
+            log(
+                f"Loaded {len(book.chapters)} chapter(s) from {args.chapters_file.name}"
+            )
+        else:
+            log(f"Generated {len(book.chapters)} chapter(s)")
 
         # Override cover with resolved value (interactive or CLI-supplied).
         book.cover = cover
