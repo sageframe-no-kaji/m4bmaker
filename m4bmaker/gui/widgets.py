@@ -179,9 +179,14 @@ class CoverWidget(QFrame):
         self._build()
 
     def _build(self) -> None:
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet(
+            "CoverWidget { background-color: #faf8f4; border: 1px solid #d0c9be;"
+            " border-radius: 4px; } "
+        )
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         self._thumb = QLabel()

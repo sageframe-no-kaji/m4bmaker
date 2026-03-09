@@ -36,7 +36,7 @@ QGroupBox {
     background-color: #ebe6dd;
     border: 1px solid #d0c9be;
     border-radius: 4px;
-    margin-top: 8px;
+    margin-top: 18px;
     font-size: 11px;
     font-weight: 600;
     color: #7a7a7a;
@@ -47,9 +47,12 @@ QGroupBox {
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 10px;
-    padding: 0 4px;
+    left: 8px;
+    top: -9px;
+    padding: 2px 8px;
     background-color: #ebe6dd;
+    border: 1px solid #d0c9be;
+    border-radius: 3px;
 }
 
 /* ── Labels ──────────────────────────────────────────────────────────── */
