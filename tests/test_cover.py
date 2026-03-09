@@ -14,7 +14,7 @@ from m4bmaker.cover import _image_area, find_cover
 # Helpers
 # ---------------------------------------------------------------------------
 
-def write_image(path: Path, width: int = 100, height: int = 100) -> Path:
+def write_image(path: Path) -> Path:
     """Write a minimal PNG-like stub (real Pillow won't open it, but path exists)."""
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
     return path
@@ -58,20 +58,8 @@ class TestImageArea:
         with patch.dict(sys.modules, {"PIL": None, "PIL.Image": None}):
             area = _image_area(img)
 
+
         assert area == 0
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def write_image(path: Path, width: int = 100, height: int = 100) -> Path:
-    """Write a minimal PNG-like stub (real Pillow won't open it, but path exists)."""
-    path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
-    return path
 
 
 # ---------------------------------------------------------------------------
