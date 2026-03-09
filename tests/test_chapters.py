@@ -261,3 +261,102 @@ class TestWriteFFMetadata:
         write_ffmetadata(chapters, meta, dest)
         raw = dest.read_bytes()
         raw.decode("utf-8")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# _format_chapter_ms
+# ---------------------------------------------------------------------------
+
+
+class TestFormatChapterMs:
+    def test_zero(self) -> None:
+        from m4bmaker.chapters import _format_chapter_ms
+
+        assert _format_chapter_ms(0) == "0:00:00"
+
+    def test_seconds_only(self) -> None:
+        from m4bmaker.chapters import _format_chapter_ms
+
+        assert _format_chapter_ms(45_000) == "0:00:45"
+
+    def test_minutes_and_seconds(self) -> None:
+        from m4bmaker.chapters import _format_chapter_ms
+
+        assert _format_chapter_ms(90_000) == "0:01:30"
+
+    def test_full_hour(self) -> None:
+        from m4bmaker.chapters import _format_chapter_ms
+
+        assert _format_chapter_ms(3_600_000) == "1:00:00"
+
+    def test_complex_value(self) -> None:
+        from m4bmaker.chapters import _format_chapter_ms
+
+        # 2h 43m 34s → 9814 seconds
+        assert _format_chapter_ms(9_814_000) == "2:43:34"
+
+
+# ---------------------------------------------------------------------------
+# format_chapter_table
+# ---------------------------------------------------------------------------
+
+
+class TestFormatChapterTable:
+    def test_empty_returns_placeholder(self) -> None:
+        from m4bmaker.chapters import format_chapter_table
+
+        result = format_chapter_table([])
+        assert "no chapters" in result
+
+    def test_single_chapter_contains_title(self) -> None:
+        from m4bmaker.chapters import format_chapter_table
+
+        ch = Chapter(title="Prologue", start_ms=0, end_ms=60_000)
+        result = format_chapter_table([ch])
+        assert "Prologue" in result
+        assert "0:00:00" in result
+
+    def test_multiple_chapters_all_present(self) -> None:
+        from m4bmaker.chapters import format_chapter_table
+
+        chapters = [
+            Chapter(title="Intro", start_ms=0, end_ms=60_000),
+            Chapter(title="The Storm", start_ms=60_000, end_ms=180_000),
+            Chapter(title="Aftermath", start_ms=180_000, end_ms=300_000),
+        ]
+        result = format_chapter_table(chapters)
+        assert "Intro" in result
+        assert "The Storm" in result
+        assert "Aftermath" in result
+        assert "0:01:00" in result
+        assert "0:03:00" in result
+
+    def test_long_title_truncated(self) -> None:
+        from m4bmaker.chapters import format_chapter_table
+
+        long_title = "A" * 50
+        ch = Chapter(title=long_title, start_ms=0, end_ms=1000)
+        result = format_chapter_table([ch])
+        # Should be truncated with ellipsis, not show all 50 chars
+        assert long_title not in result
+        assert "\u2026" in result
+
+    def test_box_drawing_characters_present(self) -> None:
+        from m4bmaker.chapters import format_chapter_table
+
+        ch = Chapter(title="Ch", start_ms=0, end_ms=1000)
+        result = format_chapter_table([ch])
+        assert "\u250c" in result  # ┌
+        assert "\u2514" in result  # └
+        assert "\u2502" in result  # │
+
+    def test_correct_row_count(self) -> None:
+        from m4bmaker.chapters import format_chapter_table
+
+        chapters = [
+            Chapter(title=f"Ch {i}", start_ms=i * 1000, end_ms=(i + 1) * 1000)
+            for i in range(5)
+        ]
+        lines = format_chapter_table(chapters).splitlines()
+        # 3 header lines (top, header, sep) + 5 data rows + 1 bottom = 9
+        assert len(lines) == 9

@@ -5,9 +5,12 @@ m4bmaker \- convert a directory of audio files into a single .m4b audiobook
 .B m4bmaker
 [\fIDIRECTORY\fR]
 [\fB\-o\fR \fIPATH\fR]
+[\fB\-O\fR \fIDIR\fR]
+[\fB\-\-flat\fR]
 [\fB\-t\fR \fITITLE\fR]
 [\fB\-a\fR \fIAUTHOR\fR]
 [\fB\-n\fR \fINARRATOR\fR]
+[\fB\-g\fR \fIGENRE\fR]
 [\fB\-c\fR \fIIMAGE\fR]
 [\fB\-b\fR \fIBITRATE\fR]
 [\fB\-\-stereo\fR]
@@ -28,8 +31,16 @@ Cover art is auto-detected from image files in \fIDIRECTORY\fR; when multiple
 candidates exist the one with the largest pixel area is chosen.
 Use \fB\-c\fR to specify a cover image path explicitly.
 .PP
-The output filename defaults to \fI<Title> \- <Author>.m4b\fR inside
-\fIDIRECTORY\fR. Use \fB\-o\fR to override this.
+After probing, a chapter preview table is printed showing the number, start
+time, and title of each chapter. In interactive mode you are then asked whether
+to rename any titles before encoding begins. Press Enter to keep a title or
+type a replacement. Pass \fB\-\-no\-prompt\fR to suppress the table and skip
+the rename step.
+.PP
+By default the output file is written to
+\fI<Author>/<Title>/<Author> \- <Title>.m4b\fR relative to the current working
+directory. Use \fB\-O\fR to choose a different base directory or \fB\-\-flat\fR
+to skip the \fIAuthor/Title/\fR nesting. Use \fB\-o\fR to specify an exact path.
 .SH OPTIONS
 .TP
 .B DIRECTORY
@@ -39,10 +50,17 @@ Directory containing the audio files.
 Defaults to the current working directory.
 .TP
 \fB\-o\fR, \fB\-\-output\fR \fIPATH\fR
-Output \fI.m4b\fR file path.
-If omitted, the filename is derived as
-\fI<Title> \- <Author>.m4b\fR inside \fIDIRECTORY\fR,
-or \fIaudiobook.m4b\fR if metadata is unavailable.
+Exact output \fI.m4b\fR file path.
+Overrides the organized \fIAuthor/Title/\fR layout entirely.
+.TP
+\fB\-O\fR, \fB\-\-output\-dir\fR \fIDIR\fR
+Base directory for the organized output layout.
+Defaults to the current working directory.
+Ignored when \fB\-o\fR is given.
+.TP
+.B \-\-flat
+Write the \fI.m4b\fR directly into the output directory without creating
+\fIAuthor/Title/\fR subdirectories.
 .TP
 \fB\-t\fR, \fB\-\-title\fR \fITITLE\fR
 Book title. Overrides tag extraction and skips the interactive title prompt.
@@ -52,6 +70,10 @@ Author name. Overrides tag extraction and skips the interactive author prompt.
 .TP
 \fB\-n\fR, \fB\-\-narrator\fR \fINARRATOR\fR
 Narrator name. Overrides tag extraction and skips the interactive narrator prompt.
+.TP
+\fB\-g\fR, \fB\-\-genre\fR \fIGENRE\fR
+Genre tag embedded in the \fI.m4b\fR.
+Default: \fBAudiobook\fR.
 .TP
 \fB\-c\fR, \fB\-\-cover\fR \fIIMAGE\fR
 Path to a cover image (\fI.jpg\fR, \fI.jpeg\fR, or \fI.png\fR).
@@ -89,11 +111,14 @@ Fully non-interactive (suitable for scripts and Docker):
 .B m4bmaker /books/Dune \-t Dune \-a \(aqFrank Herbert\(aq \-n \(aqScott Brick\(aq \-\-no\-prompt
 .SH FILES
 .TP
-.I <DIRECTORY>/<Title> \- <Author>.m4b
-Default output path when title and author are both known.
+.I <Author>/<Title>/<Author> \- <Title>.m4b
+Default output path (relative to output\-dir) when title and author are both known.
 .TP
-.I <DIRECTORY>/audiobook.m4b
-Fallback output path when title is unavailable.
+.I <Author> \- <Title>.m4b
+Output path when \fB\-\-flat\fR is used and metadata is available.
+.TP
+.I audiobook.m4b
+Fallback output filename when title is unavailable.
 .TP
 .I /tmp/m4bmaker_*/ffmetadata.txt
 Temporary FFMETADATA file holding chapter timestamps; removed after encoding.

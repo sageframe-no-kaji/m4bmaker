@@ -7,7 +7,12 @@ import tempfile
 from pathlib import Path
 
 from m4bmaker import __version__
-from m4bmaker.chapters import build_chapters, write_ffmetadata
+from m4bmaker.chapters import (
+    Chapter,
+    build_chapters,
+    format_chapter_table,
+    write_ffmetadata,
+)
 from m4bmaker.cli import parse_args
 from m4bmaker.cover import download_cover, find_cover, is_url
 from m4bmaker.encoder import _render_bar, encode, write_concat_list
@@ -52,6 +57,32 @@ def _confirm_output(proposed: Path, interactive: bool) -> Path:
     if not value:
         return proposed
     return Path(value).expanduser().resolve()
+
+
+def _print_chapter_table(chapters: list[Chapter]) -> None:
+    """Print the chapter preview table to stdout (TTY + interactive only)."""
+    print(f"\n  Chapters ({len(chapters)})")
+    print(format_chapter_table(chapters))
+    print()
+
+
+def _edit_chapters_inline(chapters: list[Chapter]) -> list[Chapter]:
+    """Interactively edit chapter titles one by one.
+
+    For each chapter the current title is shown as a prefill; pressing Enter
+    keeps it, typing a new value replaces it.
+    """
+    edited: list[Chapter] = []
+    for i, ch in enumerate(chapters, 1):
+        value = input(f"  Chapter {i} [{ch.title}]: ").strip()
+        edited.append(
+            Chapter(
+                title=value if value else ch.title,
+                start_ms=ch.start_ms,
+                end_ms=ch.end_ms,
+            )
+        )
+    return edited
 
 
 def _hints_from_dirname(directory: Path) -> dict[str, str]:
@@ -252,8 +283,16 @@ def main() -> None:
             ffprobe,
             progress_fn=_probe_progress,
         )
-        write_ffmetadata(chapters, meta, meta_file)
         log(f"Generated {len(chapters)} chapter(s)")
+
+        # 6b. Chapter preview + optional inline editing (interactive only).
+        if interactive and sys.stdout.isatty():
+            _print_chapter_table(chapters)
+            answer = input("  Edit chapter titles? [y/N]: ").strip().lower()
+            if answer == "y":
+                chapters = _edit_chapters_inline(chapters)
+
+        write_ffmetadata(chapters, meta, meta_file)
 
         # 7. Write concat list.
         write_concat_list(files, concat_file)

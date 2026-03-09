@@ -718,3 +718,103 @@ class TestConfirmCover:
         ):
             result = _confirm_cover(None, tmp_path, interactive=True)
         assert result == real
+
+
+# ---------------------------------------------------------------------------
+# _edit_chapters_inline
+# ---------------------------------------------------------------------------
+
+
+class TestEditChaptersInline:
+    def test_enter_keeps_existing_title(self) -> None:
+        from m4bmaker.__main__ import _edit_chapters_inline
+        from m4bmaker.chapters import Chapter
+
+        chapters = [Chapter(title="Prologue", start_ms=0, end_ms=5000)]
+        with patch("builtins.input", return_value=""):
+            result = _edit_chapters_inline(chapters)
+        assert result[0].title == "Prologue"
+
+    def test_typed_value_replaces_title(self) -> None:
+        from m4bmaker.__main__ import _edit_chapters_inline
+        from m4bmaker.chapters import Chapter
+
+        chapters = [Chapter(title="Old Title", start_ms=0, end_ms=5000)]
+        with patch("builtins.input", return_value="New Title"):
+            result = _edit_chapters_inline(chapters)
+        assert result[0].title == "New Title"
+
+    def test_timestamps_preserved_unchanged(self) -> None:
+        from m4bmaker.__main__ import _edit_chapters_inline
+        from m4bmaker.chapters import Chapter
+
+        chapters = [Chapter(title="Ch", start_ms=1000, end_ms=5000)]
+        with patch("builtins.input", return_value="Renamed"):
+            result = _edit_chapters_inline(chapters)
+        assert result[0].start_ms == 1000
+        assert result[0].end_ms == 5000
+
+    def test_mixed_keep_and_replace(self) -> None:
+        from m4bmaker.__main__ import _edit_chapters_inline
+        from m4bmaker.chapters import Chapter
+
+        chapters = [
+            Chapter(title="Intro", start_ms=0, end_ms=1000),
+            Chapter(title="Part One", start_ms=1000, end_ms=2000),
+            Chapter(title="Outro", start_ms=2000, end_ms=3000),
+        ]
+        inputs = iter(["", "The Middle", ""])
+        with patch("builtins.input", side_effect=inputs):
+            result = _edit_chapters_inline(chapters)
+        assert result[0].title == "Intro"
+        assert result[1].title == "The Middle"
+        assert result[2].title == "Outro"
+
+    def test_returns_same_count(self) -> None:
+        from m4bmaker.__main__ import _edit_chapters_inline
+        from m4bmaker.chapters import Chapter
+
+        chapters = [
+            Chapter(title=f"Ch {i}", start_ms=i * 1000, end_ms=(i + 1) * 1000)
+            for i in range(4)
+        ]
+        with patch("builtins.input", return_value=""):
+            result = _edit_chapters_inline(chapters)
+        assert len(result) == 4
+
+
+# ---------------------------------------------------------------------------
+# Chapter table + edit in pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestChapterTableInPipeline:
+    def test_table_suppressed_with_no_prompt(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Chapter table must NOT be shown when --no-prompt is set."""
+        _run_pipeline(tmp_path)  # _run_pipeline always uses --no-prompt
+        captured = capsys.readouterr()
+        assert "\u250c" not in captured.out  # no ┌ box drawing
+
+    def test_table_shown_on_interactive_tty(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Chapter table IS shown when interactive and stdout is a TTY."""
+        from m4bmaker.__main__ import _print_chapter_table
+        from m4bmaker.chapters import Chapter
+
+        chapters = [Chapter(title="Intro", start_ms=0, end_ms=5000)]
+        _print_chapter_table(chapters)
+        captured = capsys.readouterr()
+        assert "Intro" in captured.out
+        assert "0:00:00" in captured.out
+        assert "Chapters (1)" in captured.out
+
+    def test_edit_prompt_not_shown_with_no_prompt(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The 'Edit chapter titles?' prompt must not appear in --no-prompt mode."""
+        _run_pipeline(tmp_path)
+        captured = capsys.readouterr()
+        assert "Edit chapter titles" not in captured.out

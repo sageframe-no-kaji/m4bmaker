@@ -102,9 +102,14 @@ make_m4b /books/Dune \
   --narrator "Scott Brick" \
   --no-prompt
 
-The output file is placed inside the input directory and named:
+By default the output file is placed in a structured subdirectory relative to
+the current directory and named:
 
-<Title> - <Author>.m4b
+<Author>/<Title>/<Author> - <Title>.m4b
+
+Use `--output-dir DIR` to set a custom base directory, or `--flat` to skip the
+`Author/Title/` nesting and write the `.m4b` directly into the output directory.
+Use `--output PATH` to specify an exact path.
 
 If metadata is unavailable, the default name is:
 
@@ -124,10 +129,22 @@ $ make_m4b Dune
 
 ✔ Probing files
 ✔ Generating chapter markers
+
+  Chapters (3)
+  ┌───┬──────────┬─────────────────────┐
+  │ # │  Start   │ Title               │
+  ├───┼──────────┼─────────────────────┤
+  │ 1 │ 0:00:00  │ Arrakis             │
+  │ 2 │ 0:22:14  │ The Fremen          │
+  │ 3 │ 0:48:03  │ The Desert          │
+  └───┴──────────┴─────────────────────┘
+
+  Edit chapter titles? [y/N]: N
+
 ✔ Encoding with ffmpeg
 ✔ Writing metadata
 
-Created: Dune - Frank Herbert.m4b
+Created: Frank Herbert/Dune/Frank Herbert - Dune.m4b
 
 
 ⸻
@@ -138,10 +155,13 @@ make_m4b [DIRECTORY] [options]
 
 Flag	Short	Default	Description
 DIRECTORY		cwd	Directory containing the audio files
---output PATH	-o	auto	Output .m4b path
+--output PATH	-o	auto	Exact output .m4b path (overrides organized layout)
+--output-dir DIR	-O	cwd	Base directory for organized `Author/Title/` output
+--flat		off	Write .m4b directly into output-dir; skip sub-directories
 --title TITLE	-t	from tags	Book title
 --author AUTHOR	-a	from tags	Author name
 --narrator NAME	-n	prompted	Narrator name
+--genre GENRE	-g	Audiobook	Genre tag embedded in the .m4b
 --cover IMAGE	-c	auto	Cover image path (.jpg/.png)
 --bitrate RATE	-b	96k	Audio bitrate (e.g. 128k)
 --stereo		mono	Encode in stereo (2 channels)
@@ -149,6 +169,28 @@ DIRECTORY		cwd	Directory containing the audio files
 
 
 ⸻
+
+Chapter Preview
+
+After probing, m4bmaker prints a chapter preview table so you can review the
+automatically generated titles before encoding begins:
+
+  Chapters (3)
+  ┌───┬──────────┬─────────────────────┐
+  │ # │  Start   │ Title               │
+  ├───┼──────────┼─────────────────────┤
+  │ 1 │ 0:00:00  │ Arrakis             │
+  │ 2 │ 0:22:14  │ The Fremen          │
+  │ 3 │ 0:48:03  │ The Desert          │
+  └───┴──────────┴─────────────────────┘
+
+  Edit chapter titles? [y/N]:
+
+Type `y` and press Enter to rename titles one by one. Pressing Enter on any
+chapter keeps the existing name. The table and prompt are suppressed when
+`--no-prompt` is set.
+
+---
 
 Chapter Timestamps
 
