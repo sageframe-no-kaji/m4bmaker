@@ -852,3 +852,100 @@ class TestQueueIntegration:
         with patch.object(w._queue_window, "apply_stylesheet") as mock_apply:
             w._toggle_dark_mode()
         mock_apply.assert_called_once_with(True)
+
+
+# ── Split into chapters ───────────────────────────────────────────────────────
+
+
+class TestSplitIntoChapters:
+    def test_split_btn_exists(self, win):
+        w, _ = win
+        assert hasattr(w, "_split_btn")
+
+    def test_split_btn_hidden_in_build_mode(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        assert not w._split_btn.isVisible()
+
+    def test_split_btn_visible_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        w._mode = "edit"
+        w._book = _make_book(tmp_path)
+        w._update_controls()
+        assert w._split_btn.isVisible()
+
+    def test_split_btn_disabled_initially(self, win):
+        w, _ = win
+        w._mode = "edit"
+        w._update_controls()
+        # no book loaded → disabled
+        assert not w._split_btn.isEnabled()
+
+    def test_split_btn_enabled_after_load_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        w._mode = "edit"
+        w._book = _make_book(tmp_path)
+        w._update_controls()
+        assert w._split_btn.isEnabled()
+
+    def test_on_split_noop_when_no_book(self, win):
+        w, _ = win
+        w._on_split_chapters()  # should not raise
+
+    def test_on_split_noop_when_no_source_path(self, win, tmp_path):
+        w, _ = win
+        w._mode = "edit"
+        w._book = _make_book(tmp_path)
+        # folder_zone path is None
+        w._on_split_chapters()  # should not raise
+
+    def test_on_split_starts_worker(self, win, tmp_path):
+        from unittest.mock import PropertyMock
+
+        from m4bmaker.gui.worker import SplitWorker
+
+        w, _ = win
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        w._mode = "edit"
+        w._book = _make_book(tmp_path)
+        w._folder_zone._edit.setText(str(m4b))
+        w._m4b_total_duration = 120.0
+
+        out_dir = str(tmp_path / "chapters")
+        with patch("m4bmaker.gui.window.QFileDialog.getExistingDirectory", return_value=out_dir):
+            with patch.object(SplitWorker, "start"):
+                w._on_split_chapters()
+        assert w._split_worker is not None
+
+    def test_on_split_noop_when_dialog_cancelled(self, win, tmp_path):
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        w, _ = win
+        w._mode = "edit"
+        w._book = _make_book(tmp_path)
+        w._folder_zone._edit.setText(str(m4b))
+
+        with patch("m4bmaker.gui.window.QFileDialog.getExistingDirectory", return_value=""):
+            w._on_split_chapters()
+        assert w._split_worker is None
+
+    def test_on_split_finished_updates_status(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        out = tmp_path / "chapters"
+        out.mkdir()
+        w._on_split_finished(out)
+        assert "chapters" in w._status_label.text().lower() or "split" in w._status_label.text().lower()
+
+    def test_on_split_error_shows_dialog(self, win, tmp_path):
+        from PySide6.QtWidgets import QMessageBox
+
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        with patch.object(QMessageBox, "critical") as mock_crit:
+            w._on_split_error("ffmpeg died")
+        mock_crit.assert_called_once()
+        assert "split" in w._status_label.text().lower() or "failed" in w._status_label.text().lower()

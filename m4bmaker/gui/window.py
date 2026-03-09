@@ -64,6 +64,7 @@ from m4bmaker.gui.worker import (
     LoadWorker,
     PreflightWorker,
     SaveChaptersWorker,
+    SplitWorker,
 )
 from m4bmaker.gui.job import job_from_book
 from m4bmaker.gui.queue_manager import QueueManager
@@ -131,6 +132,7 @@ class MainWindow(QMainWindow):
         self._preflight_worker: Optional[PreflightWorker] = None
         self._preflight_sample_rate: Optional[int] = None
         self._save_worker: Optional[SaveChaptersWorker] = None
+        self._split_worker: Optional[SplitWorker] = None
         self._extra_windows: list["MainWindow"] = []
         self._queue_manager = QueueManager()
         self._queue_window: Optional[QueueWindow] = None
@@ -515,7 +517,15 @@ class MainWindow(QMainWindow):
         self._add_to_queue_btn.setToolTip("Add this book to the encode queue (⌘⇧Q to open queue)")
         self._add_to_queue_btn.clicked.connect(self._on_add_to_queue)
 
+        self._split_btn = QPushButton("✂  Split into Chapters")
+        self._split_btn.setObjectName("splitBtn")
+        self._split_btn.setFixedHeight(44)
+        self._split_btn.setToolTip("Export each chapter as a separate audio file")
+        self._split_btn.clicked.connect(self._on_split_chapters)
+        self._split_btn.setVisible(False)
+
         btn_row.addStretch()
+        btn_row.addWidget(self._split_btn)
         btn_row.addWidget(self._add_to_queue_btn)
         btn_row.addWidget(self._convert_btn)
         btn_row.addStretch()
@@ -550,6 +560,8 @@ class MainWindow(QMainWindow):
             self._convert_worker is not None and self._convert_worker.isRunning()
         ) or (
             self._save_worker is not None and self._save_worker.isRunning()
+        ) or (
+            self._split_worker is not None and self._split_worker.isRunning()
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
@@ -576,8 +588,11 @@ class MainWindow(QMainWindow):
         has_book = self._book is not None
         busy = self._convert_worker is not None and self._convert_worker.isRunning()
         save_busy = self._save_worker is not None and self._save_worker.isRunning()
-        self._convert_btn.setEnabled(has_book and not busy and not save_busy)
+        split_busy = self._split_worker is not None and self._split_worker.isRunning()
+        self._convert_btn.setEnabled(has_book and not busy and not save_busy and not split_busy)
         self._add_to_queue_btn.setEnabled(has_book and self._mode == "build")
+        self._split_btn.setVisible(self._mode == "edit")
+        self._split_btn.setEnabled(has_book and not split_busy and not save_busy)
         self._tabs.setTabEnabled(1, has_book)
         if self._mode == "edit":
             self._convert_btn.setText("Save Chapter Edits")
@@ -638,6 +653,48 @@ class MainWindow(QMainWindow):
         return book
 
     # ── Slots ─────────────────────────────────────────────────────────────────
+
+    def _on_split_chapters(self) -> None:
+        if self._book is None:
+            return
+        source = self._folder_zone.path()
+        if source is None:
+            return
+        default_dir = source.parent / (source.stem + " - Chapters")
+        out_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Choose output folder for chapter files",
+            str(default_dir.parent),
+        )
+        if not out_dir:
+            return
+        chapters = self._gather_chapters_from_table()
+        self._progress_bar.setVisible(True)
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        self._set_status("Splitting into chapters…")
+        self._split_btn.setEnabled(False)
+        self._split_worker = SplitWorker(
+            source=source,
+            chapters=chapters,
+            total_duration=self._m4b_total_duration,
+            output_dir=Path(out_dir),
+        )
+        self._split_worker.progress.connect(self._on_progress)
+        self._split_worker.finished.connect(self._on_split_finished)
+        self._split_worker.error.connect(self._on_split_error)
+        self._split_worker.start()
+
+    def _on_split_finished(self, out_dir: object) -> None:
+        self._progress_bar.setVisible(False)
+        self._update_controls()
+        self._set_status(f"Split complete → {Path(out_dir).name}/")
+
+    def _on_split_error(self, msg: str) -> None:
+        self._progress_bar.setVisible(False)
+        self._update_controls()
+        self._set_status("Split failed.")
+        QMessageBox.critical(self, "Split Error", msg)
 
     def _collect_job(self):
         """Snapshot current GUI state as a Job for the queue."""

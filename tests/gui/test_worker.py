@@ -14,6 +14,7 @@ from m4bmaker.gui.worker import (  # noqa: E402
     PreflightWorker,
     LoadM4bWorker,
     SaveChaptersWorker,
+    SplitWorker,
 )  # noqa: E402
 from m4bmaker.models import Book, BookMetadata, Chapter, PipelineResult  # noqa: E402
 
@@ -336,3 +337,67 @@ class TestSaveChaptersWorker:
 
         qapp.processEvents()
         assert errors == ["oops"]
+
+
+# ── SplitWorker ───────────────────────────────────────────────────────────────
+
+
+class TestSplitWorker:
+    @staticmethod
+    def _chapters(tmp_path: Path):
+        f = tmp_path / "book.m4b"
+        f.write_bytes(b"\x00")
+        return [
+            Chapter(index=1, start_time=0.0, title="Intro", source_file=f),
+            Chapter(index=2, start_time=30.0, title="Part Two", source_file=f),
+        ]
+
+    def test_emits_finished_on_success(self, qapp, tmp_path):
+        source = tmp_path / "book.m4b"
+        source.write_bytes(b"\x00")
+        out_dir = tmp_path / "chapters"
+        results = []
+
+        import subprocess
+        mock_result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with patch("subprocess.run", return_value=mock_result):
+            worker = SplitWorker(source, self._chapters(tmp_path), 60.0, out_dir)
+            worker.finished.connect(results.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert len(results) == 1
+        assert Path(results[0]) == out_dir
+
+    def test_emits_error_on_ffmpeg_failure(self, qapp, tmp_path):
+        source = tmp_path / "book.m4b"
+        source.write_bytes(b"\x00")
+        out_dir = tmp_path / "chapters"
+        errors = []
+
+        import subprocess
+        mock_result = subprocess.CompletedProcess([], 1, stdout="", stderr="ffmpeg died")
+        with patch("subprocess.run", return_value=mock_result):
+            worker = SplitWorker(source, self._chapters(tmp_path), 60.0, out_dir)
+            worker.error.connect(errors.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert len(errors) == 1
+        assert "ffmpeg" in errors[0].lower() or "chapter" in errors[0].lower()
+
+    def test_creates_output_dir(self, qapp, tmp_path):
+        source = tmp_path / "book.m4b"
+        source.write_bytes(b"\x00")
+        out_dir = tmp_path / "deep" / "chapters"
+
+        import subprocess
+        mock_result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with patch("subprocess.run", return_value=mock_result):
+            worker = SplitWorker(source, self._chapters(tmp_path), 60.0, out_dir)
+            worker.start()
+            worker.wait(3000)
+
+        assert out_dir.is_dir()

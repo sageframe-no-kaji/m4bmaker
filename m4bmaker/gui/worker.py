@@ -179,3 +179,57 @@ class SaveChaptersWorker(QThread):
             self.error.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             self.error.emit(str(exc))
+
+
+class SplitWorker(QThread):
+    """Export each chapter of an .m4b file as a separate audio file (stream-copy)."""
+
+    progress = Signal(str, float)  # message, 0.0–1.0
+    finished = Signal(object)      # output_dir: Path
+    error = Signal(str)
+
+    def __init__(self, source: Path, chapters: list, total_duration: float, output_dir: Path) -> None:
+        super().__init__()
+        self._source = source
+        self._chapters = chapters
+        self._total_duration = total_duration
+        self._output_dir = output_dir
+
+    def run(self) -> None:
+        try:
+            import subprocess as _sp
+
+            ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+            self._output_dir.mkdir(parents=True, exist_ok=True)
+            total = len(self._chapters)
+            ext = self._source.suffix or ".m4a"
+
+            for i, ch in enumerate(self._chapters):
+                start = ch.start_time
+                end = self._chapters[i + 1].start_time if i + 1 < total else self._total_duration
+
+                safe_title = "".join(
+                    c if c.isalnum() or c in " ._-" else "_" for c in ch.title
+                ).strip() or f"chapter_{i + 1:02d}"
+                out_file = self._output_dir / f"{i + 1:02d} - {safe_title}{ext}"
+
+                self.progress.emit(f"Splitting {i + 1}/{total}: {ch.title}", i / total)
+
+                cmd = [
+                    ffmpeg, "-y",
+                    "-ss", str(start),
+                    "-to", str(end),
+                    "-i", str(self._source),
+                    "-c", "copy",
+                    str(out_file),
+                ]
+                result = _sp.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"ffmpeg failed on chapter {i + 1}: {result.stderr.strip()}"
+                    )
+
+            self.progress.emit("Split complete.", 1.0)
+            self.finished.emit(self._output_dir)
+        except Exception as exc:  # noqa: BLE001
+            self.error.emit(str(exc))
