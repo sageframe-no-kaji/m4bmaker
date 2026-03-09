@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
-    QSizePolicy,
     QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
@@ -76,7 +75,7 @@ class FolderDropZone(QFrame):
 
     def _build(self) -> None:
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(8)
 
         self._edit = QLineEdit()
@@ -91,7 +90,7 @@ class FolderDropZone(QFrame):
 
         btn = QPushButton("Browse")
         btn.setFixedWidth(80)
-        btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        btn.setFixedHeight(34)
         btn.clicked.connect(self._browse)
         layout.addWidget(btn)
 

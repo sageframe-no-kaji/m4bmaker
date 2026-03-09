@@ -173,13 +173,19 @@ class MainWindow(QMainWindow):
 
         help_menu.addSeparator()
 
+        support_title = QAction("Support Development", self)
+        support_title.setEnabled(False)
+        help_menu.addAction(support_title)
+
         donate_action = QAction("♥  Buy Me a Coffee…", self)
         donate_action.triggered.connect(
             lambda: QDesktopServices.openUrl(QUrl(_DONATE_URL))
         )
         help_menu.addAction(donate_action)
 
-        github_action = QAction("  GitHub…", self)
+        help_menu.addSeparator()
+
+        github_action = QAction("GitHub…", self)
         github_action.triggered.connect(
             lambda: QDesktopServices.openUrl(QUrl(_GITHUB_URL))
         )
@@ -261,6 +267,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(10)
 
         layout.addWidget(self._build_meta_section())
+        layout.addSpacing(8)
         layout.addWidget(self._build_settings_tabs())
         layout.addStretch()
 
@@ -479,19 +486,7 @@ class MainWindow(QMainWindow):
         btn_row.addStretch()
         btn_row.addWidget(self._convert_btn)
         btn_row.addStretch()
-        # Sageframe icon + link
-        sf_icon_lbl = QLabel()
-        sf_icon_lbl.setPixmap(_sageframe_pixmap(14))
-        sf_icon_lbl.setStyleSheet("background: transparent;")
-        btn_row.addWidget(sf_icon_lbl)
 
-        sf_lbl = QLabel(
-            f'<a href="{_GITHUB_URL}" style="color: #7a7a7a; text-decoration: none;">'
-            "Sageframe</a>"
-        )
-        sf_lbl.setOpenExternalLinks(True)
-        sf_lbl.setStyleSheet("font-size: 11px; background: transparent;")
-        btn_row.addWidget(sf_lbl)
         donate_lbl = QLabel(
             f'<a href="{_DONATE_URL}" style="color: #c45a2d; text-decoration: none;">'
             "\u2665 Support</a>"
