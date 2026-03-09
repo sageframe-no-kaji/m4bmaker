@@ -154,6 +154,10 @@ class MainWindow(QMainWindow):
         )
         help_menu.addAction(github_action)
 
+    def _set_status(self, text: str) -> None:
+        self._status_label.setText(text)
+        self._status_label.setVisible(bool(text))
+
     def _toggle_dark_mode(self) -> None:
         self._dark_mode = self._dark_action.isChecked()
         QApplication.instance().setStyleSheet(get_stylesheet(self._dark_mode))
@@ -413,9 +417,10 @@ class MainWindow(QMainWindow):
         self._progress_bar.setVisible(False)
         layout.addWidget(self._progress_bar)
 
-        self._status_label = QLabel("Select a folder to begin.")
+        self._status_label = QLabel("")
         self._status_label.setObjectName("statusLabel")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
 
         btn_row = QHBoxLayout()
@@ -513,7 +518,7 @@ class MainWindow(QMainWindow):
         self._chapter_table.populate(book.chapters)
         self._update_output_preview()
         self._update_controls()
-        self._status_label.setText(
+        self._set_status(
             f"Loaded {len(book.files)} file(s) · {len(book.chapters)} chapter(s)."
         )
 
@@ -537,7 +542,7 @@ class MainWindow(QMainWindow):
         self._analysis_label.setText("No analysis yet.")
         self._player.stop()
         self._update_controls()
-        self._status_label.setText("Scanning…")
+        self._set_status("Scanning…")
         self._progress_bar.setVisible(True)
         self._progress_bar.setRange(0, 0)  # indeterminate spinner
 
@@ -611,7 +616,7 @@ class MainWindow(QMainWindow):
     def _on_load_error(self, msg: str) -> None:
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setVisible(False)
-        self._status_label.setText("Error loading folder.")
+        self._set_status("Error loading folder.")
         self._update_controls()
         QMessageBox.critical(self, "Load Error", msg)
 
@@ -649,7 +654,7 @@ class MainWindow(QMainWindow):
         self._progress_bar.setVisible(True)
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
-        self._status_label.setText("Starting…")
+        self._set_status("Starting…")
         self._convert_btn.setEnabled(False)
 
         self._convert_worker = ConvertWorker(
@@ -670,7 +675,7 @@ class MainWindow(QMainWindow):
         chapters = self._gather_chapters_from_table()
         self._progress_bar.setVisible(True)
         self._progress_bar.setRange(0, 0)
-        self._status_label.setText("Saving chapter edits…")
+        self._set_status("Saving chapter edits…")
         self._convert_btn.setEnabled(False)
 
         self._save_worker = SaveChaptersWorker(
@@ -698,7 +703,7 @@ class MainWindow(QMainWindow):
     def _on_save_finished(self, dest: object) -> None:
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(100)
-        self._status_label.setText(f"Saved — {Path(str(dest)).name}")
+        self._set_status(f"Saved — {Path(str(dest)).name}")
         self._update_controls()
         msg = QMessageBox(self)
         msg.setWindowTitle("Saved")
@@ -712,12 +717,12 @@ class MainWindow(QMainWindow):
         msg.exec()
 
     def _on_progress(self, msg: str, fraction: float) -> None:
-        self._status_label.setText(msg)
+        self._set_status(msg)
         self._progress_bar.setValue(int(fraction * 100))
 
     def _on_convert_finished(self, result: PipelineResult) -> None:
         self._progress_bar.setValue(100)
-        self._status_label.setText(f"Done — {result.output_file.name}")
+        self._set_status(f"Done — {result.output_file.name}")
         self._update_controls()
         mins = result.duration_seconds / 60
         msg = QMessageBox(self)
@@ -732,6 +737,6 @@ class MainWindow(QMainWindow):
 
     def _on_convert_error(self, msg: str) -> None:
         self._progress_bar.setVisible(False)
-        self._status_label.setText("Conversion failed.")
+        self._set_status("Conversion failed.")
         self._update_controls()
         QMessageBox.critical(self, "Conversion Error", msg)
