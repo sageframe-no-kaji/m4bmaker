@@ -169,7 +169,7 @@ class CoverWidget(QFrame):
 
     cover_changed = Signal(object)  # Path
 
-    _SIZE = 160
+    _SIZE = 200
     _EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:

@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QFileDialog,
-    QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -226,40 +226,39 @@ class MainWindow(QMainWindow):
 
     def _build_meta_section(self) -> QGroupBox:
         box = QGroupBox("Audiobook")
-        row = QHBoxLayout(box)
-        row.setContentsMargins(10, 16, 10, 12)
-        row.setSpacing(16)
+        hbox = QHBoxLayout(box)
+        hbox.setContentsMargins(10, 16, 10, 12)
+        hbox.setSpacing(16)
 
         # Left — cover thumbnail
         self._cover_widget = CoverWidget()
         self._cover_widget.cover_changed.connect(self._on_cover_changed)
-        row.addWidget(self._cover_widget, 0, Qt.AlignmentFlag.AlignTop)
+        hbox.addWidget(self._cover_widget, 0, Qt.AlignmentFlag.AlignTop)
 
-        # Right — metadata form
-        form = QFormLayout()
-        form.setVerticalSpacing(8)
-        form.setHorizontalSpacing(10)
-        form.setLabelAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        # Right — metadata (QGridLayout forces left-aligned labels on macOS)
+        grid = QGridLayout()
+        grid.setVerticalSpacing(8)
+        grid.setHorizontalSpacing(10)
+        grid.setColumnStretch(1, 1)
 
         self._title_edit = QLineEdit()
         self._author_edit = QLineEdit()
         self._narrator_edit = QLineEdit()
         self._genre_edit = QLineEdit()
-        for _edit in (self._title_edit, self._author_edit, self._narrator_edit, self._genre_edit):
-            _edit.setMinimumWidth(220)
 
-        for label, widget in (
+        for i, (label_text, widget) in enumerate((
             ("Title", self._title_edit),
             ("Author", self._author_edit),
             ("Narrator", self._narrator_edit),
             ("Genre", self._genre_edit),
-        ):
-            form.addRow(_muted_label(label), widget)
+        )):
+            lbl = _muted_label(label_text)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            grid.addWidget(lbl, i, 0)
+            grid.addWidget(widget, i, 1)
             widget.textChanged.connect(self._update_output_preview)
 
-        row.addLayout(form, stretch=1)
+        hbox.addLayout(grid, stretch=1)
         return box
 
     def _build_encoding_section(self) -> QGroupBox:
