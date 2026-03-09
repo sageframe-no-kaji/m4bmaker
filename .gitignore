@@ -8,6 +8,10 @@ __pycache__/
 dist/
 build/
 
+# Lock files & minified assets
+*.lock
+*.min.js
+
 # Testing & coverage
 .pytest_cache/
 .coverage
