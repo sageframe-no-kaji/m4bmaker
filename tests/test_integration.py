@@ -307,10 +307,11 @@ class TestResolveCover:
 
         expected = tmp_path / "cover.jpg"
         with patch("m4bmaker.__main__.download_cover", return_value=expected):
-            result = _resolve_cover(
+            cover, user_specified = _resolve_cover(
                 "https://example.com/c.jpg", tmp_path, tmp_path, False
             )
-        assert result == expected
+        assert cover == expected
+        assert user_specified is True
 
     def test_local_path_arg_calls_find_cover(self, tmp_path: Path) -> None:
         from m4bmaker.__main__ import _resolve_cover
@@ -318,9 +319,10 @@ class TestResolveCover:
         img = tmp_path / "cover.jpg"
         img.write_bytes(b"\x00")
         with patch("m4bmaker.__main__.find_cover", return_value=img) as mock_fc:
-            result = _resolve_cover(str(img), tmp_path, tmp_path, False)
+            cover, user_specified = _resolve_cover(str(img), tmp_path, tmp_path, False)
         mock_fc.assert_called_once()
-        assert result == img
+        assert cover == img
+        assert user_specified is True
 
     def test_auto_detects_when_no_arg(self, tmp_path: Path) -> None:
         from m4bmaker.__main__ import _resolve_cover
@@ -328,8 +330,9 @@ class TestResolveCover:
         img = tmp_path / "cover.jpg"
         img.write_bytes(b"\x00")
         with patch("m4bmaker.__main__.find_cover", return_value=img):
-            result = _resolve_cover(None, tmp_path, tmp_path, False)
-        assert result == img
+            cover, user_specified = _resolve_cover(None, tmp_path, tmp_path, False)
+        assert cover == img
+        assert user_specified is False
 
     def test_interactive_prompts_when_no_cover_found(self, tmp_path: Path) -> None:
         from m4bmaker.__main__ import _resolve_cover
@@ -339,16 +342,18 @@ class TestResolveCover:
             patch("m4bmaker.__main__.find_cover", return_value=None),
             patch("m4bmaker.__main__._prompt_cover", return_value=expected) as mock_p,
         ):
-            result = _resolve_cover(None, tmp_path, tmp_path, True)
+            cover, user_specified = _resolve_cover(None, tmp_path, tmp_path, True)
         mock_p.assert_called_once_with(tmp_path)
-        assert result == expected
+        assert cover == expected
+        assert user_specified is True
 
     def test_non_interactive_returns_none_when_no_cover(self, tmp_path: Path) -> None:
         from m4bmaker.__main__ import _resolve_cover
 
         with patch("m4bmaker.__main__.find_cover", return_value=None):
-            result = _resolve_cover(None, tmp_path, tmp_path, False)
-        assert result is None
+            cover, user_specified = _resolve_cover(None, tmp_path, tmp_path, False)
+        assert cover is None
+        assert user_specified is False
 
 
 # ---------------------------------------------------------------------------

@@ -48,7 +48,7 @@ def _progress_reader(
             elapsed = _format_ms(current_ms)
             total_str = _format_ms(total_ms)
             sys.stdout.write(
-                f"\r  Encoding {bar}  {pct:3d}%  {elapsed} / {total_str}  "
+                f"\r  Encoding {bar}  {pct:3d}%  {elapsed} / {total_str}\033[K"
             )
             sys.stdout.flush()
 
@@ -174,9 +174,11 @@ def encode(
         if proc.returncode == 0 and total_ms > 0:
             bar = _render_bar(1.0, 30)
             total_str = _format_ms(total_ms)
-            sys.stdout.write(f"\r  Encoding {bar}  100%  {total_str} / {total_str}  \n")
+            sys.stdout.write(
+                f"\r  Encoding {bar}  100%  {total_str} / {total_str}\033[K\n"
+            )
         else:
-            sys.stdout.write("\r" + " " * 70 + "\r")
+            sys.stdout.write("\r\033[K")
         sys.stdout.flush()
 
     if proc.returncode != 0:

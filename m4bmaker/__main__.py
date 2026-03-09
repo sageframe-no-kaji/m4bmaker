@@ -52,7 +52,7 @@ def _probe_progress(i: int, n: int, name: str) -> None:
     bar = _render_bar(i / n, width=30)
     max_name = 35
     disp = (name[: max_name - 1] + "\u2026") if len(name) > max_name else name
-    sys.stdout.write(f"\r  Probing {bar}  {i}/{n}  {disp:<{max_name}}")
+    sys.stdout.write(f"\r  Probing {bar}  {i}/{n}  {disp:<{max_name}}\033[K")
     sys.stdout.flush()
     if i == n:
         sys.stdout.write("\n")
@@ -64,8 +64,12 @@ def _resolve_cover(
     directory: Path,
     tmp_dir: Path,
     interactive: bool,
-) -> Path | None:
+) -> tuple[Path | None, bool]:
     """Resolve the cover image from CLI argument, directory scan, or user prompt.
+
+    Returns ``(cover, user_specified)`` where *user_specified* is ``True`` when
+    the user explicitly provided a URL or path (via CLI or interactive prompt),
+    indicating that no further confirmation is needed.
 
     Resolution order:
     1. *cover_arg* provided — URL: download (retry interactively on failure);
@@ -75,16 +79,16 @@ def _resolve_cover(
     """
     if cover_arg is not None:
         if is_url(cover_arg):
-            return _fetch_cover_url(cover_arg, tmp_dir, interactive)
-        return find_cover(directory, cli_override=Path(cover_arg).expanduser())
+            return _fetch_cover_url(cover_arg, tmp_dir, interactive), True
+        return find_cover(directory, cli_override=Path(cover_arg).expanduser()), True
 
     cover = find_cover(directory)
     if cover is not None:
-        return cover
+        return cover, False  # auto-detected — needs confirmation
 
     if interactive:
-        return _prompt_cover(tmp_dir)
-    return None
+        return _prompt_cover(tmp_dir), True  # user explicitly typed URL/path
+    return None, False
 
 
 def _fetch_cover_url(url: str, tmp_dir: Path, interactive: bool) -> Path | None:
@@ -186,14 +190,17 @@ def main() -> None:
 
         # 3. Locate cover image (URL download, auto-detect, or interactive prompt).
         log("Looking for cover art...")
-        cover = _resolve_cover(args.cover, directory, tmp_dir, interactive)
+        cover, cover_user_specified = _resolve_cover(
+            args.cover, directory, tmp_dir, interactive
+        )
         if cover:
             log(f"Cover art: {cover.name}")
         else:
             log("No cover art found — skipping")
 
-        # 3b. Confirm or replace cover interactively.
-        cover = _confirm_cover(cover, tmp_dir, interactive)
+        # 3b. Confirm or replace cover interactively (skip if user already provided it).
+        if not cover_user_specified:
+            cover = _confirm_cover(cover, tmp_dir, interactive)
 
         # 4. Read and complete metadata.
         log("Reading metadata...")
