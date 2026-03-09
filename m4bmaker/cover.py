@@ -70,6 +70,34 @@ def _image_area(path: Path) -> int:
         return 0
 
 
+def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
+    """Extract embedded cover art from *file* to a temp directory.
+
+    Returns the path to the extracted image, or ``None`` if the file has no
+    embedded cover or the extraction fails.
+    """
+    import subprocess
+    import tempfile as _tempfile
+
+    try:
+        tmp_dir = Path(_tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+        dest = tmp_dir / "cover.jpg"
+        subprocess.run(  # noqa: S603
+            [
+                ffmpeg, "-y", "-i", str(file),
+                "-an", "-vcodec", "copy",
+                str(dest),
+            ],
+            capture_output=True,
+            timeout=15,
+        )
+        if dest.exists() and dest.stat().st_size > 100:
+            return dest
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def find_cover(directory: Path, cli_override: Path | None = None) -> Path | None:
     """Return the cover image to embed, or None if none is found.
 

@@ -120,10 +120,11 @@ QComboBox QAbstractItemView {
 QPushButton {
     background-color: #ebe6dd;
     border: 1px solid #d0c9be;
-    border-radius: 3px;
-    padding: 5px 14px;
+    border-radius: 5px;
+    padding: 4px 12px;
     color: #4a4a4a;
-    min-height: 22px;
+    min-height: 20px;
+    font-size: 11px;
 }
 
 QPushButton:hover {

@@ -169,7 +169,7 @@ class CoverWidget(QFrame):
 
     cover_changed = Signal(object)  # Path
 
-    _SIZE = 100
+    _SIZE = 160
     _EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -194,13 +194,11 @@ class CoverWidget(QFrame):
         btn_width = self._SIZE + 20
         btn = QPushButton("Choose…")
         btn.setMinimumWidth(btn_width)
-        btn.setFixedHeight(26)
         btn.clicked.connect(self._browse)
         layout.addWidget(btn)
 
         url_btn = QPushButton("URL…")
         url_btn.setMinimumWidth(btn_width)
-        url_btn.setFixedHeight(26)
         url_btn.setToolTip("Set cover art from a web URL")
         url_btn.clicked.connect(self._browse_url)
         layout.addWidget(url_btn)

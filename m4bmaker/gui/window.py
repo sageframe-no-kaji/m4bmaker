@@ -240,13 +240,15 @@ class MainWindow(QMainWindow):
         form.setVerticalSpacing(8)
         form.setHorizontalSpacing(10)
         form.setLabelAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
 
         self._title_edit = QLineEdit()
         self._author_edit = QLineEdit()
         self._narrator_edit = QLineEdit()
         self._genre_edit = QLineEdit()
+        for _edit in (self._title_edit, self._author_edit, self._narrator_edit, self._genre_edit):
+            _edit.setMinimumWidth(220)
 
         for label, widget in (
             ("Title", self._title_edit),

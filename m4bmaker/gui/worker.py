@@ -128,7 +128,11 @@ class LoadM4bWorker(QThread):
                 narrator=raw_meta.get("narrator", ""),
                 genre=raw_meta.get("genre", ""),
             )
-            book = Book(files=[self._path], chapters=chapters, metadata=metadata)
+            from m4bmaker.cover import extract_cover_from_audio
+
+            ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+            cover_path = extract_cover_from_audio(self._path, ffmpeg)
+            book = Book(files=[self._path], chapters=chapters, metadata=metadata, cover=cover_path)
             self.finished.emit((book, total_duration))
         except SystemExit as exc:
             self.error.emit(str(exc))

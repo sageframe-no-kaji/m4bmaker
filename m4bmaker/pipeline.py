@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from m4bmaker.chapters import build_chapters, write_ffmetadata
-from m4bmaker.cover import find_cover
+from m4bmaker.cover import extract_cover_from_audio, find_cover
 from m4bmaker.encoder import encode, write_concat_list
 from m4bmaker.metadata import extract_metadata
 from m4bmaker.models import Book, BookMetadata, PipelineResult
@@ -55,6 +55,11 @@ def load_audiobook(
     )
 
     chapters = build_chapters(files, ffprobe, progress_fn=progress_fn)
+
+    # Fallback: extract embedded cover from first audio file if none found on disk
+    if cover is None and files:
+        _ffmpeg = __import__("shutil").which("ffmpeg") or "ffmpeg"
+        cover = extract_cover_from_audio(files[0], _ffmpeg)
 
     return Book(
         files=files,
