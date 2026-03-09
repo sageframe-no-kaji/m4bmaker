@@ -17,7 +17,9 @@ from m4bmaker.metadata import extract_metadata, prompt_missing
 
 def _args(**kwargs: object) -> Namespace:
     """Build a Namespace with sensible defaults for all CLI fields."""
-    defaults = dict(title=None, author=None, narrator=None, genre=None, no_prompt=False)
+    defaults: dict[str, object] = dict(
+        title=None, author=None, narrator=None, genre=None, no_prompt=False
+    )
     defaults.update(kwargs)
     return Namespace(**defaults)
 
