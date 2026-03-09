@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
     def _build_folder_section(self) -> QGroupBox:
         box = QGroupBox("Source")
         layout = QVBoxLayout(box)
-        layout.setContentsMargins(10, 14, 10, 10)
+        layout.setContentsMargins(12, 20, 12, 12)
         layout.setSpacing(0)
 
         self._folder_zone = FolderDropZone(accept_m4b=True)
@@ -227,7 +227,7 @@ class MainWindow(QMainWindow):
     def _build_meta_section(self) -> QGroupBox:
         box = QGroupBox("Audiobook")
         hbox = QHBoxLayout(box)
-        hbox.setContentsMargins(10, 16, 10, 12)
+        hbox.setContentsMargins(12, 20, 12, 12)
         hbox.setSpacing(16)
 
         # Left — cover thumbnail
@@ -264,7 +264,7 @@ class MainWindow(QMainWindow):
     def _build_encoding_section(self) -> QGroupBox:
         box = QGroupBox("Encoding")
         layout = QHBoxLayout(box)
-        layout.setContentsMargins(10, 14, 10, 10)
+        layout.setContentsMargins(12, 20, 12, 12)
         layout.setSpacing(14)
 
         layout.addWidget(_muted_label("Bitrate"))
@@ -292,8 +292,8 @@ class MainWindow(QMainWindow):
     def _build_output_section(self) -> QGroupBox:
         box = QGroupBox("Output Location")
         layout = QVBoxLayout(box)
-        layout.setContentsMargins(10, 16, 10, 12)
-        layout.setSpacing(7)
+        layout.setContentsMargins(12, 20, 12, 12)
+        layout.setSpacing(8)
 
         self._out_group = QButtonGroup(self)
 
