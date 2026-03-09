@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -81,7 +82,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("m4bmaker")
-        self.setMinimumSize(QSize(700, 560))
+        self.setMinimumWidth(760)
+        self.setMinimumHeight(560)
         self.resize(960, 760)
 
         self._book: Optional[Book] = None
@@ -199,8 +201,8 @@ class MainWindow(QMainWindow):
     # ── Build tab ─────────────────────────────────────────────────────────────
 
     def _build_build_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
@@ -209,7 +211,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_encoding_section())
         layout.addWidget(self._build_output_section())
         layout.addStretch()
-        return tab
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(inner)
+        return scroll
 
     def _build_analysis_section(self) -> QGroupBox:
         box = QGroupBox("Audio Analysis")
@@ -434,11 +441,14 @@ class MainWindow(QMainWindow):
             self._build_encoding_section_visibility(True)
 
     def _build_encoding_section_visibility(self, visible: bool) -> None:
-        # Find encoding and output group boxes by iterating the build tab layout
-        build_tab = self._tabs.widget(0)
-        if build_tab is None:
+        # Build tab is wrapped in a QScrollArea; get the inner widget
+        scroll = self._tabs.widget(0)
+        if not isinstance(scroll, QScrollArea):
             return
-        layout = build_tab.layout()
+        inner = scroll.widget()
+        if inner is None:
+            return
+        layout = inner.layout()
         if layout is None:
             return
         for i in range(layout.count()):

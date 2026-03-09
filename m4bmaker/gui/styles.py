@@ -214,6 +214,12 @@ QCheckBox::indicator:checked {
     border-color: #c45a2d;
 }
 
+/* ── Scroll areas ────────────────────────────────────────────────────── */
+QScrollArea,
+QScrollArea > QWidget > QWidget {
+    background-color: #f5f2ed;
+}
+
 /* ── Tabs ────────────────────────────────────────────────────────────── */
 QTabWidget::pane {
     border: 1px solid #d0c9be;
