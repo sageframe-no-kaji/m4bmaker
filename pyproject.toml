@@ -15,8 +15,12 @@ dependencies = [
     "natsort>=8.4",
 ]
 
+[project.optional-dependencies]
+gui = ["PySide6>=6.6"]
+
 [project.scripts]
 m4bmaker = "m4bmaker.__main__:main"
+m4bmaker-gui = "m4bmaker.gui.app:main"
 
 [project.urls]
 Homepage = "https://github.com/sageframe-no-kaji/m4bmaker"
