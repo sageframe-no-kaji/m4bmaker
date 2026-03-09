@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from m4bmaker.__main__ import _output_path, main
+from m4bmaker.__main__ import _output_path, _confirm_output, main
 
 # ---------------------------------------------------------------------------
 # _output_path helpers
@@ -15,14 +15,24 @@ from m4bmaker.__main__ import _output_path, main
 
 
 class TestOutputPath:
-    def test_title_and_author(self, tmp_path: Path) -> None:
+    def test_title_and_author_organized(self, tmp_path: Path) -> None:
         meta = {"title": "Dune", "author": "Frank Herbert", "narrator": ""}
         p = _output_path(tmp_path, meta)
-        assert p == tmp_path / "Dune - Frank Herbert.m4b"
+        assert p == tmp_path / "Frank Herbert" / "Dune" / "Frank Herbert - Dune.m4b"
 
-    def test_title_only(self, tmp_path: Path) -> None:
+    def test_title_and_author_flat(self, tmp_path: Path) -> None:
+        meta = {"title": "Dune", "author": "Frank Herbert", "narrator": ""}
+        p = _output_path(tmp_path, meta, flat=True)
+        assert p == tmp_path / "Frank Herbert - Dune.m4b"
+
+    def test_title_only_organized(self, tmp_path: Path) -> None:
         meta = {"title": "Dune", "author": "", "narrator": ""}
         p = _output_path(tmp_path, meta)
+        assert p == tmp_path / "Dune" / "Dune.m4b"
+
+    def test_title_only_flat(self, tmp_path: Path) -> None:
+        meta = {"title": "Dune", "author": "", "narrator": ""}
+        p = _output_path(tmp_path, meta, flat=True)
         assert p == tmp_path / "Dune.m4b"
 
     def test_no_title_fallback(self, tmp_path: Path) -> None:
@@ -38,7 +48,27 @@ class TestOutputPath:
     def test_slash_sanitised_in_author(self, tmp_path: Path) -> None:
         meta = {"title": "Title", "author": "A/B", "narrator": ""}
         p = _output_path(tmp_path, meta)
-        assert p.name == "Title - A-B.m4b"
+        assert p.name == "A-B - Title.m4b"
+
+
+class TestConfirmOutput:
+    def test_non_interactive_returns_proposed(self, tmp_path: Path) -> None:
+        proposed = tmp_path / "out.m4b"
+        result = _confirm_output(proposed, interactive=False)
+        assert result == proposed
+
+    def test_enter_confirms_proposed(self, tmp_path: Path) -> None:
+        proposed = tmp_path / "out.m4b"
+        with patch("builtins.input", return_value=""):
+            result = _confirm_output(proposed, interactive=True)
+        assert result == proposed
+
+    def test_custom_path_accepted(self, tmp_path: Path) -> None:
+        proposed = tmp_path / "out.m4b"
+        custom = tmp_path / "custom.m4b"
+        with patch("builtins.input", return_value=str(custom)):
+            result = _confirm_output(proposed, interactive=True)
+        assert result == custom.resolve()
 
 
 # ---------------------------------------------------------------------------

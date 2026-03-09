@@ -19,6 +19,14 @@ class TestDefaults:
         args = parse_args([])
         assert args.directory == Path(os.getcwd())
 
+    def test_no_args_output_dir_is_none(self) -> None:
+        args = parse_args([])
+        assert args.output_dir is None
+
+    def test_no_args_flat_is_false(self) -> None:
+        args = parse_args([])
+        assert args.flat is False
+
     def test_no_args_output_is_none(self) -> None:
         args = parse_args([])
         assert args.output is None
@@ -156,6 +164,26 @@ class TestFlags:
         args = parse_args(["--no-prompt"])
         assert hasattr(args, "no_prompt")
         assert not hasattr(args, "no-prompt")
+
+    def test_output_dir_long(self, tmp_path: Path) -> None:
+        args = parse_args(["--output-dir", str(tmp_path)])
+        assert args.output_dir == tmp_path
+
+    def test_output_dir_short(self, tmp_path: Path) -> None:
+        args = parse_args(["-O", str(tmp_path)])
+        assert args.output_dir == tmp_path
+
+    def test_output_dir_default_none(self) -> None:
+        args = parse_args([])
+        assert args.output_dir is None
+
+    def test_flat_flag_sets_true(self) -> None:
+        args = parse_args(["--flat"])
+        assert args.flat is True
+
+    def test_flat_default_false(self) -> None:
+        args = parse_args([])
+        assert args.flat is False
 
 
 # ---------------------------------------------------------------------------

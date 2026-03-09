@@ -16,23 +16,42 @@ from m4bmaker.scanner import scan_audio_files
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, log
 
 
-def _output_path(directory: Path, meta: dict[str, str]) -> Path:
-    """Derive the output .m4b filename from metadata, with a safe fallback."""
+def _safe(s: str) -> str:
+    """Sanitise a string for use as a filename or directory component."""
+    return s.replace("/", "-").replace("\x00", "")
+
+
+def _output_path(base_dir: Path, meta: dict[str, str], flat: bool = False) -> Path:
+    """Derive the output .m4b path from metadata.
+
+    Default (organized): ``base_dir/Author/Title/Author - Title.m4b``
+    With *flat*:         ``base_dir/Author - Title.m4b``
+    """
     title = meta.get("title", "").strip()
     author = meta.get("author", "").strip()
 
     if title and author:
-        # Sanitise characters that are illegal in filenames on macOS/Linux.
-        def safe(s: str) -> str:
-            return s.replace("/", "-").replace("\x00", "")
-
-        name = f"{safe(title)} - {safe(author)}.m4b"
+        stem = f"{_safe(author)} - {_safe(title)}"
+        if flat:
+            return base_dir / f"{stem}.m4b"
+        return base_dir / _safe(author) / _safe(title) / f"{stem}.m4b"
     elif title:
-        name = f"{title.replace('/', '-')}.m4b"
+        stem = _safe(title)
+        if flat:
+            return base_dir / f"{stem}.m4b"
+        return base_dir / stem / f"{stem}.m4b"
     else:
-        name = "audiobook.m4b"
+        return base_dir / "audiobook.m4b"
 
-    return directory / name
+
+def _confirm_output(proposed: Path, interactive: bool) -> Path:
+    """Confirm or override the output path interactively."""
+    if not interactive:
+        return proposed
+    value = input(f"Output [{proposed}]: ").strip()
+    if not value:
+        return proposed
+    return Path(value).expanduser().resolve()
 
 
 def _hints_from_dirname(directory: Path) -> dict[str, str]:
@@ -214,9 +233,13 @@ def main() -> None:
         )
 
         # 5. Resolve output path.
-        output: Path = (
-            args.output.resolve() if args.output else _output_path(directory, meta)
-        )
+        if args.output:
+            output = args.output.resolve()
+        else:
+            base_dir = args.output_dir.resolve() if args.output_dir else directory
+            output = _output_path(base_dir, meta, flat=args.flat)
+            output = _confirm_output(output, interactive)
+        output.parent.mkdir(parents=True, exist_ok=True)
         log(f"Output: {output}")
 
         # 6. Build chapter list and write FFMETADATA.

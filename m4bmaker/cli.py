@@ -38,9 +38,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="PATH",
         help=(
-            "Output .m4b file path. "
-            "Defaults to <DIRECTORY>/<Title> - <Author>.m4b "
-            "(or audiobook.m4b if metadata is unavailable)."
+            "Explicit output .m4b file path. Overrides --output-dir and --flat. "
+            "Defaults to <output-dir>/Author/Title/Author - Title.m4b."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        "-O",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Base directory for the auto-generated output path. "
+            "Default: same directory as the audio files. "
+            "Ignored when --output is given."
+        ),
+    )
+    parser.add_argument(
+        "--flat",
+        action="store_true",
+        default=False,
+        help=(
+            "Write the .m4b directly into the output directory as "
+            "Author - Title.m4b instead of creating Author/Title/ subfolders."
         ),
     )
     parser.add_argument(
