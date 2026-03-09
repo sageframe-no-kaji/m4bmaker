@@ -471,6 +471,30 @@ QLabel#modeBadge {
     border-radius: 3px;
     background-color: #ebe6dd;
 }
+
+/* ── Queue window ──────────────────────────────────────────────── */
+QTableWidget#queueTable {
+    border: 1px solid #d0c9be;
+    gridline-color: #e8e2d8;
+    background-color: #f9f5ef;
+    alternate-background-color: #f3ede4;
+}
+QTableWidget#queueTable::item:selected {
+    background-color: #c45a2d;
+    color: #ffffff;
+}
+QProgressBar#jobProgress {
+    border: 1px solid #d0c9be;
+    border-radius: 3px;
+    background-color: #ebe6dd;
+    text-align: center;
+    font-size: 11px;
+    max-height: 14px;
+}
+QProgressBar#jobProgress::chunk {
+    background-color: #c45a2d;
+    border-radius: 2px;
+}
 """
 
 # ── Dark mode palette ─────────────────────────────────────────────────────────
@@ -939,6 +963,31 @@ QLabel#modeBadge {
     border: 1px solid #333333;
     border-radius: 3px;
     background-color: #242424;
+}
+
+/* ── Queue window ──────────────────────────────────────────────── */
+QTableWidget#queueTable {
+    border: 1px solid #333333;
+    gridline-color: #2a2a2a;
+    background-color: #1e1e1e;
+    alternate-background-color: #222222;
+}
+QTableWidget#queueTable::item:selected {
+    background-color: #c45a2d;
+    color: #f5f2ed;
+}
+QProgressBar#jobProgress {
+    border: 1px solid #333333;
+    border-radius: 3px;
+    background-color: #2e2e2e;
+    text-align: center;
+    font-size: 11px;
+    color: #c8c2b8;
+    max-height: 14px;
+}
+QProgressBar#jobProgress::chunk {
+    background-color: #c45a2d;
+    border-radius: 2px;
 }
 """
 
