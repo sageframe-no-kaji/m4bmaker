@@ -63,7 +63,9 @@ def win(qapp, tmp_path):
     w = MainWindow()
     w.show()
     yield w, tmp_path
+    w._is_busy = lambda: False  # type: ignore[method-assign]  # prevent dialog on teardown
     w.close()
+    qapp.processEvents()  # drain pending Qt events so the next test starts clean
 
 
 # ── initial state ─────────────────────────────────────────────────────────────
@@ -378,12 +380,12 @@ class TestEncoding:
         captured_kwargs: dict = {}
 
         class _FakeWorker(MagicMock):
-            def __init__(self_inner, *args, **kwargs):
+            def __init__(self_inner, *args, **kwargs):  # type: ignore[misc]
                 captured_kwargs.update(kwargs)
                 super().__init__()
                 self_inner.isRunning = MagicMock(return_value=True)
 
-            def start(self_inner):
+            def start(self_inner):  # type: ignore[misc]
                 pass
 
             progress = MagicMock()
@@ -404,12 +406,12 @@ class TestEncoding:
         captured_kwargs: dict = {}
 
         class _FakeWorker(MagicMock):
-            def __init__(self_inner, *args, **kwargs):
+            def __init__(self_inner, *args, **kwargs):  # type: ignore[misc]
                 captured_kwargs.update(kwargs)
                 super().__init__()
                 self_inner.isRunning = MagicMock(return_value=True)
 
-            def start(self_inner):
+            def start(self_inner):  # type: ignore[misc]
                 pass
 
             progress = MagicMock()

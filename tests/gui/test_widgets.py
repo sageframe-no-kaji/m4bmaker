@@ -104,7 +104,7 @@ class TestFolderDropZone:
         mime = _mime_with_dir(tmp_path)
         event = _make_drag_enter_event(mime)
         self.w.dragEnterEvent(event)
-        event.acceptProposedAction.assert_called_once()
+        event.acceptProposedAction.assert_called_once()  # type: ignore[attr-defined]
 
     def test_drag_enter_file_ignored(self, tmp_path: Path):
         f = tmp_path / "file.mp3"
@@ -112,7 +112,7 @@ class TestFolderDropZone:
         mime = _mime_with_file(f)
         event = _make_drag_enter_event(mime)
         self.w.dragEnterEvent(event)
-        event.ignore.assert_called_once()
+        event.ignore.assert_called_once()  # type: ignore[attr-defined]
 
     def test_drag_leave_clears_style(self, tmp_path: Path):
         event = MagicMock(spec=QDragLeaveEvent)
@@ -198,7 +198,7 @@ class TestCoverWidget:
         mime = _mime_with_file(f)
         event = _make_drag_enter_event(mime)
         self.w.dragEnterEvent(event)
-        event.ignore.assert_called_once()
+        event.ignore.assert_called_once()  # type: ignore[attr-defined]
 
     def test_set_cover_non_null_pixmap_displays_thumb(self, tmp_path: Path):
         """Lines 176-185: pixmap loads OK → thumbnail shows image, text cleared."""
@@ -223,7 +223,7 @@ class TestCoverWidget:
         mime = _mime_with_file(img)
         event = _make_drag_enter_event(mime)
         self.w.dragEnterEvent(event)
-        event.acceptProposedAction.assert_called_once()
+        event.acceptProposedAction.assert_called_once()  # type: ignore[attr-defined]
 
     def test_drag_leave_resets_thumb_style(self):
         """Line 223: dragLeave resets thumbnail stylesheet."""
@@ -252,24 +252,26 @@ class TestChapterTablePopulate:
 
     def test_chapter_number_column(self):
         self.t.populate([_make_chapter(3, 0.0, "Title")])
-        assert self.t.item(0, ChapterTable.COL_NUM).text() == "3"
+        assert self.t.item(0, ChapterTable.COL_NUM).text() == "3"  # type: ignore[union-attr]
 
     def test_timestamp_mm_ss(self):
         self.t.populate([_make_chapter(1, 75.0, "T")])  # 1 min 15 sec
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15"
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15"  # type: ignore[union-attr]
 
     def test_timestamp_h_mm_ss(self):
         self.t.populate([_make_chapter(1, 3661.0, "T")])  # 1h 1m 1s
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:01:01"
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:01:01"  # type: ignore[union-attr]
 
     def test_title_column_editable(self):
         self.t.populate([_make_chapter(1, 0.0, "Hello")])
         item = self.t.item(0, ChapterTable.COL_TITLE)
+        assert item is not None
         assert item.flags() & Qt.ItemFlag.ItemIsEditable
 
     def test_num_column_not_editable(self):
         self.t.populate([_make_chapter(1, 0.0, "Hello")])
         item = self.t.item(0, ChapterTable.COL_NUM)
+        assert item is not None
         assert not (item.flags() & Qt.ItemFlag.ItemIsEditable)
 
     def test_titles_returns_all(self):
@@ -281,7 +283,7 @@ class TestChapterTablePopulate:
         self.t.populate([_make_chapter(1, 0.0, "Old")])
         self.t.populate([_make_chapter(1, 0.0, "New"), _make_chapter(2, 60.0, "New2")])
         assert self.t.rowCount() == 2
-        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "New"
+        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "New"  # type: ignore[union-attr]
 
 
 class TestChapterTableBulkEdit:
@@ -303,26 +305,26 @@ class TestChapterTableBulkEdit:
 
     def test_title_case_all(self):
         self.t._title_case()
-        assert self.t.item(1, ChapterTable.COL_TITLE).text() == "02. Middle Part"
+        assert self.t.item(1, ChapterTable.COL_TITLE).text() == "02. Middle Part"  # type: ignore[union-attr]
 
     def test_sentence_case_all(self):
         self.t._sentence_case()
         # "02. middle part" → "02. middle part"[0].upper() + rest.lower()
-        assert self.t.item(2, ChapterTable.COL_TITLE).text() == "03. the end"
+        assert self.t.item(2, ChapterTable.COL_TITLE).text() == "03. the end"  # type: ignore[union-attr]
 
     def test_add_prefix_all(self):
         with patch(
             "m4bmaker.gui.widgets.QInputDialog.getText", return_value=("X-", True)
         ):
             self.t._add_prefix()
-        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "X-01. Opening"
+        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "X-01. Opening"  # type: ignore[union-attr]
 
     def test_add_suffix_all(self):
         with patch(
             "m4bmaker.gui.widgets.QInputDialog.getText", return_value=(" [end]", True)
         ):
             self.t._add_suffix()
-        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Opening [end]"
+        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Opening [end]"  # type: ignore[union-attr]
 
     def test_find_replace_plain(self):
         with (
@@ -336,7 +338,7 @@ class TestChapterTableBulkEdit:
             ),
         ):
             self.t._find_replace()
-        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Intro"
+        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Intro"  # type: ignore[union-attr]
 
     def test_find_replace_empty_find_is_noop(self):
         original = self.t.titles()

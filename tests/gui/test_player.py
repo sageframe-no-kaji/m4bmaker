@@ -121,7 +121,7 @@ class TestAudioPlayerWidgetSeekChapter:
         p.write_bytes(b"\x00")
         w = AudioPlayerWidget()
         # Patch source() so seek_chapter doesn't bail out
-        w._source_url = QUrl.fromLocalFile(str(p))
+        w._source_url = QUrl.fromLocalFile(str(p))  # type: ignore[attr-defined]
         return w, p
 
     def test_seek_chapter_calls_set_position(self, qapp, tmp_path):
