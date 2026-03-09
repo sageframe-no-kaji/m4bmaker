@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "m4bmaker"
@@ -28,3 +28,4 @@ target-version = ["py311"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+pythonpath = ["."]

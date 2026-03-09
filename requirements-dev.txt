@@ -7,7 +7,7 @@ pytest-cov>=5.0
 
 # Type checking
 mypy>=1.9
-types-natsort>=8.4
+# types-natsort: natsort ships its own inline stubs since 8.x; no separate package needed
 
 # Linting & formatting
 black>=24.0
