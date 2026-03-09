@@ -7,17 +7,13 @@ import tempfile
 from pathlib import Path
 
 from m4bmaker import __version__
-from m4bmaker.chapters import (
-    Chapter,
-    build_chapters,
-    format_chapter_table,
-    write_ffmetadata,
-)
+from m4bmaker.chapters import format_chapter_table
 from m4bmaker.cli import parse_args
 from m4bmaker.cover import download_cover, find_cover, is_url
-from m4bmaker.encoder import _render_bar, encode, write_concat_list
+from m4bmaker.encoder import _render_bar
 from m4bmaker.metadata import extract_metadata, prompt_missing
-from m4bmaker.scanner import scan_audio_files
+from m4bmaker.models import BookMetadata, Chapter
+from m4bmaker.pipeline import load_audiobook, run_pipeline
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, log
 
 
@@ -73,13 +69,14 @@ def _edit_chapters_inline(chapters: list[Chapter]) -> list[Chapter]:
     keeps it, typing a new value replaces it.
     """
     edited: list[Chapter] = []
-    for i, ch in enumerate(chapters, 1):
-        value = input(f"  Chapter {i} [{ch.title}]: ").strip()
+    for ch in chapters:
+        value = input(f"  Chapter {ch.index} [{ch.title}]: ").strip()
         edited.append(
             Chapter(
+                index=ch.index,
+                start_time=ch.start_time,
                 title=value if value else ch.title,
-                start_ms=ch.start_ms,
-                end_ms=ch.end_ms,
+                source_file=ch.source_file,
             )
         )
     return edited
@@ -230,15 +227,10 @@ def main() -> None:
     ffmpeg = find_ffmpeg()
     ffprobe = find_ffprobe()
 
-    # 2. Scan for audio files.
-    log("Scanning directory...")
-    files = scan_audio_files(directory)
-    log(f"Found {len(files)} audio file(s)")
-
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
 
-        # 3. Locate cover image (URL download, auto-detect, or interactive prompt).
+        # 2. Locate cover image (URL download, auto-detect, or interactive prompt).
         log("Looking for cover art...")
         cover, cover_user_specified = _resolve_cover(
             args.cover, directory, tmp_dir, interactive
@@ -248,75 +240,72 @@ def main() -> None:
         else:
             log("No cover art found — skipping")
 
-        # 3b. Confirm or replace cover interactively (skip if user already provided it).
+        # 2b. Confirm or replace cover interactively.
         if not cover_user_specified:
             cover = _confirm_cover(cover, tmp_dir, interactive)
 
-        # 4. Read and complete metadata.
+        # 3. Load audiobook: scan files, extract metadata, build chapters.
+        log("Scanning audio files…")
+        book = load_audiobook(directory, ffprobe, progress_fn=_probe_progress)
+        log(f"Found {len(book.files)} audio file(s)")
+        log(f"Generated {len(book.chapters)} chapter(s)")
+
+        # Override cover with resolved value (interactive or CLI-supplied).
+        book.cover = cover
+
+        # 4. Complete metadata interactively.
         log("Reading metadata...")
-        meta = extract_metadata(files[0])
+        raw_meta = extract_metadata(book.files[0])
         hints = _hints_from_dirname(directory)
-        meta = prompt_missing(meta, args, hints=hints)
+        filled = prompt_missing(raw_meta, args, hints=hints)
+        book.metadata = BookMetadata(
+            title=filled["title"],
+            author=filled["author"],
+            narrator=filled["narrator"],
+            genre=filled.get("genre", ""),
+        )
         log(
-            f"Title: {meta['title']} | Author: {meta['author']} "
-            f"| Narrator: {meta['narrator']}"
-            + (f" | Genre: {meta['genre']}" if meta.get("genre") else "")
+            f"Title: {book.metadata.title} | Author: {book.metadata.author} "
+            f"| Narrator: {book.metadata.narrator}"
+            + (f" | Genre: {book.metadata.genre}" if book.metadata.genre else "")
         )
 
         # 5. Resolve output path.
+        meta_dict = {
+            "title": book.metadata.title,
+            "author": book.metadata.author,
+        }
         if args.output:
             output = args.output.resolve()
         else:
             base_dir = args.output_dir.resolve() if args.output_dir else directory
-            output = _output_path(base_dir, meta, flat=args.flat)
+            output = _output_path(base_dir, meta_dict, flat=args.flat)
             output = _confirm_output(output, interactive)
-        output.parent.mkdir(parents=True, exist_ok=True)
         log(f"Output: {output}")
 
-        # 6. Build chapter list and write FFMETADATA.
-        log("Generating chapter markers...")
-        meta_file = tmp_dir / "ffmetadata.txt"
-        concat_file = tmp_dir / "concat.txt"
-
-        chapters = build_chapters(
-            files,
-            ffprobe,
-            progress_fn=_probe_progress,
-        )
-        log(f"Generated {len(chapters)} chapter(s)")
-
-        # 6b. Chapter preview + optional inline editing (interactive only).
+        # 6. Chapter preview + optional inline editing (interactive only).
         if interactive and sys.stdout.isatty():
-            _print_chapter_table(chapters)
+            _print_chapter_table(book.chapters)
             answer = input("  Edit chapter titles? [y/N]: ").strip().lower()
             if answer == "y":
-                chapters = _edit_chapters_inline(chapters)
+                book.chapters = _edit_chapters_inline(book.chapters)
 
-        write_ffmetadata(chapters, meta, meta_file)
-
-        # 7. Write concat list.
-        write_concat_list(files, concat_file)
-
-        # 8. Encode.
-        total_ms = chapters[-1].end_ms if chapters else 0
+        # 7. Encode via shared pipeline.
         channels = 2 if args.stereo else 1
         log(
             f"Encoding audiobook "
             f"(codec=aac, bitrate={args.bitrate}, "
             f"channels={'stereo' if channels == 2 else 'mono'})..."
         )
-        encode(
-            concat=concat_file,
-            meta_file=meta_file,
-            cover=cover,
-            output=output,
+        run_pipeline(
+            book=book,
+            output_path=output,
             bitrate=args.bitrate,
-            channels=channels,
+            stereo=args.stereo,
             ffmpeg=ffmpeg,
-            total_ms=total_ms,
+            ffprobe=ffprobe,
         )
-
-    log(f"Done. Output: {output}")
+        log(f"Done. Created: {output}")
 
 
 if __name__ == "__main__":

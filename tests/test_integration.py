@@ -728,40 +728,39 @@ class TestConfirmCover:
 class TestEditChaptersInline:
     def test_enter_keeps_existing_title(self) -> None:
         from m4bmaker.__main__ import _edit_chapters_inline
-        from m4bmaker.chapters import Chapter
+        from m4bmaker.models import Chapter
 
-        chapters = [Chapter(title="Prologue", start_ms=0, end_ms=5000)]
+        chapters = [Chapter(index=1, start_time=0.0, title="Prologue")]
         with patch("builtins.input", return_value=""):
             result = _edit_chapters_inline(chapters)
         assert result[0].title == "Prologue"
 
     def test_typed_value_replaces_title(self) -> None:
         from m4bmaker.__main__ import _edit_chapters_inline
-        from m4bmaker.chapters import Chapter
+        from m4bmaker.models import Chapter
 
-        chapters = [Chapter(title="Old Title", start_ms=0, end_ms=5000)]
+        chapters = [Chapter(index=1, start_time=0.0, title="Old Title")]
         with patch("builtins.input", return_value="New Title"):
             result = _edit_chapters_inline(chapters)
         assert result[0].title == "New Title"
 
     def test_timestamps_preserved_unchanged(self) -> None:
         from m4bmaker.__main__ import _edit_chapters_inline
-        from m4bmaker.chapters import Chapter
+        from m4bmaker.models import Chapter
 
-        chapters = [Chapter(title="Ch", start_ms=1000, end_ms=5000)]
+        chapters = [Chapter(index=1, start_time=1.0, title="Ch")]
         with patch("builtins.input", return_value="Renamed"):
             result = _edit_chapters_inline(chapters)
-        assert result[0].start_ms == 1000
-        assert result[0].end_ms == 5000
+        assert result[0].start_time == 1.0
 
     def test_mixed_keep_and_replace(self) -> None:
         from m4bmaker.__main__ import _edit_chapters_inline
-        from m4bmaker.chapters import Chapter
+        from m4bmaker.models import Chapter
 
         chapters = [
-            Chapter(title="Intro", start_ms=0, end_ms=1000),
-            Chapter(title="Part One", start_ms=1000, end_ms=2000),
-            Chapter(title="Outro", start_ms=2000, end_ms=3000),
+            Chapter(index=1, start_time=0.0, title="Intro"),
+            Chapter(index=2, start_time=1.0, title="Part One"),
+            Chapter(index=3, start_time=2.0, title="Outro"),
         ]
         inputs = iter(["", "The Middle", ""])
         with patch("builtins.input", side_effect=inputs):
@@ -772,11 +771,10 @@ class TestEditChaptersInline:
 
     def test_returns_same_count(self) -> None:
         from m4bmaker.__main__ import _edit_chapters_inline
-        from m4bmaker.chapters import Chapter
+        from m4bmaker.models import Chapter
 
         chapters = [
-            Chapter(title=f"Ch {i}", start_ms=i * 1000, end_ms=(i + 1) * 1000)
-            for i in range(4)
+            Chapter(index=i + 1, start_time=float(i), title=f"Ch {i}") for i in range(4)
         ]
         with patch("builtins.input", return_value=""):
             result = _edit_chapters_inline(chapters)
@@ -802,9 +800,9 @@ class TestChapterTableInPipeline:
     ) -> None:
         """Chapter table IS shown when interactive and stdout is a TTY."""
         from m4bmaker.__main__ import _print_chapter_table
-        from m4bmaker.chapters import Chapter
+        from m4bmaker.models import Chapter
 
-        chapters = [Chapter(title="Intro", start_ms=0, end_ms=5000)]
+        chapters = [Chapter(index=1, start_time=0.0, title="Intro")]
         _print_chapter_table(chapters)
         captured = capsys.readouterr()
         assert "Intro" in captured.out

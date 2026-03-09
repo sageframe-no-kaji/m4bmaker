@@ -10,12 +10,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from m4bmaker.chapters import (
-    Chapter,
     _strip_chapter_prefix,
+    _format_time,
     build_chapters,
+    format_chapter_table,
     get_duration,
     write_ffmetadata,
 )
+from m4bmaker.models import BookMetadata, Chapter
 
 # ---------------------------------------------------------------------------
 # _strip_chapter_prefix
@@ -119,9 +121,10 @@ class TestBuildChapters:
             chapters = build_chapters([stub], "ffprobe")
 
         assert len(chapters) == 1
-        assert chapters[0].start_ms == 0
-        assert chapters[0].end_ms == 60_000
+        assert chapters[0].index == 1
+        assert chapters[0].start_time == 0.0
         assert chapters[0].title == "Prologue"
+        assert chapters[0].source_file == stub
 
     def test_multiple_files_cumulative_timestamps(self, tmp_path: Path) -> None:
         files = [tmp_path / f"0{i}.mp3" for i in range(1, 4)]
@@ -141,12 +144,12 @@ class TestBuildChapters:
         with patch("m4bmaker.chapters.subprocess.run", side_effect=_side_effect):
             chapters = build_chapters(files, "ffprobe")
 
-        assert chapters[0].start_ms == 0
-        assert chapters[0].end_ms == 10_000
-        assert chapters[1].start_ms == 10_000
-        assert chapters[1].end_ms == 30_000
-        assert chapters[2].start_ms == 30_000
-        assert chapters[2].end_ms == 60_000
+        assert chapters[0].start_time == 0.0
+        assert chapters[1].start_time == 10.0
+        assert chapters[2].start_time == 30.0
+        assert chapters[0].index == 1
+        assert chapters[1].index == 2
+        assert chapters[2].index == 3
 
     def test_chapter_titles_stripped_of_prefix(self, tmp_path: Path) -> None:
         stub = tmp_path / "03_Introduction.mp3"
@@ -172,8 +175,9 @@ class TestBuildChapters:
         ):
             chapters = build_chapters([stub], "ffprobe")
 
-        assert chapters[0].end_ms == 72_000_000
-        assert isinstance(chapters[0].end_ms, int)
+        assert chapters[0].start_time == 0.0
+        assert chapters[0].source_file is not None
+        assert isinstance(chapters[0].start_time, float)
 
 
 # ---------------------------------------------------------------------------
@@ -184,20 +188,22 @@ class TestBuildChapters:
 class TestWriteFFMetadata:
     def _make_chapters(self) -> list[Chapter]:
         return [
-            Chapter(title="Intro", start_ms=0, end_ms=10_000),
-            Chapter(title="Chapter One", start_ms=10_000, end_ms=30_000),
+            Chapter(index=1, start_time=0.0, title="Intro"),
+            Chapter(index=2, start_time=10.0, title="Chapter One"),
         ]
 
     def test_file_starts_with_ffmetadata1(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        write_ffmetadata(self._make_chapters(), {}, dest)
+        write_ffmetadata(
+            self._make_chapters(), BookMetadata(), dest, total_duration_s=30.0
+        )
         content = dest.read_text()
         assert content.startswith(";FFMETADATA1")
 
     def test_global_tags_written(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        meta = {"title": "My Book", "author": "J. Smith", "narrator": "B. Jones"}
-        write_ffmetadata(self._make_chapters(), meta, dest)
+        meta = BookMetadata(title="My Book", author="J. Smith", narrator="B. Jones")
+        write_ffmetadata(self._make_chapters(), meta, dest, total_duration_s=30.0)
         content = dest.read_text()
         assert "title=My Book" in content
         assert "artist=J. Smith" in content
@@ -205,33 +211,35 @@ class TestWriteFFMetadata:
 
     def test_genre_tag_written(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        meta = {
-            "title": "My Book",
-            "author": "J. Smith",
-            "narrator": "B. Jones",
-            "genre": "Science Fiction",
-        }
-        write_ffmetadata(self._make_chapters(), meta, dest)
+        meta = BookMetadata(
+            title="My Book",
+            author="J. Smith",
+            narrator="B. Jones",
+            genre="Science Fiction",
+        )
+        write_ffmetadata(self._make_chapters(), meta, dest, total_duration_s=30.0)
         content = dest.read_text()
         assert "genre=Science Fiction" in content
 
     def test_genre_omitted_when_empty(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        meta = {"title": "T", "author": "A", "narrator": "N", "genre": ""}
-        write_ffmetadata(self._make_chapters(), meta, dest)
+        meta = BookMetadata(title="T", author="A", narrator="N", genre="")
+        write_ffmetadata(self._make_chapters(), meta, dest, total_duration_s=30.0)
         content = dest.read_text()
         assert "genre=" not in content
 
     def test_chapter_count_correct(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        write_ffmetadata(self._make_chapters(), {}, dest)
+        write_ffmetadata(
+            self._make_chapters(), BookMetadata(), dest, total_duration_s=30.0
+        )
         content = dest.read_text()
         assert content.count("[CHAPTER]") == 2
 
     def test_chapter_timestamps_correct(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        chapters = [Chapter(title="Only", start_ms=0, end_ms=5_500)]
-        write_ffmetadata(chapters, {}, dest)
+        chapters = [Chapter(index=1, start_time=0.0, title="Only")]
+        write_ffmetadata(chapters, BookMetadata(), dest, total_duration_s=5.5)
         content = dest.read_text()
         assert "TIMEBASE=1/1000" in content
         assert "START=0" in content
@@ -239,7 +247,9 @@ class TestWriteFFMetadata:
 
     def test_chapter_titles_written(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        write_ffmetadata(self._make_chapters(), {}, dest)
+        write_ffmetadata(
+            self._make_chapters(), BookMetadata(), dest, total_duration_s=30.0
+        )
         content = dest.read_text()
         assert "title=Intro" in content
         assert "title=Chapter One" in content
@@ -247,7 +257,10 @@ class TestWriteFFMetadata:
     def test_empty_meta_fields_omitted(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
         write_ffmetadata(
-            self._make_chapters(), {"title": "", "author": "", "narrator": ""}, dest
+            self._make_chapters(),
+            BookMetadata(title="", author="", narrator=""),
+            dest,
+            total_duration_s=30.0,
         )
         content = dest.read_text()
         assert "title=" not in content.split("\n")[1]  # line 1 after ;FFMETADATA1
@@ -256,9 +269,9 @@ class TestWriteFFMetadata:
 
     def test_file_is_utf8(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
-        chapters = [Chapter(title="Ça va — chapter", start_ms=0, end_ms=1000)]
-        meta = {"title": "Über Book", "author": "", "narrator": ""}
-        write_ffmetadata(chapters, meta, dest)
+        chapters = [Chapter(index=1, start_time=0.0, title="Ça va — chapter")]
+        meta = BookMetadata(title="Über Book", author="", narrator="")
+        write_ffmetadata(chapters, meta, dest, total_duration_s=1.0)
         raw = dest.read_bytes()
         raw.decode("utf-8")  # must not raise
 
@@ -268,32 +281,22 @@ class TestWriteFFMetadata:
 # ---------------------------------------------------------------------------
 
 
-class TestFormatChapterMs:
+class TestFormatTime:
     def test_zero(self) -> None:
-        from m4bmaker.chapters import _format_chapter_ms
-
-        assert _format_chapter_ms(0) == "0:00:00"
+        assert _format_time(0.0) == "0:00:00"
 
     def test_seconds_only(self) -> None:
-        from m4bmaker.chapters import _format_chapter_ms
-
-        assert _format_chapter_ms(45_000) == "0:00:45"
+        assert _format_time(45.0) == "0:00:45"
 
     def test_minutes_and_seconds(self) -> None:
-        from m4bmaker.chapters import _format_chapter_ms
-
-        assert _format_chapter_ms(90_000) == "0:01:30"
+        assert _format_time(90.0) == "0:01:30"
 
     def test_full_hour(self) -> None:
-        from m4bmaker.chapters import _format_chapter_ms
-
-        assert _format_chapter_ms(3_600_000) == "1:00:00"
+        assert _format_time(3600.0) == "1:00:00"
 
     def test_complex_value(self) -> None:
-        from m4bmaker.chapters import _format_chapter_ms
-
-        # 2h 43m 34s → 9814 seconds
-        assert _format_chapter_ms(9_814_000) == "2:43:34"
+        # 2h 43m 34s = 9814 seconds
+        assert _format_time(9814.0) == "2:43:34"
 
 
 # ---------------------------------------------------------------------------
@@ -303,26 +306,20 @@ class TestFormatChapterMs:
 
 class TestFormatChapterTable:
     def test_empty_returns_placeholder(self) -> None:
-        from m4bmaker.chapters import format_chapter_table
-
         result = format_chapter_table([])
         assert "no chapters" in result
 
     def test_single_chapter_contains_title(self) -> None:
-        from m4bmaker.chapters import format_chapter_table
-
-        ch = Chapter(title="Prologue", start_ms=0, end_ms=60_000)
+        ch = Chapter(index=1, start_time=0.0, title="Prologue")
         result = format_chapter_table([ch])
         assert "Prologue" in result
         assert "0:00:00" in result
 
     def test_multiple_chapters_all_present(self) -> None:
-        from m4bmaker.chapters import format_chapter_table
-
         chapters = [
-            Chapter(title="Intro", start_ms=0, end_ms=60_000),
-            Chapter(title="The Storm", start_ms=60_000, end_ms=180_000),
-            Chapter(title="Aftermath", start_ms=180_000, end_ms=300_000),
+            Chapter(index=1, start_time=0.0, title="Intro"),
+            Chapter(index=2, start_time=60.0, title="The Storm"),
+            Chapter(index=3, start_time=180.0, title="Aftermath"),
         ]
         result = format_chapter_table(chapters)
         assert "Intro" in result
@@ -332,30 +329,23 @@ class TestFormatChapterTable:
         assert "0:03:00" in result
 
     def test_long_title_truncated(self) -> None:
-        from m4bmaker.chapters import format_chapter_table
-
         long_title = "A" * 50
-        ch = Chapter(title=long_title, start_ms=0, end_ms=1000)
+        ch = Chapter(index=1, start_time=0.0, title=long_title)
         result = format_chapter_table([ch])
         # Should be truncated with ellipsis, not show all 50 chars
         assert long_title not in result
         assert "\u2026" in result
 
     def test_box_drawing_characters_present(self) -> None:
-        from m4bmaker.chapters import format_chapter_table
-
-        ch = Chapter(title="Ch", start_ms=0, end_ms=1000)
+        ch = Chapter(index=1, start_time=0.0, title="Ch")
         result = format_chapter_table([ch])
         assert "\u250c" in result  # ┌
         assert "\u2514" in result  # └
         assert "\u2502" in result  # │
 
     def test_correct_row_count(self) -> None:
-        from m4bmaker.chapters import format_chapter_table
-
         chapters = [
-            Chapter(title=f"Ch {i}", start_ms=i * 1000, end_ms=(i + 1) * 1000)
-            for i in range(5)
+            Chapter(index=i + 1, start_time=float(i), title=f"Ch {i}") for i in range(5)
         ]
         lines = format_chapter_table(chapters).splitlines()
         # 3 header lines (top, header, sep) + 5 data rows + 1 bottom = 9

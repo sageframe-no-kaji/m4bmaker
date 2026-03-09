@@ -7,19 +7,13 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
+
+from m4bmaker.models import BookMetadata, Chapter
 
 # Matches leading digits optionally followed by separators (space/dash/dot/underscore).
 # Examples stripped: "01 - ", "1.", "02_", "003 "
 _CHAPTER_TITLE_RE = re.compile(r"^\d+[\s.\-_]*")
-
-
-@dataclass
-class Chapter:
-    title: str
-    start_ms: int  # inclusive start, milliseconds
-    end_ms: int  # exclusive end, milliseconds
 
 
 def _strip_chapter_prefix(stem: str) -> str:
@@ -67,32 +61,36 @@ def build_chapters(
     ffprobe: str,
     progress_fn: Callable[[int, int, str], None] | None = None,
 ) -> list[Chapter]:
-    """Build a Chapter list from *files* using ffprobe for durations."""
+    """Build a Chapter list from *files* using ffprobe for durations.
+
+    Chapters are indexed sequentially starting at 1, with *start_time* in
+    seconds (float).  *source_file* is set to the corresponding input path.
+    """
     chapters: list[Chapter] = []
-    cursor_ms = 0
+    cursor_s: float = 0.0
     total = len(files)
 
     for i, path in enumerate(files, 1):
         if progress_fn is not None:
             progress_fn(i, total, path.name)
         duration_sec = get_duration(path, ffprobe)
-        duration_ms = round(duration_sec * 1000)
         title = _strip_chapter_prefix(path.stem)
         chapters.append(
             Chapter(
+                index=i,
+                start_time=cursor_s,
                 title=title,
-                start_ms=cursor_ms,
-                end_ms=cursor_ms + duration_ms,
+                source_file=path,
             )
         )
-        cursor_ms += duration_ms
+        cursor_s += duration_sec
 
     return chapters
 
 
-def _format_chapter_ms(ms: int) -> str:
-    """Format a millisecond offset as H:MM:SS for display and chapter files."""
-    s = ms // 1000
+def _format_time(seconds: float) -> str:
+    """Format a duration in seconds as H:MM:SS."""
+    s = int(seconds)
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)
     return f"{h}:{m:02d}:{sec:02d}"
@@ -109,43 +107,72 @@ def format_chapter_table(chapters: list[Chapter]) -> str:
     num_w = max(len(str(len(chapters))), 1)
     time_w = 8  # "H:MM:SS" is at most 8 chars (e.g. "9:59:59")
 
-    top = f"  ┌{'─' * (num_w + 2)}┬{'─' * (time_w + 2)}┬{'─' * (title_width + 2)}┐"
-    hdr = f"  │ {'#':>{num_w}} │ {'Start':<{time_w}} │ {'Title':<{title_width}} │"
-    sep = f"  ├{'─' * (num_w + 2)}┼{'─' * (time_w + 2)}┼{'─' * (title_width + 2)}┤"
-    bot = f"  └{'─' * (num_w + 2)}┴{'─' * (time_w + 2)}┴{'─' * (title_width + 2)}┘"
+    _h = "\u2500"
+    _cols = [num_w, time_w, title_width]
+
+    def _hline(left: str, join: str, right: str) -> str:
+        return "  " + left + join.join(_h * (w + 2) for w in _cols) + right
+
+    top = _hline("\u250c", "\u252c", "\u2510")
+    sep = _hline("\u251c", "\u253c", "\u2524")
+    bot = _hline("\u2514", "\u2534", "\u2518")
+    hdr = (
+        f"  \u2502 {'#':>{num_w}} \u2502"
+        f" {'Start':<{time_w}} \u2502"
+        f" {'Title':<{title_width}} \u2502"
+    )
 
     rows = [top, hdr, sep]
-    for i, ch in enumerate(chapters, 1):
-        start = _format_chapter_ms(ch.start_ms)
+    for ch in chapters:
+        start = _format_time(ch.start_time)
         title = ch.title
         if len(title) > title_width:
             title = title[: title_width - 1] + "\u2026"
-        rows.append(f"  │ {i:>{num_w}} │ {start:<{time_w}} │ {title:<{title_width}} │")
+        rows.append(
+            f"  \u2502 {ch.index:>{num_w}} \u2502"
+            f" {start:<{time_w}} \u2502"
+            f" {title:<{title_width}} \u2502"
+        )
     rows.append(bot)
     return "\n".join(rows)
 
 
-def write_ffmetadata(chapters: list[Chapter], meta: dict[str, str], dest: Path) -> None:
-    """Write an FFMETADATA1 file with global tags and chapter markers to *dest*."""
+def write_ffmetadata(
+    chapters: list[Chapter],
+    meta: BookMetadata,
+    dest: Path,
+    total_duration_s: float,
+) -> None:
+    """Write an FFMETADATA1 file with global tags and chapter markers to *dest*.
+
+    Chapter END timestamps are derived from the next chapter's *start_time*;
+    the final chapter ends at *total_duration_s*.
+    """
     lines: list[str] = [";FFMETADATA1\n"]
 
     # Global metadata tags
-    if meta.get("title"):
-        lines.append(f"title={meta['title']}\n")
-    if meta.get("author"):
-        lines.append(f"artist={meta['author']}\n")
-    if meta.get("narrator"):
-        lines.append(f"composer={meta['narrator']}\n")
-    if meta.get("genre"):
-        lines.append(f"genre={meta['genre']}\n")
+    if meta.title:
+        lines.append(f"title={meta.title}\n")
+    if meta.author:
+        lines.append(f"artist={meta.author}\n")
+    if meta.narrator:
+        lines.append(f"composer={meta.narrator}\n")
+    if meta.genre:
+        lines.append(f"genre={meta.genre}\n")
 
     lines.append("\n")
 
-    for chapter in chapters:
+    for i, chapter in enumerate(chapters):
+        if i + 1 < len(chapters):
+            end_ms = int(chapters[i + 1].start_time * 1000)
+        else:
+            end_ms = int(total_duration_s * 1000)
+        start_ms = int(chapter.start_time * 1000)
+
         lines.append("[CHAPTER]\n")
         lines.append("TIMEBASE=1/1000\n")
-        lines.append(f"START={chapter.start_ms}\n")
-        lines.append(f"END={chapter.end_ms}\n")
+        lines.append(f"START={start_ms}\n")
+        lines.append(f"END={end_ms}\n")
         lines.append(f"title={chapter.title}\n")
         lines.append("\n")
 
