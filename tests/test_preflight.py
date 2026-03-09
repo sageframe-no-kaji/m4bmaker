@@ -251,9 +251,9 @@ class TestFormatPreflightSummary:
         s = format_preflight_summary(a)
         assert "⚠" in s or "mixed" in s
 
-    def test_empty_analysis_returns_dash(self):
+    def test_empty_analysis_returns_zero_files(self):
         a = AudioAnalysis(file_count=0)
-        assert format_preflight_summary(a) == "—"
+        assert "0 file(s)" in format_preflight_summary(a)
 
     def test_n_channel_label(self):
         a = AudioAnalysis(
@@ -309,3 +309,70 @@ class TestFormatPreflightSummary:
         with patch("subprocess.run", return_value=r):
             info = probe_file(p, "ffprobe")
         assert info.codec_name == "mp3"
+
+    def test_file_count_shown_in_summary(self):
+        a = AudioAnalysis(file_count=5, sample_rates=Counter({44100: 5}))
+        assert "5 file(s)" in format_preflight_summary(a)
+
+    def test_total_duration_shown_in_summary(self):
+        a = AudioAnalysis(
+            file_count=3,
+            sample_rates=Counter({44100: 3}),
+            total_duration_seconds=3723.0,  # 1:02:03
+        )
+        s = format_preflight_summary(a)
+        assert "1:02:03" in s
+
+    def test_duration_below_one_hour_no_h(self):
+        a = AudioAnalysis(file_count=1, total_duration_seconds=125.0)  # 2:05
+        assert "2:05" in format_preflight_summary(a)
+
+    def test_zero_duration_omitted(self):
+        a = AudioAnalysis(file_count=2, total_duration_seconds=0.0)
+        s = format_preflight_summary(a)
+        assert ":" not in s  # no time token at all
+
+    def test_duration_from_stream(self, tmp_path):
+        p = tmp_path / "t.mp3"
+        p.write_bytes(b"\x00")
+        out = json.dumps({
+            "streams": [{"sample_rate": "44100", "channels": 1,
+                         "bit_rate": "64000", "codec_name": "mp3",
+                         "duration": "3600.0"}]
+        })
+        r = MagicMock()
+        r.returncode = 0
+        r.stdout = out
+        with patch("subprocess.run", return_value=r):
+            info = probe_file(p, "ffprobe")
+        assert info.duration_seconds == 3600.0
+
+    def test_duration_fallback_to_format(self, tmp_path):
+        p = tmp_path / "t.mp3"
+        p.write_bytes(b"\x00")
+        out = json.dumps({
+            "streams": [{"sample_rate": "44100", "channels": 1}],
+            "format": {"duration": "120.5"},
+        })
+        r = MagicMock()
+        r.returncode = 0
+        r.stdout = out
+        with patch("subprocess.run", return_value=r):
+            info = probe_file(p, "ffprobe")
+        assert info.duration_seconds == 120.5
+
+    def test_total_duration_accumulated_in_run_preflight(self, tmp_path):
+        p1 = tmp_path / "a.mp3"
+        p2 = tmp_path / "b.mp3"
+        p1.write_bytes(b"\x00")
+        p2.write_bytes(b"\x00")
+
+        def _fake_probe(path, ffprobe):
+            from m4bmaker.preflight import FileInfo
+            return FileInfo(path=path, sample_rate=44100, channels=1,
+                            bit_rate=128000, duration_seconds=60.0)
+
+        with patch("m4bmaker.preflight.probe_file", side_effect=_fake_probe):
+            from m4bmaker.preflight import run_preflight
+            analysis = run_preflight([p1, p2], "ffprobe")
+        assert analysis.total_duration_seconds == 120.0

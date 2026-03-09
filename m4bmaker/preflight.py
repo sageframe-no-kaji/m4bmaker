@@ -25,6 +25,7 @@ class FileInfo:
     channels: int | None  # 1 = mono, 2 = stereo, …
     bit_rate: int | None  # bits/sec; None if unavailable
     codec_name: str | None = None  # e.g. "mp3", "aac", "flac"
+    duration_seconds: float | None = None
 
 
 @dataclass
@@ -36,6 +37,7 @@ class AudioAnalysis:
     channels: Counter = field(default_factory=Counter)  # {n_channels: count}
     bit_rates: Counter = field(default_factory=Counter)  # {bps: count}
     codecs: Counter = field(default_factory=Counter)  # {codec_name: count}
+    total_duration_seconds: float = 0.0
 
     @property
     def has_mismatches(self) -> bool:
@@ -59,6 +61,7 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
         "-print_format",
         "json",
         "-show_streams",
+        "-show_format",
         "-select_streams",
         "a:0",
         str(path),
@@ -69,6 +72,7 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
     channels: int | None = None
     bit_rate: int | None = None
     codec_name: str | None = None
+    duration_seconds: float | None = None
 
     if result.returncode == 0:
         try:
@@ -84,6 +88,13 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
                     bit_rate = int(s["bit_rate"])
                 if "codec_name" in s:
                     codec_name = s["codec_name"]
+                if "duration" in s:
+                    duration_seconds = float(s["duration"])
+            # Fall back to format-level duration (more reliable for MP3 etc.)
+            if duration_seconds is None:
+                fmt = data.get("format", {})
+                if "duration" in fmt:
+                    duration_seconds = float(fmt["duration"])
         except (KeyError, ValueError, json.JSONDecodeError):
             pass
 
@@ -93,6 +104,7 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
         channels=channels,
         bit_rate=bit_rate,
         codec_name=codec_name,
+        duration_seconds=duration_seconds,
     )
 
 
@@ -102,6 +114,7 @@ def run_preflight(files: list[Path], ffprobe: str) -> AudioAnalysis:
     channels: Counter = Counter()
     bit_rates: Counter = Counter()
     codecs: Counter = Counter()
+    total_duration: float = 0.0
 
     for path in files:
         info = probe_file(path, ffprobe)
@@ -113,6 +126,8 @@ def run_preflight(files: list[Path], ffprobe: str) -> AudioAnalysis:
             bit_rates[info.bit_rate] += 1
         if info.codec_name is not None:
             codecs[info.codec_name] += 1
+        if info.duration_seconds is not None:
+            total_duration += info.duration_seconds
 
     return AudioAnalysis(
         file_count=len(files),
@@ -120,10 +135,21 @@ def run_preflight(files: list[Path], ffprobe: str) -> AudioAnalysis:
         channels=channels,
         bit_rates=bit_rates,
         codecs=codecs,
+        total_duration_seconds=total_duration,
     )
 
 
 # ── reporting ─────────────────────────────────────────────────────────────────
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format a duration in seconds as H:MM:SS or M:SS."""
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
 
 
 def format_preflight_report(analysis: AudioAnalysis) -> str:
@@ -142,6 +168,8 @@ def format_preflight_report(analysis: AudioAnalysis) -> str:
         "Audio analysis:",
         f"  {analysis.file_count} file(s) detected",
     ]
+    if analysis.total_duration_seconds > 0:
+        lines.append(f"  Total duration: {_fmt_duration(analysis.total_duration_seconds)}")
     if analysis.sample_rates:
         lines.append(f"  Sample rates: {_fmt_sr(analysis.sample_rates)}")
     if analysis.channels:
@@ -164,6 +192,14 @@ def format_preflight_report(analysis: AudioAnalysis) -> str:
 def format_preflight_summary(analysis: AudioAnalysis) -> str:
     """Return a compact single-line summary suitable for a GUI label."""
     parts: list[str] = []
+
+    # File count + total duration (always shown if available)
+    if analysis.total_duration_seconds > 0:
+        parts.append(
+            f"{analysis.file_count} file(s)  ·  {_fmt_duration(analysis.total_duration_seconds)}"
+        )
+    else:
+        parts.append(f"{analysis.file_count} file(s)")
 
     if analysis.codecs:
         if len(analysis.codecs) == 1:
@@ -195,4 +231,4 @@ def format_preflight_summary(analysis: AudioAnalysis) -> str:
             hi = max(analysis.bit_rates) // 1000
             parts.append(f"\u26a0 {lo}\u2013{hi}kbps")
 
-    return "  ·  ".join(parts) if parts else "—"
+    return "  ·  ".join(parts)
