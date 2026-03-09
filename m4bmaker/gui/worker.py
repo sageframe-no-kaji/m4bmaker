@@ -49,12 +49,14 @@ class ConvertWorker(QThread):
         output_path: Path,
         bitrate: str = "96k",
         stereo: bool = False,
+        sample_rate: int | None = None,
     ) -> None:
         super().__init__()
         self._book = book
         self._output_path = output_path
         self._bitrate = bitrate
         self._stereo = stereo
+        self._sample_rate = sample_rate
 
     def run(self) -> None:
         try:
@@ -65,6 +67,7 @@ class ConvertWorker(QThread):
                 output_path=self._output_path,
                 bitrate=self._bitrate,
                 stereo=self._stereo,
+                sample_rate=self._sample_rate,
                 cover=self._book.cover,
                 progress_callback=self._on_progress,
                 ffmpeg=ffmpeg,

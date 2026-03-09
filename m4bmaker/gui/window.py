@@ -126,6 +126,7 @@ class MainWindow(QMainWindow):
         self._m4b_load_worker: Optional[LoadM4bWorker] = None
         self._convert_worker: Optional[ConvertWorker] = None
         self._preflight_worker: Optional[PreflightWorker] = None
+        self._preflight_sample_rate: Optional[int] = None
         self._save_worker: Optional[SaveChaptersWorker] = None
         self._extra_windows: list["MainWindow"] = []
 
@@ -634,6 +635,7 @@ class MainWindow(QMainWindow):
             self._m4b_load_worker.start()
 
     def _on_folder_cleared(self) -> None:
+        self._preflight_sample_rate = None
         self._book = None
         self._mode = "build"
         self._mode_badge.setText("Build")
@@ -666,6 +668,15 @@ class MainWindow(QMainWindow):
         summary = format_preflight_summary(analysis)  # type: ignore[arg-type]
         self._analysis_label.setText(summary)
         self._settings_tabs.setCurrentIndex(0)  # switch to Analysis tab
+        # Auto-configure encoding from detected audio properties
+        a = analysis  # type: ignore[assignment]
+        if len(a.sample_rates) == 1:  # type: ignore[union-attr]
+            self._preflight_sample_rate = next(iter(a.sample_rates))  # type: ignore[union-attr]
+        else:
+            self._preflight_sample_rate = None  # mixed rates — let ffmpeg decide
+        # VBR sources: snap bitrate to safe default
+        if len(a.bit_rates) != 1:  # type: ignore[union-attr]
+            self._bitrate_combo.setCurrentText("96k")
 
     def _on_chapter_selected(
         self, row: int, _col: int, _prev_row: int, _prev_col: int
@@ -747,6 +758,7 @@ class MainWindow(QMainWindow):
             output_path=out,
             bitrate=self._bitrate_combo.currentText(),
             stereo=self._stereo_radio.isChecked(),
+            sample_rate=self._preflight_sample_rate,
         )
         self._convert_worker.progress.connect(self._on_progress)
         self._convert_worker.finished.connect(self._on_convert_finished)

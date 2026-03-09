@@ -81,6 +81,7 @@ def encode(
     channels: int,
     ffmpeg: str,
     total_ms: int = 0,
+    sample_rate: int | None = None,
     progress_callback: Callable[[float], None] | None = None,
 ) -> None:
     """Run ffmpeg to produce the final .m4b file with live progress bar.
@@ -135,6 +136,7 @@ def encode(
         bitrate,
         "-ac",
         str(channels),
+        *(['-ar', str(sample_rate)] if sample_rate is not None else []),
         "-movflags",
         "+faststart",  # optimise for streaming
         "-progress",
