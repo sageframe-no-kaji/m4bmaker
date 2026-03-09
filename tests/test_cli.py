@@ -107,6 +107,18 @@ class TestFlags:
         args = parse_args(["-n", "Bob Smith"])
         assert args.narrator == "Bob Smith"
 
+    def test_genre_long(self) -> None:
+        args = parse_args(["--genre", "Science Fiction"])
+        assert args.genre == "Science Fiction"
+
+    def test_genre_short(self) -> None:
+        args = parse_args(["-g", "Fantasy"])
+        assert args.genre == "Fantasy"
+
+    def test_genre_default_none(self) -> None:
+        args = parse_args([])
+        assert args.genre is None
+
     def test_cover_long_is_str(self, tmp_path: Path) -> None:
         img = str(tmp_path / "cover.jpg")
         args = parse_args(["--cover", img])

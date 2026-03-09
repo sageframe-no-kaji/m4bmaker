@@ -203,6 +203,25 @@ class TestWriteFFMetadata:
         assert "artist=J. Smith" in content
         assert "composer=B. Jones" in content
 
+    def test_genre_tag_written(self, tmp_path: Path) -> None:
+        dest = tmp_path / "meta.txt"
+        meta = {
+            "title": "My Book",
+            "author": "J. Smith",
+            "narrator": "B. Jones",
+            "genre": "Science Fiction",
+        }
+        write_ffmetadata(self._make_chapters(), meta, dest)
+        content = dest.read_text()
+        assert "genre=Science Fiction" in content
+
+    def test_genre_omitted_when_empty(self, tmp_path: Path) -> None:
+        dest = tmp_path / "meta.txt"
+        meta = {"title": "T", "author": "A", "narrator": "N", "genre": ""}
+        write_ffmetadata(self._make_chapters(), meta, dest)
+        content = dest.read_text()
+        assert "genre=" not in content
+
     def test_chapter_count_correct(self, tmp_path: Path) -> None:
         dest = tmp_path / "meta.txt"
         write_ffmetadata(self._make_chapters(), {}, dest)

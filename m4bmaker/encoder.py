@@ -2,24 +2,55 @@
 
 from __future__ import annotations
 
-import itertools
 import subprocess
 import sys
 import threading
+from collections.abc import Iterable
 from pathlib import Path
 
 
-def _spin(label: str, done: threading.Event) -> None:
-    """Animate a simple CLI spinner until *done* is set."""
-    width = len(label) + 6
-    for ch in itertools.cycle(r"|/-\\"):
+def _format_ms(ms: int) -> str:
+    """Format a millisecond count as H:MM:SS."""
+    s = ms // 1000
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}:{m:02d}:{sec:02d}"
+
+
+def _render_bar(fraction: float, width: int = 30) -> str:
+    """Return a Unicode block progress bar string including brackets."""
+    filled = round(min(1.0, max(0.0, fraction)) * width)
+    return "[" + "\u2588" * filled + "\u2591" * (width - filled) + "]"
+
+
+def _progress_reader(
+    stdout: Iterable[str],
+    total_ms: int,
+    done: threading.Event,
+) -> None:
+    """Read ffmpeg -progress lines and paint a live progress bar on stdout."""
+    bar_width = 30
+    for raw in stdout:
         if done.is_set():
             break
-        sys.stdout.write(f"\r  {ch}  {label}")
-        sys.stdout.flush()
-        done.wait(0.1)
-    sys.stdout.write("\r" + " " * width + "\r")
-    sys.stdout.flush()
+        line: str = raw
+        line = line.strip()
+        if not line.startswith("out_time_ms="):
+            continue
+        try:
+            current_ms = max(0, int(line.split("=", 1)[1]) // 1000)
+        except ValueError:
+            continue
+        if total_ms > 0 and sys.stdout.isatty():
+            frac = min(1.0, current_ms / total_ms)
+            bar = _render_bar(frac, bar_width)
+            pct = int(frac * 100)
+            elapsed = _format_ms(current_ms)
+            total_str = _format_ms(total_ms)
+            sys.stdout.write(
+                f"\r  Encoding {bar}  {pct:3d}%  {elapsed} / {total_str}  "
+            )
+            sys.stdout.flush()
 
 
 def write_concat_list(files: list[Path], dest: Path) -> None:
@@ -45,8 +76,9 @@ def encode(
     bitrate: str,
     channels: int,
     ffmpeg: str,
+    total_ms: int = 0,
 ) -> None:
-    """Run ffmpeg to produce the final .m4b file.
+    """Run ffmpeg to produce the final .m4b file with live progress bar.
 
     Stream mapping:
       - Input 0: concat demuxer (audio)
@@ -54,6 +86,7 @@ def encode(
       - Input 2 (optional): cover image
 
     The output is an AAC-encoded M4B (MP4 audiobook) container.
+    ffmpeg progress data is read from stdout via ``-progress pipe:1``.
     """
     cmd: list[str] = [
         ffmpeg,
@@ -99,27 +132,57 @@ def encode(
         str(channels),
         "-movflags",
         "+faststart",  # optimise for streaming
+        "-progress",
+        "pipe:1",  # write progress key=value pairs to stdout
+        "-nostdin",  # do not read from stdin
         str(output),
     ]
 
+    stderr_buf: list[str] = []
     done = threading.Event()
-    spin: threading.Thread | None = None
-    if sys.stdout.isatty():
-        spin = threading.Thread(target=_spin, args=("Encoding", done), daemon=True)
-        spin.start()
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     except FileNotFoundError:
         sys.exit(f"Error: ffmpeg executable not found at '{ffmpeg}'.")
+
+    def _read_stderr() -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            stderr_buf.append(line)
+
+    reader = threading.Thread(
+        target=_progress_reader, args=(proc.stdout, total_ms, done), daemon=True
+    )
+    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+    reader.start()
+    stderr_thread.start()
+
+    try:
+        proc.wait()
     finally:
         done.set()
-        if spin is not None:
-            spin.join()
+        reader.join()
+        stderr_thread.join()
 
-    if result.returncode != 0:
+    if sys.stdout.isatty():
+        if proc.returncode == 0 and total_ms > 0:
+            bar = _render_bar(1.0, 30)
+            total_str = _format_ms(total_ms)
+            sys.stdout.write(f"\r  Encoding {bar}  100%  {total_str} / {total_str}  \n")
+        else:
+            sys.stdout.write("\r" + " " * 70 + "\r")
+        sys.stdout.flush()
+
+    if proc.returncode != 0:
+        stderr_data = "".join(stderr_buf)
         sys.exit(
-            f"Error: ffmpeg exited with code {result.returncode}.\n"
+            f"Error: ffmpeg exited with code {proc.returncode}.\n"
             f"Command: {' '.join(cmd)}\n"
-            f"stderr:\n{result.stderr.strip()}"
+            f"stderr:\n{stderr_data.strip()}"
         )

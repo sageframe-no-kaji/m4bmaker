@@ -20,12 +20,12 @@ def _first_tag(tags: Any, *keys: str) -> str:
 
 
 def extract_metadata(first_file: Path) -> dict[str, str]:
-    """Attempt to read title, author, and narrator from *first_file* using mutagen.
+    """Attempt to read title, author, narrator, and genre from *first_file*.
 
-    Returns a dict with keys 'title', 'author', 'narrator'.
+    Returns a dict with keys 'title', 'author', 'narrator', 'genre'.
     Missing fields are returned as empty strings.
     """
-    meta: dict[str, str] = {"title": "", "author": "", "narrator": ""}
+    meta: dict[str, str] = {"title": "", "author": "", "narrator": "", "genre": ""}
 
     try:
         from mutagen import File as MutagenFile  # type: ignore[attr-defined]
@@ -41,6 +41,7 @@ def extract_metadata(first_file: Path) -> dict[str, str]:
         meta["narrator"] = _first_tag(
             tags, "composer", "TCOM", "narrator", "TPUB", "comment"
         )
+        meta["genre"] = _first_tag(tags, "genre", "TCON")
     except Exception:
         # If mutagen cannot read the file, return empty — prompts will fill in.
         pass
@@ -53,53 +54,50 @@ def prompt_missing(
     args: Namespace,
     hints: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Fill in missing metadata fields from CLI flags or interactive prompts.
+    """Confirm or fill every metadata field interactively.
 
-    *hints* is an optional dict of pre-filled defaults (e.g. derived from the
-    directory name) shown as ``[default]`` in the prompt.  Pressing Enter
-    accepts the hint.  When ``--no-prompt`` is set and a hint is available it
-    is used silently; when no hint is available the process exits.
+    Every field is presented for confirmation — even fields already populated
+    from tags or CLI flags — with the best-known value pre-filled.
 
-    - title, author: prompted if missing and not supplied via CLI.
-    - narrator: always prompted unless --narrator CLI flag is set.
+    Precedence for pre-fill: CLI flag > current tag value > dirname hint.
 
-    Returns a new dict with all three fields populated.
+    - title, author, narrator: required; cannot be empty.
+    - genre: optional; empty is allowed.
+
+    With ``--no-prompt``, values are resolved silently without interaction.
     """
     result = dict(meta)
-
-    # Apply CLI overrides first.
-    if getattr(args, "title", None):
-        result["title"] = args.title
-    if getattr(args, "author", None):
-        result["author"] = args.author
-    if getattr(args, "narrator", None):
-        result["narrator"] = args.narrator
-
     no_prompt: bool = getattr(args, "no_prompt", False)
 
-    def _prompt(field: str, label: str) -> str:
-        hint = (hints or {}).get(field, "")
+    def _confirm(field: str, label: str, required: bool = True) -> str:
+        cli_val: str = getattr(args, field, None) or ""
+        tag_val: str = result.get(field, "")
+        hint_val: str = (hints or {}).get(field, "")
+        prefill = cli_val or tag_val or hint_val
+
         if no_prompt:
-            if hint:
-                return hint
-            sys.exit(
-                f"Error: '{field}' is required but was not found in tags and "
-                f"--no-prompt is set. Pass --{field} <value> to supply it."
-            )
-        prompt_str = f"{label} [{hint}]: " if hint else f"{label}: "
+            if prefill:
+                return prefill
+            if required:
+                sys.exit(
+                    f"Error: '{field}' is required but was not found in tags "
+                    f"and --no-prompt is set. Pass --{field} <value> to supply it."
+                )
+            return ""
+
+        prompt_str = f"{label} [{prefill}]: " if prefill else f"{label}: "
         value = input(prompt_str).strip()
         if not value:
-            if hint:
-                return hint
-            sys.exit(f"Error: '{field}' cannot be empty.")
+            if prefill:
+                return prefill
+            if required:
+                sys.exit(f"Error: '{field}' cannot be empty.")
+            return ""
         return value
 
-    if not result["title"]:
-        result["title"] = _prompt("title", "Enter book title")
-    if not result["author"]:
-        result["author"] = _prompt("author", "Enter author")
-    # Narrator is always prompted unless already set by CLI or tags.
-    if not result["narrator"]:
-        result["narrator"] = _prompt("narrator", "Enter narrator")
+    result["title"] = _confirm("title", "Book title")
+    result["author"] = _confirm("author", "Author")
+    result["narrator"] = _confirm("narrator", "Narrator")
+    result["genre"] = _confirm("genre", "Genre", required=False)
 
     return result

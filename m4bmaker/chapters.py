@@ -101,6 +101,8 @@ def write_ffmetadata(chapters: list[Chapter], meta: dict[str, str], dest: Path) 
         lines.append(f"artist={meta['author']}\n")
     if meta.get("narrator"):
         lines.append(f"composer={meta['narrator']}\n")
+    if meta.get("genre"):
+        lines.append(f"genre={meta['genre']}\n")
 
     lines.append("\n")
 

@@ -65,6 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Narrator name (overrides tag extraction and skips the narrator prompt).",
     )
     parser.add_argument(
+        "--genre",
+        "-g",
+        default=None,
+        metavar="GENRE",
+        help="Genre (overrides tag extraction and skips the genre prompt).",
+    )
+    parser.add_argument(
         "--cover",
         "-c",
         type=str,

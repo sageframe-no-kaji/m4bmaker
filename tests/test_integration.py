@@ -58,6 +58,16 @@ def _ffmpeg_result() -> MagicMock:
     return result
 
 
+def _make_popen_mock() -> MagicMock:
+    """Return a mock subprocess.Popen process that succeeds immediately."""
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.stdout = iter([])
+    proc.stderr = iter([])
+    proc.wait.return_value = 0
+    return proc
+
+
 def _run_pipeline(
     tmp_path: Path,
     num_files: int = 3,
@@ -72,7 +82,7 @@ def _run_pipeline(
 
     Strategy:
       - Patch ``m4bmaker.chapters.get_duration`` to return a fixed float.
-      - Patch ``m4bmaker.encoder.subprocess.run`` for the ffmpeg encode call.
+      - Patch ``m4bmaker.encoder.subprocess.Popen`` for the ffmpeg encode call.
       - Patch ``m4bmaker.utils.shutil.which`` for tool detection.
 
     Returns (first_ffmpeg_cmd, all_ffmpeg_cmds).
@@ -99,14 +109,14 @@ def _run_pipeline(
 
     ffmpeg_cmds: list[list[str]] = []
 
-    def _fake_ffmpeg_run(cmd: list[str], **kwargs: object) -> MagicMock:
+    def _fake_ffmpeg_popen(cmd: list[str], **kwargs: object) -> MagicMock:
         ffmpeg_cmds.append(cmd)
-        return _ffmpeg_result()
+        return _make_popen_mock()
 
     with (
         patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
         patch("m4bmaker.chapters.get_duration", return_value=duration),
-        patch("m4bmaker.encoder.subprocess.run", side_effect=_fake_ffmpeg_run),
+        patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_ffmpeg_popen),
         patch("m4bmaker.__main__.parse_args", return_value=parsed),
     ):
         main()
@@ -152,6 +162,13 @@ class TestFullPipeline:
         assert "Test Author" in last_arg
         assert last_arg.endswith(".m4b")
 
+    def test_progress_flag_in_ffmpeg_command(self, tmp_path: Path) -> None:
+        cmd, _ = _run_pipeline(tmp_path)
+        assert "-progress" in cmd
+        idx = cmd.index("-progress")
+        assert cmd[idx + 1] == "pipe:1"
+        assert "-nostdin" in cmd
+
     def test_ffmetadata_written_with_correct_chapter_count(
         self, tmp_path: Path
     ) -> None:
@@ -186,7 +203,7 @@ class TestFullPipeline:
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
-            patch("m4bmaker.encoder.subprocess.run", return_value=_ffmpeg_result()),
+            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):
@@ -228,7 +245,7 @@ class TestFullPipeline:
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
-            patch("m4bmaker.encoder.subprocess.run", return_value=_ffmpeg_result()),
+            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
             patch.object(Path, "write_text", _capture),
         ):
@@ -398,6 +415,20 @@ class TestFetchCoverUrl:
             result = _fetch_cover_url("https://example.com/first.jpg", tmp_path, True)
         assert result == expected
 
+    def test_interactive_retries_bad_local_path_then_skips(
+        self, tmp_path: Path
+    ) -> None:
+        """Entering a non-existent local path logs an error and re-prompts."""
+        from m4bmaker.__main__ import _fetch_cover_url
+
+        inputs = iter([str(tmp_path / "ghost.jpg"), ""])
+        with (
+            patch("m4bmaker.__main__.download_cover", side_effect=ValueError("bad")),
+            patch("builtins.input", side_effect=inputs),
+        ):
+            result = _fetch_cover_url("https://fail.com/x.html", tmp_path, True)
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # _prompt_cover
@@ -453,6 +484,49 @@ class TestPromptCover:
 
 
 # ---------------------------------------------------------------------------
+# _probe_progress
+# ---------------------------------------------------------------------------
+
+
+class TestProbeProgress:
+    def test_non_tty_logs_file_info(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from m4bmaker.__main__ import _probe_progress
+
+        with patch("sys.stdout.isatty", return_value=False):
+            _probe_progress(1, 3, "track01.mp3")
+        captured = capsys.readouterr()
+        assert "1/3" in captured.out or "track01" in captured.out
+
+    def test_tty_renders_bar(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from m4bmaker.__main__ import _probe_progress
+
+        with patch("sys.stdout.isatty", return_value=True):
+            _probe_progress(1, 3, "track01.mp3")
+        captured = capsys.readouterr()
+        assert "Probing" in captured.out
+
+    def test_tty_last_file_writes_newline(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from m4bmaker.__main__ import _probe_progress
+
+        with patch("sys.stdout.isatty", return_value=True):
+            _probe_progress(3, 3, "track03.mp3")
+        captured = capsys.readouterr()
+        assert "\n" in captured.out
+
+    def test_tty_long_name_truncated(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from m4bmaker.__main__ import _probe_progress
+
+        long_name = "a" * 40
+        with patch("sys.stdout.isatty", return_value=True):
+            _probe_progress(1, 3, long_name)
+        captured = capsys.readouterr()
+        # The ellipsis character indicates truncation
+        assert "\u2026" in captured.out
+
+
+# ---------------------------------------------------------------------------
 # Full pipeline — cover image in directory
 # ---------------------------------------------------------------------------
 
@@ -463,3 +537,106 @@ class TestPipelineWithCover:
         (tmp_path / "cover.jpg").write_bytes(b"\x00")
         cmd, _ = _run_pipeline(tmp_path)
         assert str(tmp_path / "cover.jpg") in cmd
+
+
+# ---------------------------------------------------------------------------
+# _confirm_cover
+# ---------------------------------------------------------------------------
+
+
+class TestConfirmCover:
+    def test_non_interactive_returns_cover_unchanged(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        img = tmp_path / "cover.jpg"
+        img.write_bytes(b"\x00")
+        result = _confirm_cover(img, tmp_path, interactive=False)
+        assert result == img
+
+    def test_non_interactive_returns_none_unchanged(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        result = _confirm_cover(None, tmp_path, interactive=False)
+        assert result is None
+
+    def test_enter_confirms_existing_cover(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        img = tmp_path / "cover.jpg"
+        img.write_bytes(b"\x00")
+        with patch("builtins.input", return_value=""):
+            result = _confirm_cover(img, tmp_path, interactive=True)
+        assert result == img
+
+    def test_enter_confirms_none(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        with patch("builtins.input", return_value=""):
+            result = _confirm_cover(None, tmp_path, interactive=True)
+        assert result is None
+
+    def test_none_keyword_removes_cover(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        img = tmp_path / "cover.jpg"
+        img.write_bytes(b"\x00")
+        with patch("builtins.input", return_value="none"):
+            result = _confirm_cover(img, tmp_path, interactive=True)
+        assert result is None
+
+    def test_skip_keyword_removes_cover(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        img = tmp_path / "cover.jpg"
+        img.write_bytes(b"\x00")
+        with patch("builtins.input", return_value="skip"):
+            result = _confirm_cover(img, tmp_path, interactive=True)
+        assert result is None
+
+    def test_local_path_replaces_cover(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        old = tmp_path / "old.jpg"
+        old.write_bytes(b"\x00")
+        new = tmp_path / "new.jpg"
+        new.write_bytes(b"\x00")
+        with patch("builtins.input", return_value=str(new)):
+            result = _confirm_cover(old, tmp_path, interactive=True)
+        assert result == new
+
+    def test_url_input_downloads_cover(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        downloaded = tmp_path / "downloaded.jpg"
+        with (
+            patch("builtins.input", return_value="https://example.com/c.jpg"),
+            patch("m4bmaker.__main__.download_cover", return_value=downloaded),
+        ):
+            result = _confirm_cover(None, tmp_path, interactive=True)
+        assert result == downloaded
+
+    def test_nonexistent_path_reprompts(self, tmp_path: Path) -> None:
+        from m4bmaker.__main__ import _confirm_cover
+
+        new = tmp_path / "real.jpg"
+        new.write_bytes(b"\x00")
+        inputs = iter([str(tmp_path / "ghost.jpg"), str(new)])
+        with patch("builtins.input", side_effect=inputs):
+            result = _confirm_cover(None, tmp_path, interactive=True)
+        assert result == new
+
+    def test_download_exception_reprompts(self, tmp_path: Path) -> None:
+        """Exception from download_cover is caught and user is re-prompted."""
+        from m4bmaker.__main__ import _confirm_cover
+
+        real = tmp_path / "real.jpg"
+        real.write_bytes(b"\x00")
+        inputs = iter(["https://bad.com/fail.jpg", str(real)])
+        with (
+            patch("builtins.input", side_effect=inputs),
+            patch(
+                "m4bmaker.__main__.download_cover", side_effect=ValueError("no image")
+            ),
+        ):
+            result = _confirm_cover(None, tmp_path, interactive=True)
+        assert result == real

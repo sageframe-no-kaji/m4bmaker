@@ -10,7 +10,7 @@ from m4bmaker import __version__
 from m4bmaker.chapters import build_chapters, write_ffmetadata
 from m4bmaker.cli import parse_args
 from m4bmaker.cover import download_cover, find_cover, is_url
-from m4bmaker.encoder import encode, write_concat_list
+from m4bmaker.encoder import _render_bar, encode, write_concat_list
 from m4bmaker.metadata import extract_metadata, prompt_missing
 from m4bmaker.scanner import scan_audio_files
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, log
@@ -42,6 +42,21 @@ def _hints_from_dirname(directory: Path) -> dict[str, str]:
         author, _, title = name.partition(" - ")
         return {"author": author.strip(), "title": title.strip()}
     return {"title": name.strip()}
+
+
+def _probe_progress(i: int, n: int, name: str) -> None:
+    """Display a progress bar while probing file durations."""
+    if not sys.stdout.isatty():
+        log(f"  [{i}/{n}] {name}")
+        return
+    bar = _render_bar(i / n, width=30)
+    max_name = 35
+    disp = (name[: max_name - 1] + "\u2026") if len(name) > max_name else name
+    sys.stdout.write(f"\r  Probing {bar}  {i}/{n}  {disp:<{max_name}}")
+    sys.stdout.flush()
+    if i == n:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
 
 def _resolve_cover(
@@ -123,6 +138,32 @@ def _prompt_cover(tmp_dir: Path) -> Path | None:
             log(f"Cover error: {exc} — please try again.")
 
 
+def _confirm_cover(
+    cover: Path | None,
+    tmp_dir: Path,
+    interactive: bool,
+) -> Path | None:
+    """Confirm or replace the selected cover image interactively."""
+    if not interactive:
+        return cover
+    while True:
+        display = str(cover) if cover else "none"
+        value = input(f"Cover image [{display}]: ").strip()
+        if not value:
+            return cover  # confirmed as-is
+        if value.lower() in ("none", "skip"):
+            return None
+        try:
+            if is_url(value):
+                return download_cover(value, tmp_dir)
+            path = Path(value).expanduser()
+            if path.is_file():
+                return path
+            log(f"File not found: {path} — please try again.")
+        except Exception as exc:
+            log(f"Cover error: {exc} — please try again.")
+
+
 def main() -> None:
     args = parse_args()
     directory: Path = args.directory.resolve()
@@ -151,6 +192,9 @@ def main() -> None:
         else:
             log("No cover art found — skipping")
 
+        # 3b. Confirm or replace cover interactively.
+        cover = _confirm_cover(cover, tmp_dir, interactive)
+
         # 4. Read and complete metadata.
         log("Reading metadata...")
         meta = extract_metadata(files[0])
@@ -159,6 +203,7 @@ def main() -> None:
         log(
             f"Title: {meta['title']} | Author: {meta['author']} "
             f"| Narrator: {meta['narrator']}"
+            + (f" | Genre: {meta['genre']}" if meta.get("genre") else "")
         )
 
         # 5. Resolve output path.
@@ -175,7 +220,7 @@ def main() -> None:
         chapters = build_chapters(
             files,
             ffprobe,
-            progress_fn=lambda i, n, name: log(f"  [{i}/{n}] {name}"),
+            progress_fn=_probe_progress,
         )
         write_ffmetadata(chapters, meta, meta_file)
         log(f"Generated {len(chapters)} chapter(s)")
@@ -184,6 +229,7 @@ def main() -> None:
         write_concat_list(files, concat_file)
 
         # 8. Encode.
+        total_ms = chapters[-1].end_ms if chapters else 0
         channels = 2 if args.stereo else 1
         log(
             f"Encoding audiobook "
@@ -198,6 +244,7 @@ def main() -> None:
             bitrate=args.bitrate,
             channels=channels,
             ffmpeg=ffmpeg,
+            total_ms=total_ms,
         )
 
     log(f"Done. Output: {output}")
