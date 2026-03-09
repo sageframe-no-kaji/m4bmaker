@@ -226,7 +226,8 @@ QTabBar::tab {
     border-bottom: none;
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
-    padding: 6px 20px;
+    padding: 6px 24px;
+    min-width: 100px;
     color: #7a7a7a;
     font-size: 12px;
     margin-right: 3px;
@@ -367,6 +368,33 @@ QMenu::separator {
     height: 1px;
     background-color: #d0c9be;
     margin: 3px 8px;
+}
+
+/* ── Player transport buttons ────────────────────────────────────────── */
+QPushButton#playerPlayBtn,
+QPushButton#playerStopBtn {
+    background-color: #4a4a4a;
+    border: none;
+    border-radius: 4px;
+    color: #faf8f4;
+    font-size: 14px;
+    padding: 0;
+}
+
+QPushButton#playerPlayBtn:hover,
+QPushButton#playerStopBtn:hover {
+    background-color: #333333;
+}
+
+QPushButton#playerPlayBtn:pressed,
+QPushButton#playerStopBtn:pressed {
+    background-color: #1a1a1a;
+}
+
+QPushButton#playerPlayBtn:disabled,
+QPushButton#playerStopBtn:disabled {
+    background-color: #b5ae9e;
+    color: #ebe6dd;
 }
 
 /* ── Dialogs ─────────────────────────────────────────────────────────── */

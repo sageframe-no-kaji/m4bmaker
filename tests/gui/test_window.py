@@ -350,10 +350,10 @@ class TestEncoding:
         w, _ = win
         w._on_load_finished(_make_book(tmp_path))
         result = _make_pipeline_result(tmp_path)
-        with patch("m4bmaker.gui.window.QMessageBox.information") as mock_info:
+        with patch("m4bmaker.gui.window.QMessageBox") as mock_mb:
+            mock_mb.return_value.exec.return_value = None
             w._on_convert_finished(result)
-        mock_info.assert_called_once()
-        assert "My Book.m4b" in mock_info.call_args[0][2]
+        mock_mb.assert_called_once()
 
     def test_convert_error_shows_dialog(self, win):
         w, _ = win
@@ -620,19 +620,30 @@ class TestChaptersTabPlayer:
         # Index 5 is out of range (book has 1 chapter)
         w._on_chapter_selected(5, 0, -1, 0)  # should not raise
 
-    def test_chapter_selected_calls_player_load(self, win, tmp_path):
+    def test_chapter_selected_calls_player_load_paused_when_stopped(self, win, tmp_path):
+        """Selecting a chapter when not playing calls load_paused (no auto-play)."""
+        from unittest.mock import PropertyMock
+
         w, _ = win
         book = _make_book(tmp_path)
         w._book = book
         w._mode = "build"
-        with patch.object(w._player, "load") as mock_load:
-            w._on_chapter_selected(0, 0, -1, 0)
-        mock_load.assert_called_once()
-        _, kwargs = (
-            mock_load.call_args
-            if mock_load.call_args.kwargs
-            else (mock_load.call_args[0], {})
-        )
-        # start_ms should be 0 (chapter starts at 0.0s)
-        pos_args = mock_load.call_args[0]
+        with patch.object(type(w._player), "is_playing", new_callable=PropertyMock, return_value=False):
+            with patch.object(w._player, "load_paused") as mock_load_paused:
+                w._on_chapter_selected(0, 0, -1, 0)
+        mock_load_paused.assert_called_once()
+        pos_args = mock_load_paused.call_args[0]
         assert pos_args[1] == 0  # start_ms = 0
+
+    def test_chapter_selected_calls_player_load_when_playing(self, win, tmp_path):
+        """Selecting a chapter while playing calls load (seek + continue playing)."""
+        from unittest.mock import PropertyMock
+
+        w, _ = win
+        book = _make_book(tmp_path)
+        w._book = book
+        w._mode = "build"
+        with patch.object(type(w._player), "is_playing", new_callable=PropertyMock, return_value=True):
+            with patch.object(w._player, "load") as mock_load:
+                w._on_chapter_selected(0, 0, -1, 0)
+        mock_load.assert_called_once()

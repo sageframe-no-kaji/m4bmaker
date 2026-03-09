@@ -142,11 +142,15 @@ def run_pipeline(
 
     _cb("Generating chapter markers…", 0.1)
 
+    def _encode_progress(frac: float) -> None:
+        pct = int(frac * 100)
+        _cb(f"Encoding audiobook… {pct}%", 0.2 + 0.78 * frac)
+
     if _tmp_dir is not None:
         meta_file, concat_file = _make_tmp(_tmp_dir)
         write_ffmetadata(book.chapters, book.metadata, meta_file, total_duration_s)
         write_concat_list(book.files, concat_file)
-        _cb("Encoding audiobook…", 0.2)
+        _cb(f"Encoding {len(book.files)} file(s) to M4B…", 0.2)
         encode(
             concat=concat_file,
             meta_file=meta_file,
@@ -156,6 +160,7 @@ def run_pipeline(
             channels=channels,
             ffmpeg=ffmpeg,
             total_ms=total_ms,
+            progress_callback=_encode_progress,
         )
     else:
         with tempfile.TemporaryDirectory() as tmp:
@@ -163,7 +168,7 @@ def run_pipeline(
             meta_file, concat_file = _make_tmp(tmp_path)
             write_ffmetadata(book.chapters, book.metadata, meta_file, total_duration_s)
             write_concat_list(book.files, concat_file)
-            _cb("Encoding audiobook…", 0.2)
+            _cb(f"Encoding {len(book.files)} file(s) to M4B…", 0.2)
             encode(
                 concat=concat_file,
                 meta_file=meta_file,
@@ -173,6 +178,7 @@ def run_pipeline(
                 channels=channels,
                 ffmpeg=ffmpeg,
                 total_ms=total_ms,
+                progress_callback=_encode_progress,
             )
 
     _cb("Done.", 1.0)

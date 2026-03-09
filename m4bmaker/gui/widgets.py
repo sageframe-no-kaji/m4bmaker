@@ -11,6 +11,9 @@ FindReplaceDialog — simple find / replace dialog
 from __future__ import annotations
 
 import re
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
@@ -162,11 +165,11 @@ class FolderDropZone(QFrame):
 
 
 class CoverWidget(QFrame):
-    """80×80 thumbnail + 'Choose…' button; accepts image drag-and-drop."""
+    """100×100 thumbnail + ‘Choose…’ + ‘URL…’ buttons; accepts image drag-and-drop."""
 
     cover_changed = Signal(object)  # Path
 
-    _SIZE = 80
+    _SIZE = 100
     _EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -188,11 +191,19 @@ class CoverWidget(QFrame):
         self._thumb.setText("Cover")
         layout.addWidget(self._thumb)
 
+        btn_width = self._SIZE + 20
         btn = QPushButton("Choose…")
-        btn.setFixedWidth(self._SIZE)
+        btn.setMinimumWidth(btn_width)
         btn.setFixedHeight(26)
         btn.clicked.connect(self._browse)
         layout.addWidget(btn)
+
+        url_btn = QPushButton("URL…")
+        url_btn.setMinimumWidth(btn_width)
+        url_btn.setFixedHeight(26)
+        url_btn.setToolTip("Set cover art from a web URL")
+        url_btn.clicked.connect(self._browse_url)
+        layout.addWidget(url_btn)
 
     # ── public interface ──────────────────────────────────────────────────────
 
@@ -228,7 +239,41 @@ class CoverWidget(QFrame):
         )
         if path:
             self._set_and_emit(Path(path))
+    def _browse_url(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
 
+        url, ok = QInputDialog.getText(
+            self,
+            "Cover Art URL",
+            "Enter image URL:",
+        )
+        if not ok or not url.strip():
+            return
+        url = url.strip()
+        if not url.lower().startswith(("http://", "https://")):
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(self, "Invalid URL", "Please enter an http:// or https:// URL.")
+            return
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "m4bmaker/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as response:  # noqa: S310
+                data = response.read()
+            suffix = Path(url.split("?")[0]).suffix.lower() or ".jpg"
+            if suffix not in self._EXTS:
+                suffix = ".jpg"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            tmp.write(data)
+            tmp.close()
+            self._set_and_emit(Path(tmp.name))
+        except urllib.error.URLError as exc:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(self, "Download Error", f"Could not download image:\n{exc.reason}")
+        except Exception as exc:  # noqa: BLE001
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.critical(self, "Download Error", f"Could not download image:\n{exc}")
     def _set_and_emit(self, p: Path) -> None:
         self.set_cover(p)
         self.cover_changed.emit(p)

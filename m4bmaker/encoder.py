@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 
@@ -27,6 +27,7 @@ def _progress_reader(
     stdout: Iterable[str],
     total_ms: int,
     done: threading.Event,
+    progress_callback: Callable[[float], None] | None = None,
 ) -> None:
     """Read ffmpeg -progress lines and paint a live progress bar on stdout."""
     bar_width = 30
@@ -41,16 +42,19 @@ def _progress_reader(
             current_ms = max(0, int(line.split("=", 1)[1]) // 1000)
         except ValueError:
             continue
-        if total_ms > 0 and sys.stdout.isatty():
+        if total_ms > 0:
             frac = min(1.0, current_ms / total_ms)
-            bar = _render_bar(frac, bar_width)
-            pct = int(frac * 100)
-            elapsed = _format_ms(current_ms)
-            total_str = _format_ms(total_ms)
-            sys.stdout.write(
-                f"\r  Encoding {bar}  {pct:3d}%  {elapsed} / {total_str}\033[K"
-            )
-            sys.stdout.flush()
+            if progress_callback is not None:
+                progress_callback(frac)
+            if sys.stdout.isatty():
+                bar = _render_bar(frac, bar_width)
+                pct = int(frac * 100)
+                elapsed = _format_ms(current_ms)
+                total_str = _format_ms(total_ms)
+                sys.stdout.write(
+                    f"\r  Encoding {bar}  {pct:3d}%  {elapsed} / {total_str}\033[K"
+                )
+                sys.stdout.flush()
 
 
 def write_concat_list(files: list[Path], dest: Path) -> None:
@@ -77,6 +81,7 @@ def encode(
     channels: int,
     ffmpeg: str,
     total_ms: int = 0,
+    progress_callback: Callable[[float], None] | None = None,
 ) -> None:
     """Run ffmpeg to produce the final .m4b file with live progress bar.
 
@@ -157,7 +162,9 @@ def encode(
             stderr_buf.append(line)
 
     reader = threading.Thread(
-        target=_progress_reader, args=(proc.stdout, total_ms, done), daemon=True
+        target=_progress_reader,
+        args=(proc.stdout, total_ms, done, progress_callback),
+        daemon=True,
     )
     stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
     reader.start()

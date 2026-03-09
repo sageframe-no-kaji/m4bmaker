@@ -63,12 +63,14 @@ class AudioPlayerWidget(QWidget):
 
         # ── buttons ──────────────────────────────────────────────────────────
         self._play_btn = QPushButton(_ICON_PLAY)
-        self._play_btn.setFixedSize(32, 28)
+        self._play_btn.setObjectName("playerPlayBtn")
+        self._play_btn.setFixedSize(36, 32)
         self._play_btn.setToolTip("Play / Pause")
         self._play_btn.clicked.connect(self._toggle_play)
 
         self._stop_btn = QPushButton(_ICON_STOP)
-        self._stop_btn.setFixedSize(32, 28)
+        self._stop_btn.setObjectName("playerStopBtn")
+        self._stop_btn.setFixedSize(36, 32)
         self._stop_btn.setToolTip("Stop")
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._on_stop)
@@ -127,6 +129,24 @@ class AudioPlayerWidget(QWidget):
 
         self._player.setSource(new_url)
         self._player.play()
+        if start_ms > 0:
+            QTimer.singleShot(
+                self._SEEK_DELAY_MS,
+                lambda: self._player.setPosition(start_ms),
+            )
+
+    def load_paused(self, path: Path, start_ms: int = 0) -> None:
+        """Load *path* and seek to *start_ms* without starting playback.
+
+        Use this when selecting a chapter row should preview position
+        but not auto-start audio.
+        """
+        new_url = QUrl.fromLocalFile(str(path))
+        if self._player.source() == new_url:
+            self._player.setPosition(start_ms)
+            return
+
+        self._player.setSource(new_url)
         if start_ms > 0:
             QTimer.singleShot(
                 self._SEEK_DELAY_MS,

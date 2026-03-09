@@ -31,8 +31,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QComboBox,
     QFileDialog,
@@ -65,6 +67,7 @@ from m4bmaker.preflight import format_preflight_summary
 
 _BITRATES = ["32k", "48k", "64k", "96k", "128k", "192k", "256k", "320k"]
 _DEFAULT_BITRATE = "96k"
+_DONATE_URL = "https://ko-fi.com/m4bmaker"
 
 
 def _muted_label(text: str) -> QLabel:
@@ -77,8 +80,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("m4bmaker")
-        self.setMinimumSize(QSize(820, 640))
-        self.resize(860, 720)
+        self.setMinimumSize(QSize(700, 560))
+        self.resize(960, 760)
 
         self._book: Optional[Book] = None
         self._mode: str = "build"  # "build" or "edit"
@@ -88,8 +91,65 @@ class MainWindow(QMainWindow):
         self._convert_worker: Optional[ConvertWorker] = None
         self._preflight_worker: Optional[PreflightWorker] = None
         self._save_worker: Optional[SaveChaptersWorker] = None
+        self._extra_windows: list["MainWindow"] = []
 
+        self._build_menu_bar()
         self._build_ui()
+
+    # ── Menu bar ──────────────────────────────────────────────────────────────
+
+    def _build_menu_bar(self) -> None:
+        mb = self.menuBar()
+
+        # File menu
+        file_menu = mb.addMenu("File")
+
+        new_action = QAction("New Window", self)
+        new_action.setShortcut(QKeySequence.StandardKey.New)
+        new_action.triggered.connect(self._new_window)
+        file_menu.addAction(new_action)
+
+        open_action = QAction("Open Folder\u2026", self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(lambda: self._folder_zone._browse())
+        file_menu.addAction(open_action)
+
+        file_menu.addSeparator()
+
+        quit_action = QAction("Quit m4bmaker", self)
+        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_action.triggered.connect(QApplication.quit)
+        file_menu.addAction(quit_action)
+
+        # Help menu
+        help_menu = mb.addMenu("Help")
+
+        about_action = QAction("About m4bmaker", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+        help_menu.addSeparator()
+
+        donate_action = QAction("\u2665  Support m4bmaker\u2026", self)
+        donate_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(_DONATE_URL))
+        )
+        help_menu.addAction(donate_action)
+
+    def _new_window(self) -> None:
+        win = MainWindow()
+        win.show()
+        self._extra_windows.append(win)
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "About m4bmaker",
+            "<b>m4bmaker</b><br>"
+            "Convert audio files to M4B audiobooks.<br><br>"
+            "Uses ffmpeg for encoding and chapter metadata.<br><br>"
+            f'<a href="{_DONATE_URL}">\u2665 Support this project</a>',
+        )
 
     # ── UI construction ───────────────────────────────────────────────────────
 
@@ -312,6 +372,16 @@ class MainWindow(QMainWindow):
         btn_row.addStretch()
         btn_row.addWidget(self._convert_btn)
         btn_row.addStretch()
+
+        donate_lbl = QLabel(
+            f'<a href="{_DONATE_URL}" style="color: #c45a2d; text-decoration: none;">'
+            "\u2665 Support</a>"
+        )
+        donate_lbl.setOpenExternalLinks(True)
+        donate_lbl.setStyleSheet("font-size: 11px; background: transparent;")
+        donate_lbl.setToolTip("Support m4bmaker development")
+        btn_row.addWidget(donate_lbl)
+
         layout.addLayout(btn_row)
 
         return layout
@@ -459,7 +529,12 @@ class MainWindow(QMainWindow):
         else:
             src = ch.source_file
         if src is not None:
-            self._player.load(src, start_ms)
+            if self._player.is_playing:
+                # Already playing — seek to the new chapter without restarting
+                self._player.load(src, start_ms)
+            else:
+                # Not playing — load and position but stay paused
+                self._player.load_paused(src, start_ms)
 
     def _on_load_error(self, msg: str) -> None:
         self._progress_bar.setRange(0, 100)
@@ -550,11 +625,16 @@ class MainWindow(QMainWindow):
         self._progress_bar.setValue(100)
         self._status_label.setText(f"Saved — {Path(str(dest)).name}")
         self._update_controls()
-        QMessageBox.information(
-            self,
-            "Done",
-            f"Chapter metadata saved to:\n{dest}",
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Saved")
+        msg.setIcon(QMessageBox.Icon.NoIcon)
+        mins = self._m4b_total_duration / 60
+        msg.setText(
+            f"✅ Chapter metadata saved\n\n"
+            f"{Path(str(dest)).name}\n\n"
+            f"{len(self._book.chapters) if self._book else 0} chapter(s)  ·  {mins:.1f} min"
         )
+        msg.exec()
 
     def _on_progress(self, msg: str, fraction: float) -> None:
         self._status_label.setText(msg)
@@ -565,12 +645,15 @@ class MainWindow(QMainWindow):
         self._status_label.setText(f"Done — {result.output_file.name}")
         self._update_controls()
         mins = result.duration_seconds / 60
-        QMessageBox.information(
-            self,
-            "Done",
-            f"Saved to:\n{result.output_file}\n\n"
-            f"{result.chapter_count} chapter(s)  ·  {mins:.1f} min",
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Saved")
+        msg.setIcon(QMessageBox.Icon.NoIcon)
+        msg.setText(
+            f"✅ Audiobook saved\n\n"
+            f"{result.output_file}\n\n"
+            f"{result.chapter_count} chapter(s)  ·  {mins:.1f} min"
         )
+        msg.exec()
 
     def _on_convert_error(self, msg: str) -> None:
         self._progress_bar.setVisible(False)
