@@ -291,6 +291,49 @@ class TestFullPipeline:
         p = _output_path(tmp_path, meta)
         assert p.name == "audiobook.m4b"
 
+    def test_default_output_uses_author_title_subfolders(self, tmp_path: Path) -> None:
+        """Default (no --flat) produces Author/Title/Author - Title.m4b."""
+        cmd, _ = _run_pipeline(tmp_path, title="My Book", author="Jane Doe")
+        output = cmd[-1]
+        assert "Jane Doe" in output
+        assert "My Book" in output
+        # Should contain subdir separators, not just a flat filename
+        rel = output[len(str(tmp_path)) :]
+        assert rel.count("/") >= 3  # /Jane Doe/My Book/filename
+
+    def test_flat_flag_produces_flat_output(self, tmp_path: Path) -> None:
+        """--flat writes directly into the source dir without subfolders."""
+        cmd, _ = _run_pipeline(
+            tmp_path, title="My Book", author="Jane Doe", extra_argv=["--flat"]
+        )
+        output = cmd[-1]
+        assert output.startswith(str(tmp_path))
+        rel = output[len(str(tmp_path)) :]
+        # Only one separator: /filename.m4b
+        assert rel.count("/") == 1
+        assert rel.endswith(".m4b")
+
+    def test_output_dir_flag_sets_base_directory(self, tmp_path: Path) -> None:
+        """--output-dir redirects the auto-generated path to a different base."""
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        src = tmp_path / "src"
+        src.mkdir()
+        cmd, _ = _run_pipeline(
+            src,
+            title="Book",
+            author="Author",
+            extra_argv=["--output-dir", str(out_dir)],
+        )
+        output = cmd[-1]
+        assert output.startswith(str(out_dir))
+
+    def test_explicit_output_flag_bypasses_auto_path(self, tmp_path: Path) -> None:
+        """--output overrides all auto-path logic."""
+        explicit = tmp_path / "explicit.m4b"
+        cmd, _ = _run_pipeline(tmp_path, extra_argv=["--output", str(explicit)])
+        assert cmd[-1] == str(explicit)
+
 
 # ---------------------------------------------------------------------------
 # _hints_from_dirname
