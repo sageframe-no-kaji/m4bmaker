@@ -67,7 +67,8 @@ from m4bmaker.preflight import format_preflight_summary
 
 _BITRATES = ["32k", "48k", "64k", "96k", "128k", "192k", "256k", "320k"]
 _DEFAULT_BITRATE = "96k"
-_DONATE_URL = "https://ko-fi.com/m4bmaker"
+_DONATE_URL = "https://buymeacoffee.com/sageframe"
+_GITHUB_URL = "https://github.com/sageframe-no-kaji"
 
 
 def _muted_label(text: str) -> QLabel:
@@ -130,11 +131,17 @@ class MainWindow(QMainWindow):
 
         help_menu.addSeparator()
 
-        donate_action = QAction("\u2665  Support m4bmaker\u2026", self)
+        donate_action = QAction("♥  Buy Me a Coffee…", self)
         donate_action.triggered.connect(
             lambda: QDesktopServices.openUrl(QUrl(_DONATE_URL))
         )
         help_menu.addAction(donate_action)
+
+        github_action = QAction("  GitHub…", self)
+        github_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(_GITHUB_URL))
+        )
+        help_menu.addAction(github_action)
 
     def _new_window(self) -> None:
         win = MainWindow()
@@ -148,7 +155,8 @@ class MainWindow(QMainWindow):
             "<b>m4bmaker</b><br>"
             "Convert audio files to M4B audiobooks.<br><br>"
             "Uses ffmpeg for encoding and chapter metadata.<br><br>"
-            f'<a href="{_DONATE_URL}">\u2665 Support this project</a>',
+            f'<a href="{_GITHUB_URL}"> GitHub</a> &nbsp;&nbsp; '
+            f'<a href="{_DONATE_URL}">♥ Buy Me a Coffee</a>',
         )
 
     # ── UI construction ───────────────────────────────────────────────────────
