@@ -48,6 +48,21 @@ pytest tests/test_chapters.py::TestGetDuration::test_parses_duration_from_ffprob
 
 Coverage target: **> 90%** across all modules.
 
+Current coverage (616 tests, March 2026): **93% overall**.
+
+| Module | Coverage | Notes |
+|---|---|---|
+| Core logic (`chapters`, `metadata`, `models`, etc.) | 97–100% | Fully covered |
+| `encoder.py`, `preflight.py`, `repair.py` | 97–99% | Near-complete |
+| `gui/window.py`, `gui/worker.py` | 95–98% | Drag-drop and a few edge slots untested |
+| `gui/queue_window.py` | 95% | A few button handlers |
+| `gui/widgets.py` | 89% | Some widget edge paths |
+| `gui/player.py` | 81% | Media playback callbacks require a real audio device |
+| `gui/queue_manager.py` | 65% | Live worker-launch and stop/pause paths require real pipeline execution |
+
+The gaps in `player.py` and `queue_manager.py` are intentional — they cover code paths that only
+exercise with a real ffmpeg process or audio device and are not worth mocking at that depth.
+
 ---
 
 ## Linting and Formatting
