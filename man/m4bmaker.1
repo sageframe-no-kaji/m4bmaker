@@ -11,9 +11,10 @@ m4bmaker \- convert a directory of audio files into a single .m4b audiobook
 [\fB\-a\fR \fIAUTHOR\fR]
 [\fB\-n\fR \fINARRATOR\fR]
 [\fB\-g\fR \fIGENRE\fR]
-[\fB\-c\fR \fIIMAGE\fR]
+[\fB\-c\fR \fIIMAGE_OR_URL\fR]
 [\fB\-b\fR \fIBITRATE\fR]
 [\fB\-\-stereo\fR]
+[\fB\-\-chapters\-file\fR \fIFILE\fR]
 [\fB\-\-no\-prompt\fR]
 .SH DESCRIPTION
 .B m4bmaker
@@ -29,7 +30,7 @@ prompts and fail immediately if required metadata is absent.
 .PP
 Cover art is auto-detected from image files in \fIDIRECTORY\fR; when multiple
 candidates exist the one with the largest pixel area is chosen.
-Use \fB\-c\fR to specify a cover image path explicitly.
+Use \fB\-c\fR to specify a cover image path or URL explicitly.
 .PP
 After probing, a chapter preview table is printed showing the number, start
 time, and title of each chapter. In interactive mode you are then asked whether
@@ -75,8 +76,8 @@ Narrator name. Overrides tag extraction and skips the interactive narrator promp
 Genre tag embedded in the \fI.m4b\fR.
 Default: \fBAudiobook\fR.
 .TP
-\fB\-c\fR, \fB\-\-cover\fR \fIIMAGE\fR
-Path to a cover image (\fI.jpg\fR, \fI.jpeg\fR, or \fI.png\fR).
+\fB\-c\fR, \fB\-\-cover\fR \fIIMAGE_OR_URL\fR
+Path or URL to a cover image (\fI.jpg\fR, \fI.jpeg\fR, or \fI.png\fR).
 Bypasses automatic cover detection.
 The file must exist; an error is raised if it does not.
 .TP
@@ -93,6 +94,11 @@ Missing required metadata (title, author, narrator) will cause an immediate
 error exit with a descriptive message.
 Combine with \fB\-t\fR, \fB\-a\fR, and \fB\-n\fR for fully non-interactive
 batch processing.
+.TP
+\fB\-\-chapters\-file\fR \fIFILE\fR
+Path to a plain-text chapter list that overrides the auto-generated markers.
+Each non-blank line must be: \fITIMESTAMP TITLE\fR where TIMESTAMP is
+\fIMM:SS\fR or \fIH:MM:SS\fR.
 .SH EXAMPLES
 .TP
 Simplest usage — process current directory interactively:
@@ -145,6 +151,24 @@ Success.
 Error. A descriptive message is printed to \fIstderr\fR.
 Common causes: ffmpeg not found, no audio files in directory, missing required
 metadata with \fB\-\-no\-prompt\fR, or an ffmpeg encoding failure.
+.SH NOTES
+The following features are available in the GUI only and have no CLI equivalent:
+.TP
+.B Chapter editor and audio player
+Inline chapter title editing with an integrated audio preview player. Selecting
+a chapter seeks the player to that timestamp.
+.TP
+.B Rechaptering (edit mode)
+Load an existing \fI.m4b\fR, edit its chapter titles and timestamps, and
+save changes back without re-encoding the audio stream.
+.TP
+.B Split into chapters
+Export each chapter of an existing \fI.m4b\fR as a separate audio file via
+stream copy (no re-encoding).
+.TP
+.B Batch queue
+HandBrake-style job queue for staging and processing multiple audiobook
+builds sequentially.
 .SH BUGS
 Report bugs at \fIhttps://github.com/sageframe-no-kaji/m4bmaker/issues\fR
 .SH AUTHOR

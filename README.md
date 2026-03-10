@@ -8,7 +8,7 @@ Free and open source. Available on macOS.
 
 ---
 
-⭐ **Star this repo if m4bmaker saves you time.**  
+⭐ **Star this repo if m4bmaker saves you time.**
 ☕ **Buy me a coffee:** https://buymeacoffee.com/sageframe
 
 ---
@@ -129,4 +129,9 @@ Areas where Areas where Aciated:
 
 ## License
 
-MIT License · © 2026 Andrew T. Marcus
+GPL-3.0 License · © 2026 Andrew T. Marcus
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See [LICENSE](LICENSE) for details.

@@ -54,3 +54,6 @@ wheels/
 # Temporary ffmpeg working files that might escape the temp dir
 ffmetadata.txt
 concat.txt
+
+# Website / marketing folder
+m4Bookmaker/

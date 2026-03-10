@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OPTIONS, EXAMPLES, FILES, REQUIREMENTS, EXIT STATUS, BUGS, AUTHOR, SEE ALSO.
 - **`README.md`** — installation guide, quick-start examples, full CLI reference table,
   chapter-title stripping rules, Docker pointer.
-- **`LICENSE`** — MIT 2026 sageframe-no-kaji.
+- **`LICENSE`** — GPL-3.0 2026 sageframe-no-kaji.
 - **`CONTRIBUTING.md`** — virtualenv setup, linting commands, test commands, PR guide.
 - **`docs/architecture.md`** — module dependency map, data-flow diagram, design decisions.
 - **`docs/docker.md`** — sample `Dockerfile` and `docker run` examples.
