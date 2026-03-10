@@ -188,7 +188,9 @@ class SplitWorker(QThread):
     finished = Signal(object)      # output_dir: Path
     error = Signal(str)
 
-    def __init__(self, source: Path, chapters: list, total_duration: float, output_dir: Path) -> None:
+    def __init__(
+        self, source: Path, chapters: list, total_duration: float, output_dir: Path
+    ) -> None:
         super().__init__()
         self._source = source
         self._chapters = chapters
@@ -206,7 +208,11 @@ class SplitWorker(QThread):
 
             for i, ch in enumerate(self._chapters):
                 start = ch.start_time
-                end = self._chapters[i + 1].start_time if i + 1 < total else self._total_duration
+                end = (
+                    self._chapters[i + 1].start_time
+                    if i + 1 < total
+                    else self._total_duration
+                )
 
                 safe_title = "".join(
                     c if c.isalnum() or c in " ._-" else "_" for c in ch.title

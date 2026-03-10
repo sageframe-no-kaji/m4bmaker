@@ -377,7 +377,9 @@ class TestSplitWorker:
         errors = []
 
         import subprocess
-        mock_result = subprocess.CompletedProcess([], 1, stdout="", stderr="ffmpeg died")
+        mock_result = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="ffmpeg died"
+        )
         with patch("subprocess.run", return_value=mock_result):
             worker = SplitWorker(source, self._chapters(tmp_path), 60.0, out_dir)
             worker.error.connect(errors.append)

@@ -589,7 +589,9 @@ class MainWindow(QMainWindow):
         busy = self._convert_worker is not None and self._convert_worker.isRunning()
         save_busy = self._save_worker is not None and self._save_worker.isRunning()
         split_busy = self._split_worker is not None and self._split_worker.isRunning()
-        self._convert_btn.setEnabled(has_book and not busy and not save_busy and not split_busy)
+        self._convert_btn.setEnabled(
+            has_book and not busy and not save_busy and not split_busy
+        )
         self._add_to_queue_btn.setEnabled(has_book and self._mode == "build")
         self._split_btn.setVisible(self._mode == "edit")
         self._split_btn.setEnabled(has_book and not split_busy and not save_busy)

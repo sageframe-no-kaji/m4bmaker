@@ -902,8 +902,6 @@ class TestSplitIntoChapters:
         w._on_split_chapters()  # should not raise
 
     def test_on_split_starts_worker(self, win, tmp_path):
-        from unittest.mock import PropertyMock
-
         from m4bmaker.gui.worker import SplitWorker
 
         w, _ = win
@@ -915,7 +913,10 @@ class TestSplitIntoChapters:
         w._m4b_total_duration = 120.0
 
         out_dir = str(tmp_path / "chapters")
-        with patch("m4bmaker.gui.window.QFileDialog.getExistingDirectory", return_value=out_dir):
+        with patch(
+            "m4bmaker.gui.window.QFileDialog.getExistingDirectory",
+            return_value=out_dir,
+        ):
             with patch.object(SplitWorker, "start"):
                 w._on_split_chapters()
         assert w._split_worker is not None
@@ -928,7 +929,10 @@ class TestSplitIntoChapters:
         w._book = _make_book(tmp_path)
         w._folder_zone._edit.setText(str(m4b))
 
-        with patch("m4bmaker.gui.window.QFileDialog.getExistingDirectory", return_value=""):
+        with patch(
+            "m4bmaker.gui.window.QFileDialog.getExistingDirectory",
+            return_value="",
+        ):
             w._on_split_chapters()
         assert w._split_worker is None
 
@@ -938,7 +942,8 @@ class TestSplitIntoChapters:
         out = tmp_path / "chapters"
         out.mkdir()
         w._on_split_finished(out)
-        assert "chapters" in w._status_label.text().lower() or "split" in w._status_label.text().lower()
+        text = w._status_label.text().lower()
+        assert "chapters" in text or "split" in text
 
     def test_on_split_error_shows_dialog(self, win, tmp_path):
         from PySide6.QtWidgets import QMessageBox
@@ -948,4 +953,5 @@ class TestSplitIntoChapters:
         with patch.object(QMessageBox, "critical") as mock_crit:
             w._on_split_error("ffmpeg died")
         mock_crit.assert_called_once()
-        assert "split" in w._status_label.text().lower() or "failed" in w._status_label.text().lower()
+        text = w._status_label.text().lower()
+        assert "split" in text or "failed" in text
