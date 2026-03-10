@@ -1,257 +1,132 @@
 # m4bmaker
 
-**A fast, modern tool for building audiobooks (.m4b) from folders of audio files.**
+**Build beautiful audiobooks from folders of audio files — in seconds.**
 
-m4bmaker converts a directory of audio files into a clean, chapterized **.m4b audiobook** with proper metadata and cover art — powered by ffmpeg and designed to be simple, reliable, and scriptable.
+m4bmaker converts a directory of audio files into a clean, chapterized **.m4b audiobook** with metadata, cover art, and proper chapter markers. It works as a desktop GUI app, a command-line tool, and a scriptable pipeline.
 
----
-
-⭐ **If this tool helped you, please star the repository!**
-☕ **Support development:** https://buymeacoffee.com/sageframe
+Free and open source. Available on macOS.
 
 ---
 
-# Why This Exists
-
-Audiobook tools have historically been frustrating.
-
-Many are:
-
-• old GUI applications that are difficult to automate
-• fragile tools that fail on imperfect audio files
-• complicated ffmpeg command pipelines
-• abandoned software
-
-m4bmaker was created to provide a **modern, reliable audiobook builder** that works for both **command-line users and GUI users**.
-
-The goal is simple:
-
-> Turn a folder of audio files into a clean `.m4b` audiobook with minimal friction.
+⭐ **Star this repo if m4bmaker saves you time.**  
+☕ **Buy me a coffee:** https://buymeacoffee.com/sageframe
 
 ---
 
-# Features
+## Features
 
-## 📚 Automatic Chapter Creation
+### 📚 Automatic Chapter Creation
+Drop a folder of audio files and m4bmaker generates chapters automatically — one per file, with titles cleaned from track numbers and prefixes.
 
-Each audio file becomes a chapter automatically.
+```
+01 - Prologue.mp3       →  Prologue
+02 - The Journey.mp3    →  The Journey
+03 - Arrival.mp3        →  Arrival
+```
 
-Example input files:
+### ✏️ Chapter Editor
+Rename chapters, adjust timestamps, and reorder — all inline, before encoding. No nested menus.
 
-01 - Prologue.mp3
-02 - The Journey.mp3
-03 - Arrival.mp3
+### 🎧 Built-in Audio Preview Player
+A lightweight playback player lets you scrub through the source audio anA lightweight playback player lets you scrub through the source audio aseeksA lightweight playback player lets you scrub through the source audio anA lightweight playback player lets you scrub through the source audio aseeksA lightweight playback player lets you scrub through the source audio anurce.
 
-Chapters become:
+### 🔄 Rechaptering (Edit Mode)
+Load an existing `.m4b` to rename chapters, adjust timestamps, and write the changes back — without re-encoding the audio.
 
-Prologue
-The Journey
-Arrival
+### 🖼 Automatic Cover Art
+The largest image in the source directory is automatically used as the audiobook cover. Override with `--cover` if needed.
 
-Track numbers and prefixes are cleaned automatically.
-
----
-
-## ✏️ Simple Chapter Editing
-
-Chapters are automatically generated, but **can be edited easily before encoding**.
-
-Features include:
-
-- rename chapters directly
-- edit titles inline
-- flatten the chapter list (no confusing nested menus)
-- bulk rename chapters
-
-The goal is **fast editing with minimal friction**.
-
----
-
-## 🎧 Built-in Mini Chapter Player
-
-The GUI includes a **small preview player** so you can quickly listen to chapter boundaries.
-
-This helps users:
-
-- verify chapter positions
-- identify chapter names
-- rename chapters without leaving the app
-
----
-
-## 🖼 Automatic Cover Detection
-
-The tool automatically selects the **largest image in the directory** as the audiobook cover.
-
-You can override with:
-
-–cover cover.jpg
-
----
-
-## ⚙️ Clean, Scriptable CLI
-
-The command line interface is designed for **automation and scripting**.
-
-Example:
-
-m4bmaker ./Dune
-–title “Dune”
-–author “Frank Herbert”
-–narrator “Scott Brick”
-
-Batch workflows, Docker, and pipelines work cleanly.
-
----
-
-## 🧱 Robust Audio Handling
-
-Many audiobook downloads contain messy files.
-
-m4bmaker automatically handles:
-
+### 🛡 Robust Audio Repair
+Many audiobook downloads contain damaged files. m4bmaker automatically detects and repairs:
 - corrupted MP3 frames
-- missing headers
-- embedded artwork in tracks
-- inconsistent metadata
-- mixed audio formats
+- missing or invalid VBR/Xing headers
+- embedded artwork in source tracks
+- inconsistent audio stream layouts
 
-Files are normalized before encoding so the final audiobook is stable.
+Files are normalized before encoding so the final `.m4b` is clean and stable.
 
----
+### 🔍 Preflight Audio Analysis
+Before encoding, m4bmaker analyzes all input files and reports sample rate consistency, channel layout (mono/stereo), and bitrate distribution. Encoding settings are automatically matched to the source material.
 
-## 🖥 Simple Desktop GUI
+### 📋 Batch Queue
+Stage multiple audiobook jobs and process them sequentially — HandBrake-style. Add jobs to the queue, start the queue, and walk away.
 
-For users who prefer a visual interface, the GUI provides:
+### 🚀 Multiple Windows
+Press `⌘N` to open a new independent window. Each window runs its own encode in parallel with no shared state.
 
-• folder selection
-• metadata editing
-• chapter editing
-• cover preview
-• progress display
+### ⚙️ Full CLI Support
+Everything available in the GUI is also scriptable:
 
-Everything happens in **one clean window**.
-
----
-
-## 🚀 Multiple Encoding Jobs
-
-Run multiple audiobook builds simultaneously.
-
-You can simply open multiple windows and run separate encodes in parallel.
-
-This makes it easy to process large audiobook collections.
+```bash
+m4bmaker ./Dune \
+  --title "Dune" \
+  --author "Frank Herbert" \
+  --narrator "Scott Brick"
+```
 
 ---
 
-# Installation
+## Installation
 
-Clone the repository:
+### macOS (App Store)
+Download **m4bmaker** from the Mac App Store. ffmpeg is bundled — no additional setup required.
 
-git clone https://github.com/sageframe-no-kaji/m4bmaker.git
+### From Source
+
+**Requirements:** Python 3.11+, ffmpeg
+
+```bash
+# Install ffmpeg
+brew install ffmpeg
+
+# Clone and install
+git clone https://github.cgit clone https://github.cgit cit
 cd m4bmaker
-
-Create a virtual environment:
-
 python3 -m venv .venv
 source .venv/bin/activate
-
-Install dependencies:
-
-pip install -r requirements.txt
-
-Install the command:
-
 pip install -e .
+```
 
 ---
 
-# Quick Start
+## Quick Start
 
-Convert a folder of audio files into an audiobook:
-
+```bash
+# Convert a folder of audio files
 m4bmaker ./MyBook
 
-Interactive prompts will guide you through metadata.
+# With metadata
+m4bmaker ./MyBook \
+  --title "My Book" \
+  --author "Author Name" \
+  --narrator "Narrator Name"
 
-Or provide metadata directly:
-
-m4bmaker ./MyBook
-–title “My Book”
-–author “Author Name”
-–narrator “Narrator Name”
+# Custom cover art
+m4bmaker ./MyBook --cover cover.jpg
+```
 
 ---
 
-# Supported Audio Formats
+## Supported Input Formats
 
-mp3
-m4a
-aac
-flac
-wav
-ogg
+`mp3` · `m4a` · `aac` · `flac` · `wav` · `ogg`
 
 Formats can be mixed in the same directory.
 
 ---
 
-# Requirements
+## Contributing
 
-- Python 3.11+
-- ffmpeg
+Contributions are wContributions are wBUTING.mdContributions are wContributions are wBUTING.mdConyleContrilines.
 
-Install ffmpeg on macOS:
-
-brew install ffmpeg
-
----
-
-# Project Philosophy
-
-m4bmaker is designed to be:
-
-• simple
-• reliable
-• scriptable
-• predictable
-
-It should work equally well for:
-
-- CLI users
-- audiobook collectors
-- automation workflows
-- GUI users
-
----
-
-# Support Development
-
-If m4bmaker saves you time or helps manage your audiobook library, consider supporting the project.
-
-☕ **Buy me a coffee:**
-https://buymeacoffee.com/sageframe
-
-Even small donations help keep development active.
-
----
-
-# Contributing
-
-Contributions are welcome.
-
-Helpful areas include:
-
-- testing on large audiobook collections
-- metadata improvements
+Areas where Areas where Aciated:
+- testing on large or unusual audiobook collections
+- - tadata edge cases
 - GUI improvements
 - documentation
-- bug reports
 
 ---
 
-# License
+## License
 
-MIT License
-
-© 2026 Andrew T. Marcus
+MIT License · © 2026 Andrew T. Marcus
