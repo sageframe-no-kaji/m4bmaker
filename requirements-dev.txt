@@ -15,3 +15,6 @@ flake8>=7.0
 
 # Cover image resolution comparison (used in cover.py and tests)
 Pillow>=10.0
+
+# macOS .app bundle packaging
+pyinstaller>=6.0

@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# build_macos.sh — build m4bmaker.app and (optionally) a distributable .dmg
+#
+# Usage:
+#   ./scripts/build_macos.sh            # build .app
+#   ./scripts/build_macos.sh --dmg      # build .app + .dmg
+#   ./scripts/build_macos.sh --clean    # wipe build/ and dist/ only
+#
+# Prerequisites (in the active venv):
+#   pip install pyinstaller
+#
+# System dependencies stay external (NOT bundled):
+#   brew install ffmpeg
+#
+# For a signed + notarized release build, set:
+#   export CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+#   export NOTARIZE_APPLE_ID="you@example.com"
+#   export NOTARIZE_PASSWORD="@keychain:AC_PASSWORD"
+#   export NOTARIZE_TEAM_ID="TEAMID"
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT"
+
+APP_NAME="m4bmaker"
+SPEC_FILE="m4bmaker.spec"
+VERSION="$(python -c "from m4bmaker import __version__; print(__version__)")"
+DMG_NAME="${APP_NAME}-${VERSION}.dmg"
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+BUILD_DMG=false
+CLEAN_ONLY=false
+for arg in "$@"; do
+    case "$arg" in
+        --dmg)   BUILD_DMG=true ;;
+        --clean) CLEAN_ONLY=true ;;
+    esac
+done
+
+# ── Clean ─────────────────────────────────────────────────────────────────────
+echo "==> Cleaning build artefacts"
+rm -rf build dist
+
+if $CLEAN_ONLY; then
+    echo "==> Clean done."
+    exit 0
+fi
+
+# ── Preflight checks ──────────────────────────────────────────────────────────
+echo "==> Checking environment"
+
+if ! python -m PyInstaller --version &>/dev/null; then
+    echo "ERROR: PyInstaller not found."
+    echo "       Run: pip install pyinstaller"
+    exit 1
+fi
+
+if ! command -v ffmpeg &>/dev/null; then
+    echo "WARNING: ffmpeg not found on PATH — the final .app will require"
+    echo "         the user to install ffmpeg separately (brew install ffmpeg)."
+fi
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+echo "==> Building ${APP_NAME}.app  (version ${VERSION})"
+python -m PyInstaller "$SPEC_FILE" --noconfirm
+
+APP_PATH="dist/${APP_NAME}.app"
+
+if [[ ! -d "$APP_PATH" ]]; then
+    echo "ERROR: Expected app bundle not found at $APP_PATH"
+    exit 1
+fi
+echo "==> Built: $APP_PATH"
+
+# ── Ad-hoc codesign (required to run on Apple Silicon without Gatekeeper) ─────
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+    echo "==> Signing with identity: $CODESIGN_IDENTITY"
+    codesign --deep --force --options runtime \
+        --sign "$CODESIGN_IDENTITY" "$APP_PATH"
+else
+    echo "==> Ad-hoc signing (local use only)"
+    codesign --deep --force --sign - "$APP_PATH"
+fi
+
+# ── DMG ───────────────────────────────────────────────────────────────────────
+if $BUILD_DMG; then
+    echo "==> Creating $DMG_NAME"
+
+    STAGING="$(mktemp -d)"
+    cp -r "$APP_PATH" "$STAGING/"
+    ln -s /Applications "$STAGING/Applications"
+
+    hdiutil create \
+        -volname "$APP_NAME" \
+        -srcfolder "$STAGING" \
+        -ov -format UDZO \
+        "dist/$DMG_NAME"
+
+    rm -rf "$STAGING"
+    echo "==> DMG: dist/$DMG_NAME"
+
+    # ── Notarize (only if credentials are set) ────────────────────────────────
+    if [[ -n "${NOTARIZE_APPLE_ID:-}" && -n "${NOTARIZE_PASSWORD:-}" && -n "${NOTARIZE_TEAM_ID:-}" ]]; then
+        echo "==> Submitting for notarization…"
+        xcrun notarytool submit "dist/$DMG_NAME" \
+            --apple-id  "$NOTARIZE_APPLE_ID" \
+            --password  "$NOTARIZE_PASSWORD" \
+            --team-id   "$NOTARIZE_TEAM_ID" \
+            --wait
+        xcrun stapler staple "dist/$DMG_NAME"
+        echo "==> Notarization complete."
+    fi
+fi
+
+echo ""
+echo "==> Done!  Output:"
+ls -lh dist/
