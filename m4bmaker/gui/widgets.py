@@ -18,7 +18,17 @@ from pathlib import Path
 from typing import Any, Optional
 
 from PySide6.QtCore import Qt, QPoint, QTimer, Signal
-from PySide6.QtGui import QColor, QDragEnterEvent, QDragLeaveEvent, QDropEvent, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDragLeaveEvent,
+    QDropEvent,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+    QUndoCommand,
+    QUndoStack,
+)
 from PySide6.QtWidgets import QLineEdit as _QLineEdit  # for selectAll cast
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -231,6 +241,7 @@ class CoverWidget(QFrame):
         )
         if path:
             self._set_and_emit(Path(path))
+
     def _browse_url(self) -> None:
         from PySide6.QtWidgets import QInputDialog
 
@@ -245,7 +256,9 @@ class CoverWidget(QFrame):
         if not url.lower().startswith(("http://", "https://")):
             from PySide6.QtWidgets import QMessageBox
 
-            QMessageBox.warning(self, "Invalid URL", "Please enter an http:// or https:// URL.")
+            QMessageBox.warning(
+                self, "Invalid URL", "Please enter an http:// or https:// URL."
+            )
             return
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "m4bmaker/1.0"})
@@ -261,11 +274,16 @@ class CoverWidget(QFrame):
         except urllib.error.URLError as exc:
             from PySide6.QtWidgets import QMessageBox
 
-            QMessageBox.critical(self, "Download Error", f"Could not download image:\n{exc.reason}")
+            QMessageBox.critical(
+                self, "Download Error", f"Could not download image:\n{exc.reason}"
+            )
         except Exception as exc:  # noqa: BLE001
             from PySide6.QtWidgets import QMessageBox
 
-            QMessageBox.critical(self, "Download Error", f"Could not download image:\n{exc}")
+            QMessageBox.critical(
+                self, "Download Error", f"Could not download image:\n{exc}"
+            )
+
     def _set_and_emit(self, p: Path) -> None:
         self.set_cover(p)
         self.cover_changed.emit(p)
@@ -298,14 +316,90 @@ class CoverWidget(QFrame):
 # ── Chapter table internals ───────────────────────────────────────────────────
 
 
+class _TitlesCommand(QUndoCommand):
+    """Undo/redo a change to chapter title text (bulk or single cell).
+
+    The change is assumed to be *already applied* when the command is pushed,
+    so the first call to redo() is skipped.
+    """
+
+    def __init__(  # noqa: E501
+        self, table: "ChapterTable", before: list[str], after: list[str]
+    ) -> None:
+        super().__init__("Edit Titles")
+        self._table = table
+        self._before = before
+        self._after = after
+        self._first = True  # change already applied; skip first redo
+
+    def redo(self) -> None:
+        if self._first:
+            self._first = False
+            return
+        self._table._apply_titles(self._after)
+
+    def undo(self) -> None:
+        self._first = False
+        self._table._apply_titles(self._before)
+
+
+class _TimeCommand(QUndoCommand):
+    """Undo/redo a single chapter start-time insertion.
+
+    Likewise assumes the change is already applied on first push.
+    """
+
+    def __init__(
+        self,
+        table: "ChapterTable",
+        row: int,
+        old_ms: "int | None",
+        old_text: str,
+        new_ms: int,
+    ) -> None:
+        super().__init__("Insert Time")
+        self._table = table
+        self._row = row
+        self._old_ms = old_ms
+        self._old_text = old_text
+        self._new_ms = new_ms
+        self._first = True
+
+    def redo(self) -> None:
+        if self._first:
+            self._first = False
+            return
+        self._table._do_set_time(self._row, self._new_ms)
+
+    def undo(self) -> None:
+        self._first = False
+        item = self._table.item(self._row, self._table.COL_TIME)
+        if item:
+            item.setText(self._old_text)
+            item.setData(Qt.ItemDataRole.UserRole, self._old_ms)
+
+
 class _TitleDelegate(QStyledItemDelegate):
-    """Auto-select all text when entering edit mode."""
+    """Auto-select all text when entering edit mode; records undo snapshots."""
+
+    def __init__(self, table: "ChapterTable") -> None:
+        super().__init__(table)
+        self._table = table
+        self._snapshot_before: list[str] = []
 
     def createEditor(self, parent, option, index):  # type: ignore[no-untyped-def]  # noqa: E501
+        self._snapshot_before = self._table._snapshot_titles()
         editor = super().createEditor(parent, option, index)
         if isinstance(editor, _QLineEdit):
             QTimer.singleShot(0, editor.selectAll)
         return editor
+
+    def setModelData(self, editor, model, index) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
+        before = self._snapshot_before
+        super().setModelData(editor, model, index)
+        after = self._table._snapshot_titles()
+        if before != after:
+            self._table._undo_stack.push(_TitlesCommand(self._table, before, after))
 
 
 # ── ChapterTable ──────────────────────────────────────────────────────────────
@@ -329,6 +423,7 @@ class ChapterTable(QTableWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(0, 3, parent)
+        self._undo_stack = QUndoStack(self)
         self._setup()
 
     def _setup(self) -> None:
@@ -352,10 +447,15 @@ class ChapterTable(QTableWidget):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
+        undo_sc = QShortcut(QKeySequence.StandardKey.Undo, self)
+        undo_sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        undo_sc.activated.connect(self._undo_stack.undo)
+
     # ── public interface ──────────────────────────────────────────────────────
 
     def populate(self, chapters: list[Any]) -> None:
         """Replace table contents with *chapters*."""
+        self._undo_stack.clear()
         self.setRowCount(0)
         for ch in chapters:
             row = self.rowCount()
@@ -407,9 +507,19 @@ class ChapterTable(QTableWidget):
         return result
 
     def set_chapter_time(self, row: int, ms: int) -> None:
-        """Update the chapter start time display and store the ms value."""
+        """Update the chapter start time display and store the ms value (undoable)."""
         if row < 0 or row >= self.rowCount():
             return
+        item = self.item(row, self.COL_TIME)
+        if not item:
+            return
+        old_ms = item.data(Qt.ItemDataRole.UserRole)
+        old_text = item.text()
+        self._do_set_time(row, ms)
+        self._undo_stack.push(_TimeCommand(self, row, old_ms, old_text, ms))
+
+    def _do_set_time(self, row: int, ms: int) -> None:
+        """Apply a time change without pushing to the undo stack."""
         t = ms / 1000.0
         h = int(t // 3600)
         m = int((t % 3600) // 60)
@@ -419,6 +529,24 @@ class ChapterTable(QTableWidget):
         if item:
             item.setText(ts)
             item.setData(Qt.ItemDataRole.UserRole, ms)
+
+    def _snapshot_titles(self) -> list[str]:
+        """Return current title text for every row."""
+        return [
+            (
+                self.item(r, self.COL_TITLE).text()
+                if self.item(r, self.COL_TITLE)
+                else ""
+            )
+            for r in range(self.rowCount())
+        ]
+
+    def _apply_titles(self, titles: list[str]) -> None:
+        """Restore title text for every row without touching the undo stack."""
+        for r, text in enumerate(titles):
+            item = self.item(r, self.COL_TITLE)
+            if item:
+                item.setText(text)
 
     # ── keyboard navigation ───────────────────────────────────────────────────
 
@@ -454,6 +582,7 @@ class ChapterTable(QTableWidget):
         menu.addAction("Find / Replace…", self._find_replace)
         menu.addSeparator()
         menu.addAction("Remove Numeric Prefixes", self._remove_numeric)
+        menu.addAction("Add Sequential Numeric Prefix", self._add_sequential_prefix)
         menu.addAction("Add Prefix…", self._add_prefix)
         menu.addAction("Add Suffix…", self._add_suffix)
         menu.addSeparator()
@@ -472,6 +601,7 @@ class ChapterTable(QTableWidget):
             find, replace, case_sensitive = dlg.values()
             if not find:
                 return
+            before = self._snapshot_titles()
             flags = 0 if case_sensitive else re.IGNORECASE
             try:
                 for row in self._selected_rows():
@@ -492,43 +622,77 @@ class ChapterTable(QTableWidget):
                         else:
                             new = old.replace(find, replace)
                         item.setText(new)
+            after = self._snapshot_titles()
+            if before != after:
+                self._undo_stack.push(_TitlesCommand(self, before, after))
 
     def _remove_numeric(self) -> None:
+        before = self._snapshot_titles()
         for row in self._selected_rows():
             item = self.item(row, self.COL_TITLE)
             if item:
                 item.setText(
                     re.sub(r"^\d+[\s.\-\u2013\u2014:]+", "", item.text()).strip()
                 )
+        after = self._snapshot_titles()
+        if before != after:
+            self._undo_stack.push(_TitlesCommand(self, before, after))
+
+    def _add_sequential_prefix(self) -> None:
+        before = self._snapshot_titles()
+        rows = self._selected_rows()
+        for seq, row in enumerate(rows, start=1):
+            item = self.item(row, self.COL_TITLE)
+            if item:
+                item.setText(f"{seq}. {item.text()}")
+        after = self._snapshot_titles()
+        if before != after:
+            self._undo_stack.push(_TitlesCommand(self, before, after))
 
     def _add_prefix(self) -> None:
         text, ok = QInputDialog.getText(self, "Add Prefix", "Prefix to add:")
         if ok and text:
+            before = self._snapshot_titles()
             for row in self._selected_rows():
                 item = self.item(row, self.COL_TITLE)
                 if item:
                     item.setText(text + item.text())
+            after = self._snapshot_titles()
+            if before != after:
+                self._undo_stack.push(_TitlesCommand(self, before, after))
 
     def _add_suffix(self) -> None:
         text, ok = QInputDialog.getText(self, "Add Suffix", "Suffix to add:")
         if ok and text:
+            before = self._snapshot_titles()
             for row in self._selected_rows():
                 item = self.item(row, self.COL_TITLE)
                 if item:
                     item.setText(item.text() + text)
+            after = self._snapshot_titles()
+            if before != after:
+                self._undo_stack.push(_TitlesCommand(self, before, after))
 
     def _title_case(self) -> None:
+        before = self._snapshot_titles()
         for row in self._selected_rows():
             item = self.item(row, self.COL_TITLE)
             if item:
                 item.setText(item.text().title())
+        after = self._snapshot_titles()
+        if before != after:
+            self._undo_stack.push(_TitlesCommand(self, before, after))
 
     def _sentence_case(self) -> None:
+        before = self._snapshot_titles()
         for row in self._selected_rows():
             item = self.item(row, self.COL_TITLE)
             if item:
                 t = item.text()
                 item.setText(t[:1].upper() + t[1:].lower() if t else t)
+        after = self._snapshot_titles()
+        if before != after:
+            self._undo_stack.push(_TitlesCommand(self, before, after))
 
 
 # ── FindReplaceDialog ─────────────────────────────────────────────────────────

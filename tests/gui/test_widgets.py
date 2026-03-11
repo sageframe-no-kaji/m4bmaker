@@ -265,15 +265,15 @@ class TestChapterTablePopulate:
 
     def test_chapter_number_column(self):
         self.t.populate([_make_chapter(3, 0.0, "Title")])
-        assert self.t.item(0, ChapterTable.COL_NUM).text() == "3"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_NUM).text() == "3"  # type: ignore[union-attr]  # noqa: E501
 
     def test_timestamp_mm_ss(self):
         self.t.populate([_make_chapter(1, 75.0, "T")])  # 1 min 15 sec
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15"  # type: ignore[union-attr]  # noqa: E501
 
     def test_timestamp_h_mm_ss(self):
         self.t.populate([_make_chapter(1, 3661.0, "T")])  # 1h 1m 1s
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:01:01"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:01:01"  # type: ignore[union-attr]  # noqa: E501
 
     def test_title_column_editable(self):
         self.t.populate([_make_chapter(1, 0.0, "Hello")])
@@ -296,7 +296,7 @@ class TestChapterTablePopulate:
         self.t.populate([_make_chapter(1, 0.0, "Old")])
         self.t.populate([_make_chapter(1, 0.0, "New"), _make_chapter(2, 60.0, "New2")])
         assert self.t.rowCount() == 2
-        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "New"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "New"  # type: ignore[union-attr]  # noqa: E501
 
 
 class TestChapterTableBulkEdit:
@@ -318,26 +318,26 @@ class TestChapterTableBulkEdit:
 
     def test_title_case_all(self):
         self.t._title_case()
-        assert self.t.item(1, ChapterTable.COL_TITLE).text() == "02. Middle Part"  # type: ignore[union-attr]
+        assert self.t.item(1, ChapterTable.COL_TITLE).text() == "02. Middle Part"  # type: ignore[union-attr]  # noqa: E501
 
     def test_sentence_case_all(self):
         self.t._sentence_case()
         # "02. middle part" → "02. middle part"[0].upper() + rest.lower()
-        assert self.t.item(2, ChapterTable.COL_TITLE).text() == "03. the end"  # type: ignore[union-attr]
+        assert self.t.item(2, ChapterTable.COL_TITLE).text() == "03. the end"  # type: ignore[union-attr]  # noqa: E501
 
     def test_add_prefix_all(self):
         with patch(
             "m4bmaker.gui.widgets.QInputDialog.getText", return_value=("X-", True)
         ):
             self.t._add_prefix()
-        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "X-01. Opening"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "X-01. Opening"  # type: ignore[union-attr]  # noqa: E501
 
     def test_add_suffix_all(self):
         with patch(
             "m4bmaker.gui.widgets.QInputDialog.getText", return_value=(" [end]", True)
         ):
             self.t._add_suffix()
-        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Opening [end]"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Opening [end]"  # type: ignore[union-attr]  # noqa: E501
 
     def test_find_replace_plain(self):
         with (
@@ -351,7 +351,7 @@ class TestChapterTableBulkEdit:
             ),
         ):
             self.t._find_replace()
-        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Intro"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Intro"  # type: ignore[union-attr]  # noqa: E501
 
     def test_find_replace_empty_find_is_noop(self):
         original = self.t.titles()
@@ -438,9 +438,9 @@ class TestTitleDelegate:
     def test_create_editor_selects_all_for_line_edit(self, qapp):
         from m4bmaker.gui import widgets as _w
 
-        delegate = _w._TitleDelegate()
         table = ChapterTable()
         table.populate([_make_chapter(1, 0.0, "test")])
+        delegate = _w._TitleDelegate(table)
         index = table.model().index(0, ChapterTable.COL_TITLE)
         real_editor = QLineEdit()
         with patch.object(
@@ -581,3 +581,165 @@ class TestFindReplaceFallback:
         ):
             self.t._find_replace()
         assert self.t.titles()[0] == "REPLACED bracket title"
+
+
+# ── ChapterTable undo ──────────────────────────────────────────────────────────
+
+
+class TestChapterTableUndo:
+    """QUndoStack integration: bulk ops and time inserts are undoable."""
+
+    @pytest.fixture(autouse=True)
+    def widget(self, qapp):
+        self.t = ChapterTable()
+        self.t.populate(
+            [
+                _make_chapter(1, 0.0, "alpha"),
+                _make_chapter(2, 60.0, "beta"),
+                _make_chapter(3, 120.0, "gamma"),
+            ]
+        )
+        yield
+        self.t.close()
+
+    # ── populate clears the stack ─────────────────────────────────────────────
+
+    def test_populate_clears_undo_stack(self):
+        self.t._title_case()
+        assert self.t._undo_stack.canUndo()
+        self.t.populate([_make_chapter(1, 0.0, "fresh")])
+        assert not self.t._undo_stack.canUndo()
+
+    # ── bulk title ops ────────────────────────────────────────────────────────
+
+    def test_undo_title_case(self):
+        original = self.t.titles()
+        self.t._title_case()
+        assert self.t.titles() == ["Alpha", "Beta", "Gamma"]
+        self.t._undo_stack.undo()
+        assert self.t.titles() == original
+
+    def test_undo_sentence_case(self):
+        original = self.t.titles()
+        self.t._sentence_case()
+        self.t._undo_stack.undo()
+        assert self.t.titles() == original
+
+    def test_undo_remove_numeric(self):
+        self.t.populate(
+            [
+                _make_chapter(1, 0.0, "01. alpha"),
+                _make_chapter(2, 60.0, "02. beta"),
+            ]
+        )
+        original = self.t.titles()
+        self.t._remove_numeric()
+        self.t._undo_stack.undo()
+        assert self.t.titles() == original
+
+    def test_undo_add_prefix(self):
+        original = self.t.titles()
+        with patch(
+            "m4bmaker.gui.widgets.QInputDialog.getText",
+            return_value=("X-", True),
+        ):
+            self.t._add_prefix()
+        self.t._undo_stack.undo()
+        assert self.t.titles() == original
+
+    def test_undo_add_suffix(self):
+        original = self.t.titles()
+        with patch(
+            "m4bmaker.gui.widgets.QInputDialog.getText",
+            return_value=("-end", True),
+        ):
+            self.t._add_suffix()
+        self.t._undo_stack.undo()
+        assert self.t.titles() == original
+
+    def test_undo_sequential_prefix(self):
+        original = self.t.titles()
+        self.t._add_sequential_prefix()
+        self.t._undo_stack.undo()
+        assert self.t.titles() == original
+
+    def test_undo_find_replace(self):
+        original = self.t.titles()
+        with (
+            patch.object(
+                FindReplaceDialog,
+                "exec",
+                return_value=FindReplaceDialog.DialogCode.Accepted,
+            ),
+            patch.object(
+                FindReplaceDialog,
+                "values",
+                return_value=("alpha", "REPLACED", False),
+            ),
+        ):
+            self.t._find_replace()
+        self.t._undo_stack.undo()
+        assert self.t.titles() == original
+
+    # ── no-op ops don't push to stack ────────────────────────────────────────
+
+    def test_noop_find_replace_does_not_push(self):
+        with (
+            patch.object(
+                FindReplaceDialog,
+                "exec",
+                return_value=FindReplaceDialog.DialogCode.Accepted,
+            ),
+            patch.object(
+                FindReplaceDialog,
+                "values",
+                return_value=("NOMATCH", "X", False),
+            ),
+        ):
+            self.t._find_replace()
+        assert not self.t._undo_stack.canUndo()
+
+    def test_cancelled_prefix_does_not_push(self):
+        with patch(
+            "m4bmaker.gui.widgets.QInputDialog.getText",
+            return_value=("", False),
+        ):
+            self.t._add_prefix()
+        assert not self.t._undo_stack.canUndo()
+
+    # ── multiple undo steps ───────────────────────────────────────────────────
+
+    def test_two_ops_two_undos(self):
+        original = self.t.titles()
+        self.t._title_case()
+        with patch(
+            "m4bmaker.gui.widgets.QInputDialog.getText",
+            return_value=("X-", True),
+        ):
+            self.t._add_prefix()
+        assert self.t.titles() == ["X-Alpha", "X-Beta", "X-Gamma"]
+        self.t._undo_stack.undo()
+        assert self.t.titles() == ["Alpha", "Beta", "Gamma"]
+        self.t._undo_stack.undo()
+        assert self.t.titles() == original
+
+    # ── time insert undo ──────────────────────────────────────────────────────
+
+    def test_undo_set_chapter_time(self):
+        old_text = self.t.item(0, ChapterTable.COL_TIME).text()  # type: ignore[union-attr]  # noqa: E501
+        old_ms = self.t.item(  # type: ignore[union-attr]
+            0, ChapterTable.COL_TIME
+        ).data(1)  # Qt.ItemDataRole.UserRole == 1 after Qt.UserRole alias
+        self.t.set_chapter_time(0, 90_000)  # 1 min 30 sec
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:30"  # type: ignore[union-attr]  # noqa: E501
+        self.t._undo_stack.undo()
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == old_text  # type: ignore[union-attr]  # noqa: E501
+        assert (
+            self.t.item(0, ChapterTable.COL_TIME).data(1) == old_ms  # type: ignore[union-attr]  # noqa: E501
+        )
+
+    def test_set_chapter_time_out_of_range_no_crash(self):
+        # row -1 and row == rowCount should be silent no-ops
+        self.t.set_chapter_time(-1, 5000)
+        self.t.set_chapter_time(self.t.rowCount(), 5000)
+        assert not self.t._undo_stack.canUndo()

@@ -32,7 +32,7 @@ class TestExtensionFiltering:
         assert result[0].name == "track.mp3"
 
     def test_finds_all_supported_extensions(self, tmp_path: Path) -> None:
-        names = ["a.mp3", "b.m4a", "c.aac", "d.flac", "e.wav", "f.ogg"]
+        names = ["a.mp3", "b.m4a", "b2.m4b", "c.aac", "d.flac", "e.wav", "f.ogg"]
         for n in names:
             touch(tmp_path, n)
         result = scan_audio_files(tmp_path)

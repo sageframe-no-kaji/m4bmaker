@@ -8,7 +8,7 @@ from pathlib import Path
 from natsort import natsorted
 
 AUDIO_EXTENSIONS: frozenset[str] = frozenset(
-    {".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg"}
+    {".mp3", ".m4a", ".m4b", ".aac", ".flac", ".wav", ".ogg"}
 )
 
 
