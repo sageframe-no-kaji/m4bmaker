@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QComboBox,
+    QDialog,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -54,6 +55,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from m4bmaker import __version__
 from m4bmaker.models import Book, Chapter, PipelineResult
 from m4bmaker.gui.player import AudioPlayerWidget
 from m4bmaker.gui.styles import get_stylesheet
@@ -126,6 +128,7 @@ class MainWindow(QMainWindow):
         self._book: Optional[Book] = None
         self._mode: str = "build"  # "build" or "edit"
         self._m4b_total_duration: float = 0.0
+        self._chapter_durations: list[float] = []
         self._load_worker: Optional[LoadWorker] = None
         self._m4b_load_worker: Optional[LoadM4bWorker] = None
         self._convert_worker: Optional[ConvertWorker] = None
@@ -228,16 +231,78 @@ class MainWindow(QMainWindow):
         self._extra_windows.append(win)
 
     def _show_about(self) -> None:
-        QMessageBox.about(
-            self,
-            "About m4Bookmaker",
-            "<b>m4Bookmaker</b><br>"
-            "Convert audio files to M4B audiobooks.<br><br>"
-            "Uses ffmpeg for encoding and chapter metadata.<br><br>"
-            f'<a href="{_GITHUB_URL}"> GitHub</a> &nbsp;&nbsp; '
-            f'<a href="{_DONATE_URL}">♥ Buy Me a Coffee</a>',
-        )
+        dlg = QDialog(self)
+        dlg.setWindowTitle("About m4Bookmaker")
+        dlg.setFixedWidth(320)
 
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(32, 32, 32, 32)
+        v.setSpacing(0)
+
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(_sageframe_pixmap(72))
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet("background: transparent; margin-bottom: 14px;")
+        v.addWidget(icon_lbl)
+
+        name_lbl = QLabel("m4Bookmaker")
+        name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name_lbl.setStyleSheet(
+            "font-size: 22px; font-weight: 700; color: #1a1a1a; background: transparent;"
+        )
+        v.addWidget(name_lbl)
+
+        ver_lbl = QLabel(f"Version {__version__}")
+        ver_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ver_lbl.setStyleSheet(
+            "font-size: 12px; color: #7a7a7a; background: transparent; margin-bottom: 18px;"
+        )
+        v.addWidget(ver_lbl)
+
+        author_lbl = QLabel("by Andrew T. Marcus")
+        author_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        author_lbl.setStyleSheet("font-size: 13px; color: #4a4a4a; background: transparent;")
+        v.addWidget(author_lbl)
+
+        sf_lbl = QLabel(
+            f'<a href="{_GITHUB_URL}" style="color: #7a7a7a; text-decoration: none;">Sageframe</a>'
+        )
+        sf_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sf_lbl.setOpenExternalLinks(True)
+        sf_lbl.setStyleSheet(
+            "font-size: 12px; background: transparent; margin-bottom: 22px;"
+        )
+        v.addWidget(sf_lbl)
+
+        links = QHBoxLayout()
+        links.setSpacing(20)
+        links.addStretch()
+        gh_lbl = QLabel(
+            f'<a href="{_GITHUB_URL}/m4bmaker" style="color: #c45a2d; text-decoration: none;">GitHub</a>'
+        )
+        gh_lbl.setOpenExternalLinks(True)
+        gh_lbl.setStyleSheet("font-size: 13px; background: transparent;")
+        links.addWidget(gh_lbl)
+        ko_lbl = QLabel(
+            f'<a href="{_DONATE_URL}" style="color: #c45a2d; text-decoration: none;">♥ Support</a>'
+        )
+        ko_lbl.setOpenExternalLinks(True)
+        ko_lbl.setStyleSheet("font-size: 13px; background: transparent;")
+        links.addWidget(ko_lbl)
+        links.addStretch()
+        v.addLayout(links)
+        v.addSpacing(22)
+
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedWidth(88)
+        ok_btn.clicked.connect(dlg.accept)
+        ok_row = QHBoxLayout()
+        ok_row.addStretch()
+        ok_row.addWidget(ok_btn)
+        ok_row.addStretch()
+        v.addLayout(ok_row)
+
+        dlg.exec()
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
@@ -449,6 +514,30 @@ class MainWindow(QMainWindow):
         self._chapter_table.currentCellChanged.connect(self._on_chapter_selected)
         layout.addWidget(self._chapter_table, stretch=1)
 
+        # Move / Remove toolbar (build mode only)
+        ch_tools_row = QHBoxLayout()
+        ch_tools_row.setContentsMargins(0, 0, 0, 0)
+        ch_tools_row.setSpacing(4)
+        self._ch_up_btn = QPushButton("↑")
+        self._ch_up_btn.setFixedWidth(32)
+        self._ch_up_btn.setToolTip("Move selected file up")
+        self._ch_up_btn.setEnabled(False)
+        self._ch_up_btn.clicked.connect(self._on_chapter_move_up)
+        self._ch_down_btn = QPushButton("↓")
+        self._ch_down_btn.setFixedWidth(32)
+        self._ch_down_btn.setToolTip("Move selected file down")
+        self._ch_down_btn.setEnabled(False)
+        self._ch_down_btn.clicked.connect(self._on_chapter_move_down)
+        ch_tools_row.addWidget(self._ch_up_btn)
+        ch_tools_row.addWidget(self._ch_down_btn)
+        ch_tools_row.addStretch()
+        self._ch_remove_btn = QPushButton("Remove")
+        self._ch_remove_btn.setToolTip("Remove selected file from book")
+        self._ch_remove_btn.setEnabled(False)
+        self._ch_remove_btn.clicked.connect(self._on_chapter_remove)
+        ch_tools_row.addWidget(self._ch_remove_btn)
+        layout.addLayout(ch_tools_row)
+
         hint = QLabel(
             "Double-click or press a key to edit a title  ·  "
             "Enter = next row  ·  Shift+Enter = previous row  ·  "
@@ -530,6 +619,10 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self._convert_btn)
         btn_row.addStretch()
 
+        sf_icon_lbl = QLabel()
+        sf_icon_lbl.setPixmap(_sageframe_pixmap(14))
+        sf_icon_lbl.setStyleSheet("background: transparent;")
+        btn_row.addWidget(sf_icon_lbl)
         sf_lbl = QLabel(
             f'<a href="{_GITHUB_URL}" style="color: #7a7a7a; text-decoration: none;">'
             "Sageframe</a>"
@@ -582,6 +675,10 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
+            # Stop the queue and wait for the worker to finish cleanly
+            self._queue_manager.stop()
+            if self._queue_manager._worker is not None:
+                self._queue_manager._worker.wait(5000)
         super().closeEvent(event)
 
     def _update_controls(self) -> None:
@@ -602,6 +699,7 @@ class MainWindow(QMainWindow):
         else:
             self._convert_btn.setText("Convert to M4B")
             self._build_encoding_section_visibility(True)
+        self._update_chapter_buttons()
 
     def _build_encoding_section_visibility(self, visible: bool) -> None:
         self._settings_tabs.setVisible(visible)
@@ -635,6 +733,7 @@ class MainWindow(QMainWindow):
         self._genre_edit.setText(book.metadata.genre)
         self._cover_widget.set_cover(book.cover)
         self._chapter_table.populate(book.chapters)
+        self._chapter_durations = self._derive_durations(book)
         self._update_output_preview()
         self._update_controls()
         self._set_status(
@@ -760,6 +859,7 @@ class MainWindow(QMainWindow):
         self._mode_badge.setText("Build")
         self._analysis_label.setText("No analysis yet.")
         self._chapter_table.populate([])
+        self._chapter_durations = []
         self._player.stop()
         self._progress_bar.setVisible(False)
         self._set_status("")
@@ -811,6 +911,7 @@ class MainWindow(QMainWindow):
     def _on_chapter_selected(
         self, row: int, _col: int, _prev_row: int, _prev_col: int
     ) -> None:
+        self._update_chapter_buttons()
         if self._book is None or row < 0 or row >= len(self._book.chapters):
             self._insert_time_btn.setEnabled(False)
             return
@@ -838,6 +939,110 @@ class MainWindow(QMainWindow):
             return
         ms = self._player.current_position_ms
         self._chapter_table.set_chapter_time(row, ms)
+
+    # ── Chapter file management (build mode only) ─────────────────────────────
+
+    def _derive_durations(self, book: "Book") -> list[float]:
+        """Derive per-chapter durations from start_time diffs + book.total_duration."""
+        result = []
+        for i, ch in enumerate(book.chapters):
+            if i + 1 < len(book.chapters):
+                result.append(book.chapters[i + 1].start_time - ch.start_time)
+            else:
+                result.append(max(0.0, book.total_duration - ch.start_time))
+        return result
+
+    def _reindex_chapters(self) -> None:
+        """Rebuild chapter indices and start_times from self._chapter_durations."""
+        if self._book is None:
+            return
+        cursor = 0.0
+        for i, (ch, dur) in enumerate(zip(self._book.chapters, self._chapter_durations)):
+            ch.index = i + 1
+            ch.start_time = cursor
+            cursor += dur
+        self._book.total_duration = cursor
+
+    def _sync_titles_from_table(self) -> None:
+        """Write table-edited titles back into self._book.chapters before structural change."""
+        if self._book is None:
+            return
+        for i, title in enumerate(self._chapter_table.titles()):
+            if i < len(self._book.chapters):
+                self._book.chapters[i].title = title
+
+    def _update_chapter_buttons(self) -> None:
+        """Enable/disable Up/Down/Remove based on selection and mode."""
+        if not hasattr(self, "_ch_up_btn"):
+            return
+        if self._book is None or self._mode != "build":
+            self._ch_up_btn.setEnabled(False)
+            self._ch_down_btn.setEnabled(False)
+            self._ch_remove_btn.setEnabled(False)
+            return
+        row = self._chapter_table.currentRow()
+        n = self._chapter_table.rowCount()
+        self._ch_up_btn.setEnabled(row > 0)
+        self._ch_down_btn.setEnabled(0 <= row < n - 1)
+        self._ch_remove_btn.setEnabled(row >= 0 and n > 1)
+
+    def _on_chapter_move_up(self) -> None:
+        row = self._chapter_table.currentRow()
+        if row <= 0 or self._book is None:
+            return
+        self._sync_titles_from_table()
+        i = row
+        self._chapter_durations[i], self._chapter_durations[i - 1] = (
+            self._chapter_durations[i - 1], self._chapter_durations[i]
+        )
+        self._book.files[i], self._book.files[i - 1] = (
+            self._book.files[i - 1], self._book.files[i]
+        )
+        self._book.chapters[i], self._book.chapters[i - 1] = (
+            self._book.chapters[i - 1], self._book.chapters[i]
+        )
+        self._reindex_chapters()
+        self._chapter_table.populate(self._book.chapters)
+        self._chapter_table.setCurrentCell(i - 1, ChapterTable.COL_TITLE)
+
+    def _on_chapter_move_down(self) -> None:
+        if self._book is None:
+            return
+        row = self._chapter_table.currentRow()
+        n = self._chapter_table.rowCount()
+        if row < 0 or row >= n - 1:
+            return
+        self._sync_titles_from_table()
+        i = row
+        self._chapter_durations[i], self._chapter_durations[i + 1] = (
+            self._chapter_durations[i + 1], self._chapter_durations[i]
+        )
+        self._book.files[i], self._book.files[i + 1] = (
+            self._book.files[i + 1], self._book.files[i]
+        )
+        self._book.chapters[i], self._book.chapters[i + 1] = (
+            self._book.chapters[i + 1], self._book.chapters[i]
+        )
+        self._reindex_chapters()
+        self._chapter_table.populate(self._book.chapters)
+        self._chapter_table.setCurrentCell(i + 1, ChapterTable.COL_TITLE)
+
+    def _on_chapter_remove(self) -> None:
+        row = self._chapter_table.currentRow()
+        if row < 0 or self._book is None:
+            return
+        self._sync_titles_from_table()
+        del self._chapter_durations[row]
+        del self._book.files[row]
+        del self._book.chapters[row]
+        self._reindex_chapters()
+        self._chapter_table.populate(self._book.chapters)
+        new_row = min(row, self._chapter_table.rowCount() - 1)
+        if new_row >= 0:
+            self._chapter_table.setCurrentCell(new_row, ChapterTable.COL_TITLE)
+        self._set_status(
+            f"{len(self._book.files)} file(s) · {len(self._book.chapters)} chapter(s)."
+        )
 
     def _on_load_error(self, msg: str) -> None:
         self._progress_bar.setRange(0, 100)

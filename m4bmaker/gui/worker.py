@@ -135,7 +135,8 @@ class LoadM4bWorker(QThread):
 
             ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
             cover_path = extract_cover_from_audio(self._path, ffmpeg)
-            book = Book(files=[self._path], chapters=chapters, metadata=metadata, cover=cover_path)
+            book = Book(files=[self._path], chapters=chapters, metadata=metadata, cover=cover_path,
+                        total_duration=total_duration)
             self.finished.emit((book, total_duration))
         except SystemExit as exc:
             self.error.emit(str(exc))

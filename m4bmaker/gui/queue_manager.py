@@ -9,6 +9,7 @@ can stay in sync without polling.
 from __future__ import annotations
 
 import shutil
+import threading
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QThread, Signal
@@ -29,10 +30,16 @@ class JobWorker(QThread):
     progress = Signal(str, str, float)
     finished = Signal(str)   # job_id
     failed = Signal(str, str)  # job_id, error message
+    cancelled = Signal(str)  # job_id
 
     def __init__(self, job: Job) -> None:
         super().__init__()
         self._job = job
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        """Signal the running ffmpeg subprocess to stop."""
+        self._cancel_event.set()
 
     def run(self) -> None:
         from m4bmaker.pipeline import run_pipeline
@@ -54,12 +61,22 @@ class JobWorker(QThread):
                 progress_callback=_cb,
                 ffmpeg=ffmpeg,
                 ffprobe=ffprobe,
+                cancel_event=self._cancel_event,
             )
-            self.finished.emit(self._job.id)
+            if self._cancel_event.is_set():
+                self.cancelled.emit(self._job.id)
+            else:
+                self.finished.emit(self._job.id)
         except SystemExit as exc:
-            self.failed.emit(self._job.id, str(exc))
+            if self._cancel_event.is_set():
+                self.cancelled.emit(self._job.id)
+            else:
+                self.failed.emit(self._job.id, str(exc))
         except Exception as exc:  # noqa: BLE001
-            self.failed.emit(self._job.id, str(exc))
+            if self._cancel_event.is_set():
+                self.cancelled.emit(self._job.id)
+            else:
+                self.failed.emit(self._job.id, str(exc))
 
 
 # ── queue manager ─────────────────────────────────────────────────────────────
@@ -101,10 +118,10 @@ class QueueManager(QObject):
         self._advance()
 
     def stop(self) -> None:
-        """Stop launching new jobs.  The current job finishes normally."""
+        """Cancel the running job immediately and stop the queue."""
         self._running = False
-        # If a worker is running, let it complete — the _on_finished handler
-        # will see _running=False and not launch the next job.
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
 
     def remove(self, job_id: str) -> None:
         """Remove a queued (not running) job."""
@@ -160,6 +177,7 @@ class QueueManager(QObject):
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.start()
 
     def _on_progress(self, job_id: str, msg: str, frac: float) -> None:
@@ -178,6 +196,15 @@ class QueueManager(QObject):
             job.status_message = "Done"
             self.job_updated.emit(job_id)
         self._advance()
+
+    def _on_cancelled(self, job_id: str) -> None:
+        job = self.get_job(job_id)
+        if job is not None:
+            job.status = JobStatus.CANCELLED
+            job.status_message = "Cancelled"
+            self.job_updated.emit(job_id)
+        self._running = False
+        self.queue_finished.emit()
 
     def _on_failed(self, job_id: str, error: str) -> None:
         job = self.get_job(job_id)

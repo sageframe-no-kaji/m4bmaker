@@ -7,10 +7,11 @@ these functions rather than reimplementing the conversion logic.
 from __future__ import annotations
 
 import tempfile
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from m4bmaker.chapters import build_chapters, write_ffmetadata
+from m4bmaker.chapters import build_chapters, get_duration, write_ffmetadata
 from m4bmaker.cover import extract_cover_from_audio, find_cover
 from m4bmaker.encoder import encode, write_concat_list
 from m4bmaker.metadata import extract_metadata
@@ -56,6 +57,12 @@ def load_audiobook(
 
     chapters = build_chapters(files, ffprobe, progress_fn=progress_fn)
 
+    # Compute total duration for UI reorder/remove support
+    if chapters:
+        total_duration = chapters[-1].start_time + get_duration(files[-1], ffprobe)
+    else:
+        total_duration = 0.0
+
     # Fallback: extract embedded cover from first audio file if none found on disk
     if cover is None and files:
         _ffmpeg = __import__("shutil").which("ffmpeg") or "ffmpeg"
@@ -66,6 +73,7 @@ def load_audiobook(
         chapters=chapters,
         metadata=metadata,
         cover=cover,
+        total_duration=total_duration,
     )
 
 
@@ -80,6 +88,7 @@ def run_pipeline(
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
     _tmp_dir: Path | None = None,
+    cancel_event: "threading.Event | None" = None,
 ) -> PipelineResult:
     """Encode *book* to *output_path* and return a :class:`PipelineResult`.
 
@@ -122,7 +131,7 @@ def run_pipeline(
     def _run(tmp_path: Path) -> PipelineResult:
         # ── Repair pass ──────────────────────────────────────────────────
         def _repair_cb(msg: str) -> None:
-            _cb(msg, 0.05)
+            _cb(msg, 0.0)
 
         repair_result = run_repair(
             files=book.files,
@@ -135,7 +144,7 @@ def run_pipeline(
         if repair_result.needed_repair:
             _cb(
                 f"Repaired {repair_result.repaired} file(s). Continuing…",
-                0.08,
+                0.0,
             )
 
         # ── Compute total duration ────────────────────────────────────────
@@ -171,18 +180,18 @@ def run_pipeline(
         total_ms = int(total_duration_s * 1000)
 
         # ── Chapter metadata & concat list ───────────────────────────────
-        _cb("Generating chapter markers…", 0.1)
+        _cb("Generating chapter markers…", 0.0)
         meta_file = tmp_path / "ffmetadata.txt"
         concat_file = tmp_path / "concat.txt"
         write_ffmetadata(working_book.chapters, working_book.metadata, meta_file, total_duration_s)
         write_concat_list(active_files, concat_file)
 
         # ── Encode ───────────────────────────────────────────────────────
-        _cb(f"Encoding {len(active_files)} file(s) to M4B…", 0.2)
+        _cb(f"Encoding {len(active_files)} file(s) to M4B…", 0.0)
 
         def _encode_progress(frac: float) -> None:
             pct = int(frac * 100)
-            _cb(f"Encoding audiobook… {pct}%", 0.2 + 0.78 * frac)
+            _cb(f"Encoding audiobook… {pct}%", frac)
 
         encode(
             concat=concat_file,
@@ -195,6 +204,7 @@ def run_pipeline(
             ffmpeg=ffmpeg,
             total_ms=total_ms,
             progress_callback=_encode_progress,
+            cancel_event=cancel_event,
         )
 
         _cb("Done.", 1.0)

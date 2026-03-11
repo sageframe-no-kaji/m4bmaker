@@ -214,10 +214,11 @@ class CoverWidget(QFrame):
         if path and path.exists():
             pix = QPixmap(str(path))
             if not pix.isNull():
+                inner = self._SIZE - 2  # 1px border on each side
                 self._thumb.setPixmap(
                     pix.scaled(
-                        self._SIZE,
-                        self._SIZE,
+                        inner,
+                        inner,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )

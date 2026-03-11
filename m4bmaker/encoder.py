@@ -83,6 +83,7 @@ def encode(
     total_ms: int = 0,
     sample_rate: int | None = None,
     progress_callback: Callable[[float], None] | None = None,
+    cancel_event: "threading.Event | None" = None,
 ) -> None:
     """Run ffmpeg to produce the final .m4b file with live progress bar.
 
@@ -173,7 +174,11 @@ def encode(
     stderr_thread.start()
 
     try:
-        proc.wait()
+        while proc.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                break
+            threading.Event().wait(0.1)
     finally:
         done.set()
         reader.join()

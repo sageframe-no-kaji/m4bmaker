@@ -44,6 +44,7 @@ class Book:
     chapters: list[Chapter]
     metadata: BookMetadata
     cover: Path | None = field(default=None)
+    total_duration: float = field(default=0.0)
 
 
 @dataclass
