@@ -82,6 +82,7 @@ _BITRATES = ["32k", "48k", "64k", "96k", "128k", "192k", "256k", "320k"]
 _DEFAULT_BITRATE = "96k"
 _DONATE_URL = "https://buymeacoffee.com/sageframe"
 _GITHUB_URL = "https://github.com/sageframe-no-kaji"
+_BUG_REPORT_URL = "https://tally.so/r/1AKQPW"
 
 # Sageframe brand SVG (embedded so the app has no file dependency)
 _SAGEFRAME_SVG = (
@@ -188,6 +189,12 @@ class MainWindow(QMainWindow):
         about_action = QAction("About m4Bookmaker", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+        bug_action = QAction("Report a Bug…", self)
+        bug_action.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(_BUG_REPORT_URL))
+        )
+        help_menu.addAction(bug_action)
 
         help_menu.addSeparator()
 
