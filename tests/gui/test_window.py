@@ -26,6 +26,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: F401, E402
 
 from m4bmaker.gui.window import MainWindow  # noqa: E402
+from m4bmaker.gui.widgets import ChapterTable  # noqa: E402
 from m4bmaker.models import Book, BookMetadata, Chapter, PipelineResult  # noqa: E402
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -728,7 +729,9 @@ class TestChaptersTabPlayer:
         # Index 5 is out of range (book has 1 chapter)
         w._on_chapter_selected(5, 0, -1, 0)  # should not raise
 
-    def test_chapter_selected_calls_player_load_paused_when_stopped(self, win, tmp_path):
+    def test_chapter_selected_calls_player_load_paused_when_stopped(
+        self, win, tmp_path
+    ):
         """Selecting a chapter when not playing calls load_paused (no auto-play)."""
         from unittest.mock import PropertyMock
 
@@ -736,7 +739,9 @@ class TestChaptersTabPlayer:
         book = _make_book(tmp_path)
         w._book = book
         w._mode = "build"
-        with patch.object(type(w._player), "is_playing", new_callable=PropertyMock, return_value=False):
+        with patch.object(
+            type(w._player), "is_playing", new_callable=PropertyMock, return_value=False
+        ):
             with patch.object(w._player, "load_paused") as mock_load_paused:
                 w._on_chapter_selected(0, 0, -1, 0)
         mock_load_paused.assert_called_once()
@@ -751,7 +756,9 @@ class TestChaptersTabPlayer:
         book = _make_book(tmp_path)
         w._book = book
         w._mode = "build"
-        with patch.object(type(w._player), "is_playing", new_callable=PropertyMock, return_value=True):
+        with patch.object(
+            type(w._player), "is_playing", new_callable=PropertyMock, return_value=True
+        ):
             with patch.object(w._player, "load") as mock_load:
                 w._on_chapter_selected(0, 0, -1, 0)
         mock_load.assert_called_once()
@@ -824,7 +831,6 @@ class TestQueueIntegration:
         assert w._queue_window is first
 
     def test_close_event_allowed_when_queue_idle(self, win):
-        from PySide6.QtCore import QEvent
         from PySide6.QtGui import QCloseEvent
 
         w, _ = win
@@ -840,8 +846,15 @@ class TestQueueIntegration:
 
         w, _ = win
         event = QCloseEvent()
-        with patch.object(type(w._queue_manager), "is_running", new_callable=PropertyMock, return_value=True):
-            with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No):
+        with patch.object(
+            type(w._queue_manager),
+            "is_running",
+            new_callable=PropertyMock,
+            return_value=True,
+        ):
+            with patch.object(
+                QMessageBox, "question", return_value=QMessageBox.StandardButton.No
+            ):
                 w.closeEvent(event)
         assert not event.isAccepted()
 
@@ -955,3 +968,409 @@ class TestSplitIntoChapters:
         mock_crit.assert_called_once()
         text = w._status_label.text().lower()
         assert "split" in text or "failed" in text
+
+
+# ── helpers for chapter-editing tests ─────────────────────────────────────────
+
+
+def _make_multi_book(tmp_path: Path, n: int = 5) -> Book:
+    """Create a book with *n* chapters (10 s each), each backed by its own file."""
+    files = []
+    chapters = []
+    for i in range(n):
+        f = tmp_path / f"{i + 1:02d}.mp3"
+        f.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 128)
+        files.append(f)
+        chapters.append(
+            Chapter(
+                index=i + 1,
+                start_time=i * 10.0,
+                title=f"Chapter {i + 1}",
+                source_file=f,
+            )
+        )
+    return Book(
+        files=files,
+        chapters=chapters,
+        metadata=BookMetadata(title="Test", author="A", narrator="N", genre="G"),
+        total_duration=n * 10.0,
+    )
+
+
+def _load_multi(w, tmp_path, n=5):
+    """Load a multi-chapter book into the window and return the book.
+
+    Calls ``_apply_book_to_ui`` directly instead of ``_on_load_finished`` to
+    avoid spawning a PreflightWorker thread (which runs ffprobe and crashes
+    on teardown when the QThread is destroyed mid-run).  Player load methods
+    are also stubbed out so ``_on_chapter_selected`` doesn't start workers.
+    """
+    book = _make_multi_book(tmp_path, n)
+    w._player.load = lambda *a, **kw: None
+    w._player.load_paused = lambda *a, **kw: None
+    w._apply_book_to_ui(book)
+    return book
+
+
+# ── chapter move up / down ────────────────────────────────────────────────────
+
+
+class TestChapterMoveUp:
+    def test_move_up_swaps_chapters(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_move_up()
+        assert w._book.chapters[0].title == "Chapter 2"
+        assert w._book.chapters[1].title == "Chapter 1"
+
+    def test_move_up_swaps_files_in_build_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        original_file_0 = w._book.files[0]
+        original_file_1 = w._book.files[1]
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_move_up()
+        assert w._book.files[0] == original_file_1
+        assert w._book.files[1] == original_file_0
+
+    def test_move_up_skips_files_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._mode = "edit"
+        original_files = list(w._book.files)
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_move_up()
+        assert w._book.files == original_files
+
+    def test_move_up_at_row_0_is_noop(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+        w._on_chapter_move_up()
+        assert w._book.chapters[0].title == "Chapter 1"
+
+    def test_move_up_reindexes_start_times(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_move_up()
+        # After swap, start_times are rebuilt from durations
+        assert w._book.chapters[0].start_time == 0.0
+        assert w._book.chapters[1].start_time == 10.0
+
+
+class TestChapterMoveDown:
+    def test_move_down_swaps_chapters(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+        w._on_chapter_move_down()
+        assert w._book.chapters[0].title == "Chapter 2"
+        assert w._book.chapters[1].title == "Chapter 1"
+
+    def test_move_down_swaps_files_in_build_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        original_file_0 = w._book.files[0]
+        original_file_1 = w._book.files[1]
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+        w._on_chapter_move_down()
+        assert w._book.files[0] == original_file_1
+        assert w._book.files[1] == original_file_0
+
+    def test_move_down_skips_files_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._mode = "edit"
+        original_files = list(w._book.files)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+        w._on_chapter_move_down()
+        assert w._book.files == original_files
+
+    def test_move_down_at_last_row_is_noop(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        w._on_chapter_move_down()
+        assert w._book.chapters[2].title == "Chapter 3"
+
+
+# ── chapter remove ────────────────────────────────────────────────────────────
+
+
+class TestChapterRemove:
+    def test_remove_deletes_chapter_and_file_in_build_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_remove()
+        assert len(w._book.chapters) == 2
+        assert len(w._book.files) == 2
+        assert w._book.chapters[0].title == "Chapter 1"
+        assert w._book.chapters[1].title == "Chapter 3"
+
+    def test_remove_keeps_files_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_remove()
+        assert len(w._book.chapters) == 2
+        assert len(w._book.files) == 3  # files untouched
+
+    def test_remove_updates_durations(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_remove()
+        assert len(w._chapter_durations) == 2
+
+    def test_remove_noop_no_selection(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._chapter_table.setCurrentCell(-1, 0)
+        w._on_chapter_remove()
+        assert len(w._book.chapters) == 5  # unchanged
+
+
+# ── chapter merge ─────────────────────────────────────────────────────────────
+
+
+class TestChapterMerge:
+    def _select_range(self, w, start, end):
+        """Simulate shift-click selection of rows start..end (inclusive)."""
+        from PySide6.QtCore import QItemSelectionModel
+
+        sel_model = w._chapter_table.selectionModel()
+        sel_model.clearSelection()
+        for r in range(start, end + 1):
+            idx = w._chapter_table.model().index(r, 0)
+            sel_model.select(
+                idx,
+                QItemSelectionModel.SelectionFlag.Select
+                | QItemSelectionModel.SelectionFlag.Rows,
+            )
+
+    def test_merge_collapses_chapters(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        self._select_range(w, 1, 3)  # rows 1,2,3 → merge into row 1
+        w._on_chapter_merge()
+        assert len(w._book.chapters) == 3
+        assert w._book.chapters[0].title == "Chapter 1"
+        assert w._book.chapters[1].title == "Chapter 2"  # keeps first selected title
+        assert w._book.chapters[2].title == "Chapter 5"
+
+    def test_merge_sums_durations(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        self._select_range(w, 1, 3)
+        w._on_chapter_merge()
+        # 3 rows of 10s each merged → 30s
+        assert w._chapter_durations[1] == pytest.approx(30.0)
+
+    def test_merge_preserves_all_files_in_build_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        self._select_range(w, 1, 3)
+        w._on_chapter_merge()
+        assert len(w._book.files) == 5  # all files still present
+
+    def test_merge_sets_chapters_merged_in_build_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        assert w._chapters_merged is False
+        self._select_range(w, 0, 1)
+        w._on_chapter_merge()
+        assert w._chapters_merged is True
+
+    def test_merge_does_not_set_chapters_merged_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        self._select_range(w, 0, 1)
+        w._on_chapter_merge()
+        assert w._chapters_merged is False
+
+    def test_merge_hides_file_ops_after_build_merge(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        self._select_range(w, 0, 1)
+        w._on_chapter_merge()
+        # Use isHidden() — checks the widget's own flag, not the parent chain.
+        assert w._ch_up_btn.isHidden()
+        assert w._ch_down_btn.isHidden()
+        assert w._ch_remove_btn.isHidden()
+        assert not w._ch_merge_btn.isHidden()
+
+    def test_merge_noop_single_selection(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        self._select_range(w, 1, 1)
+        w._on_chapter_merge()
+        assert len(w._book.chapters) == 3  # unchanged
+
+    def test_chapters_merged_resets_on_new_book(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        self._select_range(w, 0, 1)
+        w._on_chapter_merge()
+        assert w._chapters_merged is True
+        # Load a fresh book
+        _load_multi(w, tmp_path, n=3)
+        assert w._chapters_merged is False
+
+    def test_merge_reindexes_start_times(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        self._select_range(w, 1, 3)
+        w._on_chapter_merge()
+        # ch0: 0s, ch1 (merged): 10s, ch2 (was ch5): 40s
+        assert w._book.chapters[0].start_time == pytest.approx(0.0)
+        assert w._book.chapters[1].start_time == pytest.approx(10.0)
+        assert w._book.chapters[2].start_time == pytest.approx(40.0)
+
+
+# ── chapter prev / next ───────────────────────────────────────────────────────
+
+
+class TestChapterPrevNext:
+    def test_prev_moves_to_previous_row(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        w._on_chapter_prev()
+        assert w._chapter_table.currentRow() == 1
+
+    def test_prev_at_row_0_stays(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+        w._on_chapter_prev()
+        assert w._chapter_table.currentRow() == 0
+
+    def test_next_moves_to_next_row(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+        w._on_chapter_next()
+        assert w._chapter_table.currentRow() == 1
+
+    def test_next_at_last_row_stays(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        w._on_chapter_next()
+        assert w._chapter_table.currentRow() == 2
+
+    def test_prev_btn_disabled_at_row_0(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+        # trigger signal manually
+        w._on_chapter_selected(0, 0, -1, -1)
+        assert not w._ch_prev_btn.isEnabled()
+
+    def test_next_btn_disabled_at_last_row(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        w._on_chapter_selected(2, 0, -1, -1)
+        assert not w._ch_next_btn.isEnabled()
+
+    def test_both_btns_enabled_at_middle_row(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_selected(1, 0, -1, -1)
+        assert w._ch_prev_btn.isEnabled()
+        assert w._ch_next_btn.isEnabled()
+
+
+# ── insert time ───────────────────────────────────────────────────────────────
+
+
+class TestInsertTime:
+    def test_insert_time_build_mode_adds_cumulative_offset(self, win, tmp_path):
+        """In build mode, player position is file-local; Insert Time must add
+        the chapter's cumulative start_time to get the correct global time."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        # Simulate: chapter 3 (start_time=20.0s), player at 3.5s into that file
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        with patch.object(
+            type(w._player),
+            "current_position_ms",
+            new_callable=lambda: property(lambda self: 3500),
+        ):
+            w._on_insert_time()
+        # Expected: 20000 + 3500 = 23500 ms
+        times = w._chapter_table.times_ms()
+        assert times[2] == 23500
+
+    def test_insert_time_edit_mode_uses_raw_position(self, win, tmp_path):
+        """In edit mode, player loads the single .m4b — positions are global.
+        Insert Time should use the raw position without adding any offset."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        with patch.object(
+            type(w._player),
+            "current_position_ms",
+            new_callable=lambda: property(lambda self: 45000),
+        ):
+            w._on_insert_time()
+        times = w._chapter_table.times_ms()
+        assert times[2] == 45000
+
+    def test_insert_time_noop_no_selection(self, win, tmp_path):
+        """Insert Time with no row selected should be a no-op."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.setCurrentCell(-1, 0)
+        # Should not raise
+        w._on_insert_time()
+
+
+# ── update_chapter_buttons visibility ─────────────────────────────────────────
+
+
+class TestUpdateChapterButtons:
+    def test_buttons_visible_in_build_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._update_chapter_buttons()
+        assert not w._ch_up_btn.isHidden()
+        assert not w._ch_down_btn.isHidden()
+        assert not w._ch_remove_btn.isHidden()
+        assert not w._ch_merge_btn.isHidden()
+
+    def test_buttons_visible_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._mode = "edit"
+        w._update_chapter_buttons()
+        assert not w._ch_up_btn.isHidden()
+        assert not w._ch_down_btn.isHidden()
+        assert not w._ch_remove_btn.isHidden()
+        assert not w._ch_merge_btn.isHidden()
+
+    def test_remove_btn_label_build_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._update_chapter_buttons()
+        assert w._ch_remove_btn.text() == "Remove File"
+
+    def test_remove_btn_label_edit_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        w._mode = "edit"
+        w._update_chapter_buttons()
+        assert w._ch_remove_btn.text() == "Remove Chapter"
+
+    def test_no_book_hides_merge(self, win):
+        w, _ = win
+        w._update_chapter_buttons()
+        assert w._ch_merge_btn.isHidden()

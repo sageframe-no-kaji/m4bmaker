@@ -137,7 +137,7 @@ def encode(
         bitrate,
         "-ac",
         str(channels),
-        *(['-ar', str(sample_rate)] if sample_rate is not None else []),
+        *(["-ar", str(sample_rate)] if sample_rate is not None else []),
         "-movflags",
         "+faststart",  # optimise for streaming
         "-progress",

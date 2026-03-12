@@ -301,8 +301,18 @@ class TestFormatPreflightSummary:
 
         p = tmp_path / "t.mp3"
         p.write_bytes(b"\x00")
-        out = json.dumps({"streams": [{"sample_rate": "44100", "channels": 2,
-                                        "bit_rate": "128000", "codec_name": "mp3"}]})
+        out = json.dumps(
+            {
+                "streams": [
+                    {
+                        "sample_rate": "44100",
+                        "channels": 2,
+                        "bit_rate": "128000",
+                        "codec_name": "mp3",
+                    }
+                ]
+            }
+        )
         r = MagicMock()
         r.returncode = 0
         r.stdout = out
@@ -335,11 +345,19 @@ class TestFormatPreflightSummary:
     def test_duration_from_stream(self, tmp_path):
         p = tmp_path / "t.mp3"
         p.write_bytes(b"\x00")
-        out = json.dumps({
-            "streams": [{"sample_rate": "44100", "channels": 1,
-                         "bit_rate": "64000", "codec_name": "mp3",
-                         "duration": "3600.0"}]
-        })
+        out = json.dumps(
+            {
+                "streams": [
+                    {
+                        "sample_rate": "44100",
+                        "channels": 1,
+                        "bit_rate": "64000",
+                        "codec_name": "mp3",
+                        "duration": "3600.0",
+                    }
+                ]
+            }
+        )
         r = MagicMock()
         r.returncode = 0
         r.stdout = out
@@ -350,10 +368,12 @@ class TestFormatPreflightSummary:
     def test_duration_fallback_to_format(self, tmp_path):
         p = tmp_path / "t.mp3"
         p.write_bytes(b"\x00")
-        out = json.dumps({
-            "streams": [{"sample_rate": "44100", "channels": 1}],
-            "format": {"duration": "120.5"},
-        })
+        out = json.dumps(
+            {
+                "streams": [{"sample_rate": "44100", "channels": 1}],
+                "format": {"duration": "120.5"},
+            }
+        )
         r = MagicMock()
         r.returncode = 0
         r.stdout = out
@@ -369,10 +389,17 @@ class TestFormatPreflightSummary:
 
         def _fake_probe(path, ffprobe):
             from m4bmaker.preflight import FileInfo
-            return FileInfo(path=path, sample_rate=44100, channels=1,
-                            bit_rate=128000, duration_seconds=60.0)
+
+            return FileInfo(
+                path=path,
+                sample_rate=44100,
+                channels=1,
+                bit_rate=128000,
+                duration_seconds=60.0,
+            )
 
         with patch("m4bmaker.preflight.probe_file", side_effect=_fake_probe):
             from m4bmaker.preflight import run_preflight
+
             analysis = run_preflight([p1, p2], "ffprobe")
         assert analysis.total_duration_seconds == 120.0

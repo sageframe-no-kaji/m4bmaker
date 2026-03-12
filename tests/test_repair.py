@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from m4bmaker.repair import (
     RepairResult,
@@ -15,7 +15,6 @@ from m4bmaker.repair import (
     repair_file,
     run_repair,
 )
-
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -103,9 +102,10 @@ class TestNeedsRepair:
             "could not find codec",
         ]
         for marker in markers:
-            with patch("subprocess.run", return_value=_probe_result(
-                [{"codec_type": "audio"}], stderr=marker
-            )):
+            with patch(
+                "subprocess.run",
+                return_value=_probe_result([{"codec_type": "audio"}], stderr=marker),
+            ):
                 assert needs_repair(p, "ffprobe") is True, f"should detect: {marker}"
 
     def test_no_repair_for_data_stream(self, tmp_path):
@@ -113,10 +113,15 @@ class TestNeedsRepair:
         p = tmp_path / "a.mp3"
         p.write_bytes(b"\x00")
         for codec_type in ("data", "subtitle"):
-            with patch("subprocess.run", return_value=_probe_result(
-                [{"codec_type": "audio"}, {"codec_type": codec_type}]
-            )):
-                assert needs_repair(p, "ffprobe") is False, f"should not repair: {codec_type}"
+            with patch(
+                "subprocess.run",
+                return_value=_probe_result(
+                    [{"codec_type": "audio"}, {"codec_type": codec_type}]
+                ),
+            ):
+                assert (
+                    needs_repair(p, "ffprobe") is False
+                ), f"should not repair: {codec_type}"
 
     def test_handles_malformed_json_gracefully(self, tmp_path):
         p = tmp_path / "a.mp3"
@@ -131,7 +136,9 @@ class TestNeedsRepair:
     def test_repair_needed_for_empty_streams_with_stderr_error(self, tmp_path):
         p = tmp_path / "a.mp3"
         p.write_bytes(b"\x00")
-        with patch("subprocess.run", return_value=_probe_result([], stderr="corrupt frame")):
+        with patch(
+            "subprocess.run", return_value=_probe_result([], stderr="corrupt frame")
+        ):
             assert needs_repair(p, "ffprobe") is True
 
 
@@ -233,19 +240,24 @@ class TestRunRepair:
 
         with (
             patch("m4bmaker.repair.needs_repair", return_value=True),
-            patch("m4bmaker.repair.repair_file", return_value=tmp_path / "repaired" / "a.mp3"),
+            patch(
+                "m4bmaker.repair.repair_file",
+                return_value=tmp_path / "repaired" / "a.mp3",
+            ),
         ):
-            run_repair([a], tmp_path, "ffmpeg", "ffprobe", progress_callback=messages.append)
+            run_repair(
+                [a], tmp_path, "ffmpeg", "ffprobe", progress_callback=messages.append
+            )
 
         assert any("Repairing" in m for m in messages)
 
     def test_progress_callback_none_is_safe(self, tmp_path):
         a = tmp_path / "a.mp3"
         a.write_bytes(b"\x00")
-        with (
-            patch("m4bmaker.repair.needs_repair", return_value=False),
-        ):
-            result = run_repair([a], tmp_path, "ffmpeg", "ffprobe", progress_callback=None)
+        with (patch("m4bmaker.repair.needs_repair", return_value=False),):
+            result = run_repair(
+                [a], tmp_path, "ffmpeg", "ffprobe", progress_callback=None
+            )
         assert result.total == 1
 
     def test_error_paths_populated_on_ffmpeg_failure(self, tmp_path):

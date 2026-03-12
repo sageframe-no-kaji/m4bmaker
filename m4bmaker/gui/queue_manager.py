@@ -28,7 +28,7 @@ class JobWorker(QThread):
 
     # job_id, human message, 0.0–1.0
     progress = Signal(str, str, float)
-    finished = Signal(str)   # job_id
+    finished = Signal(str)  # job_id
     failed = Signal(str, str)  # job_id, error message
     cancelled = Signal(str)  # job_id
 
@@ -94,7 +94,7 @@ class QueueManager(QObject):
         Emitted when the last running job completes (or stops).
     """
 
-    job_updated = Signal(str)   # job_id
+    job_updated = Signal(str)  # job_id
     queue_finished = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -125,7 +125,9 @@ class QueueManager(QObject):
 
     def remove(self, job_id: str) -> None:
         """Remove a queued (not running) job."""
-        self._jobs = [j for j in self._jobs if j.id != job_id or j.status == JobStatus.RUNNING]
+        self._jobs = [
+            j for j in self._jobs if j.id != job_id or j.status == JobStatus.RUNNING
+        ]
 
     def clear_completed(self) -> None:
         """Drop all COMPLETED / FAILED / CANCELLED jobs from the list."""

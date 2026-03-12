@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 
-from m4bmaker.models import Book, BookMetadata, Chapter
+from m4bmaker.models import Book, BookMetadata
 
 
 class JobStatus(Enum):
@@ -41,7 +41,7 @@ class Job:
 
     # ── runtime state (mutable) ───────────────────────────────────────────────
     status: JobStatus = JobStatus.QUEUED
-    progress: float = 0.0          # 0.0 – 1.0
+    progress: float = 0.0  # 0.0 – 1.0
     status_message: str = ""
     error_message: str = ""
 

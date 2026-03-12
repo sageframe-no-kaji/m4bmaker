@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from m4bmaker.gui.job import Job, JobStatus, job_from_book
 from m4bmaker.gui.queue_manager import QueueManager
 from m4bmaker.models import Book, BookMetadata
-
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -125,11 +121,17 @@ class _FakeWorker:
         self.finished_cb = None
         self.failed_cb = None
 
-    def connect_progress(self, cb): self.progress_cb = cb
-    def connect_finished(self, cb): self.finished_cb = cb
-    def connect_failed(self, cb): self.failed_cb = cb
+    def connect_progress(self, cb):
+        self.progress_cb = cb
 
-    def isRunning(self): return False
+    def connect_finished(self, cb):
+        self.finished_cb = cb
+
+    def connect_failed(self, cb):
+        self.failed_cb = cb
+
+    def isRunning(self):
+        return False
 
     def start(self):
         if self._fail:
@@ -142,7 +144,7 @@ class _FakeWorker:
 
 def _patch_worker(qm: QueueManager, workers_iter):
     """Intercept JobWorker construction so we control execution."""
-    original_advance = qm._advance
+    _ = qm._advance  # keep reference to original
     call_count = [0]
     worker_list = list(workers_iter)
 
@@ -237,10 +239,11 @@ def test_stop_prevents_next_job(qapp):
             j1.status = JobStatus.RUNNING
             j1.status = JobStatus.COMPLETED
             qm.job_updated.emit(j1.id)
-            qm.stop()   # stop before moving to j2
+            qm.stop()  # stop before moving to j2
             # now call _on_finished directly
-            real_on_finished = QueueManager._on_finished.__get__(qm, QueueManager)
+            _ = QueueManager._on_finished.__get__(qm, QueueManager)  # noqa: F841
         # if called again after stop, just return
+
     # patch minimally: just stop before j2 starts
     qm._running = True
     qm.stop()

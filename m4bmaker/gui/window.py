@@ -31,8 +31,15 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QSize, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QPainter, QPixmap
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDesktopServices,
+    QKeySequence,
+    QPainter,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -72,8 +79,10 @@ from m4bmaker.gui.job import job_from_book
 from m4bmaker.gui.queue_manager import QueueManager
 from m4bmaker.gui.queue_window import QueueWindow
 from m4bmaker.preflight import format_preflight_summary
+
 try:
     from PySide6.QtSvg import QSvgRenderer as _QSvgRenderer
+
     _HAS_SVG = True
 except ImportError:
     _HAS_SVG = False
@@ -87,16 +96,16 @@ _BUG_REPORT_URL = "https://tally.so/r/1AKQPW"
 # Sageframe brand SVG (embedded so the app has no file dependency)
 _SAGEFRAME_SVG = (
     b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 301 301">'
-    b'<defs><style>'
-    b'.s1{fill:none;stroke:#c45b35;stroke-linecap:square;stroke-miterlimit:10;stroke-width:23px}'
-    b'.s2{fill:#eae5dd}</style></defs>'
+    b"<defs><style>"
+    b".s1{fill:none;stroke:#c45b35;stroke-linecap:square;stroke-miterlimit:10;stroke-width:23px}"
+    b".s2{fill:#eae5dd}</style></defs>"
     b'<circle class="s2" cx="150.5" cy="150.5" r="150.5"/>'
     b'<line class="s1" x1="150.19" y1="52.98" x2="150.19" y2="257.92"/>'
     b'<line class="s1" x1="86.88" y1="106.38" x2="182.15" y2="203.64"/>'
     b'<line class="s1" x1="86.88" y1="236.27" x2="150.19" y2="172.97"/>'
     b'<line class="s1" x1="150.19" y1="43.08" x2="214.12" y2="106.38"/>'
     b'<line class="s1" x1="86.88" y1="106.38" x2="150.19" y2="43.08"/>'
-    b'</svg>'
+    b"</svg>"
 )
 
 
@@ -269,7 +278,9 @@ class MainWindow(QMainWindow):
 
         author_lbl = QLabel("by Andrew T. Marcus")
         author_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        author_lbl.setStyleSheet("font-size: 13px; color: #4a4a4a; background: transparent;")
+        author_lbl.setStyleSheet(
+            "font-size: 13px; color: #4a4a4a; background: transparent;"
+        )
         v.addWidget(author_lbl)
 
         sf_lbl = QLabel(
@@ -311,6 +322,7 @@ class MainWindow(QMainWindow):
         v.addLayout(ok_row)
 
         dlg.exec()
+
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
@@ -421,12 +433,14 @@ class MainWindow(QMainWindow):
         self._narrator_edit = QLineEdit()
         self._genre_edit = QLineEdit()
 
-        for i, (label_text, widget) in enumerate((
-            ("Title", self._title_edit),
-            ("Author", self._author_edit),
-            ("Narrator", self._narrator_edit),
-            ("Genre", self._genre_edit),
-        )):
+        for i, (label_text, widget) in enumerate(
+            (
+                ("Title", self._title_edit),
+                ("Author", self._author_edit),
+                ("Narrator", self._narrator_edit),
+                ("Genre", self._genre_edit),
+            )
+        ):
             lbl = _muted_label(label_text)
             lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             grid.addWidget(lbl, i, 0)
@@ -550,7 +564,9 @@ class MainWindow(QMainWindow):
         self._ch_merge_btn.clicked.connect(self._on_chapter_merge)
         ch_tools_row.addWidget(self._ch_merge_btn)
         self._ch_remove_btn = QPushButton("Remove File")
-        self._ch_remove_btn.setToolTip("Remove selected file from book (build mode only)")
+        self._ch_remove_btn.setToolTip(
+            "Remove selected file from book (build mode only)"
+        )
         self._ch_remove_btn.setEnabled(False)
         self._ch_remove_btn.clicked.connect(self._on_chapter_remove)
         ch_tools_row.addWidget(self._ch_remove_btn)
@@ -634,7 +650,9 @@ class MainWindow(QMainWindow):
         self._add_to_queue_btn = QPushButton("+ Queue")
         self._add_to_queue_btn.setObjectName("addToQueueBtn")
         self._add_to_queue_btn.setFixedHeight(44)
-        self._add_to_queue_btn.setToolTip("Add this book to the encode queue (⌘⇧Q to open queue)")
+        self._add_to_queue_btn.setToolTip(
+            "Add this book to the encode queue (⌘⇧Q to open queue)"
+        )
         self._add_to_queue_btn.clicked.connect(self._on_add_to_queue)
 
         self._split_btn = QPushButton("✂  Split into Chapters")
@@ -681,11 +699,9 @@ class MainWindow(QMainWindow):
 
     def _is_busy(self) -> bool:
         return (
-            self._convert_worker is not None and self._convert_worker.isRunning()
-        ) or (
-            self._save_worker is not None and self._save_worker.isRunning()
-        ) or (
-            self._split_worker is not None and self._split_worker.isRunning()
+            (self._convert_worker is not None and self._convert_worker.isRunning())
+            or (self._save_worker is not None and self._save_worker.isRunning())
+            or (self._split_worker is not None and self._split_worker.isRunning())
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
@@ -836,7 +852,8 @@ class MainWindow(QMainWindow):
         if out is None:
             return None
         return job_from_book(
-            book, out,
+            book,
+            out,
             bitrate=self._bitrate_combo.currentText(),
             stereo=self._stereo_radio.isChecked(),
             sample_rate=self._preflight_sample_rate,
@@ -850,7 +867,9 @@ class MainWindow(QMainWindow):
             return
         self._queue_manager.add(job)
         self._show_queue_window()
-        self._set_status(f"Added \"{job.title}\" to queue  ({len(self._queue_manager.jobs)} job(s))")
+        self._set_status(
+            f'Added "{job.title}" to queue  ({len(self._queue_manager.jobs)} job(s))'
+        )
 
     def _show_queue_window(self) -> None:
         if self._queue_window is None:
@@ -1015,7 +1034,9 @@ class MainWindow(QMainWindow):
         if self._book is None:
             return
         cursor = 0.0
-        for i, (ch, dur) in enumerate(zip(self._book.chapters, self._chapter_durations)):
+        for i, (ch, dur) in enumerate(
+            zip(self._book.chapters, self._chapter_durations)
+        ):
             ch.index = i + 1
             ch.start_time = cursor
             cursor += dur
@@ -1034,7 +1055,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_ch_up_btn"):
             return
         has_book = self._book is not None
-        in_edit  = has_book and self._mode == "edit"
+        in_edit = has_book and self._mode == "edit"
         in_build = has_book and self._mode == "build"
         # After a merge in build mode files/chapters diverge — hide file-reorder ops.
         # In edit mode the count always differs (1 file, many chapters) so never hide.
@@ -1064,9 +1085,8 @@ class MainWindow(QMainWindow):
         selected = sorted(
             {idx.row() for idx in self._chapter_table.selectionModel().selectedRows()}
         )
-        is_consecutive = (
-            len(selected) >= 2
-            and selected == list(range(selected[0], selected[-1] + 1))
+        is_consecutive = len(selected) >= 2 and selected == list(
+            range(selected[0], selected[-1] + 1)
         )
         self._ch_merge_btn.setEnabled(is_consecutive)
 
@@ -1077,14 +1097,17 @@ class MainWindow(QMainWindow):
         self._sync_titles_from_table()
         i = row
         self._chapter_durations[i], self._chapter_durations[i - 1] = (
-            self._chapter_durations[i - 1], self._chapter_durations[i]
+            self._chapter_durations[i - 1],
+            self._chapter_durations[i],
         )
         if self._mode == "build":
             self._book.files[i], self._book.files[i - 1] = (
-                self._book.files[i - 1], self._book.files[i]
+                self._book.files[i - 1],
+                self._book.files[i],
             )
         self._book.chapters[i], self._book.chapters[i - 1] = (
-            self._book.chapters[i - 1], self._book.chapters[i]
+            self._book.chapters[i - 1],
+            self._book.chapters[i],
         )
         self._reindex_chapters()
         self._chapter_table.populate(self._book.chapters)
@@ -1100,14 +1123,17 @@ class MainWindow(QMainWindow):
         self._sync_titles_from_table()
         i = row
         self._chapter_durations[i], self._chapter_durations[i + 1] = (
-            self._chapter_durations[i + 1], self._chapter_durations[i]
+            self._chapter_durations[i + 1],
+            self._chapter_durations[i],
         )
         if self._mode == "build":
             self._book.files[i], self._book.files[i + 1] = (
-                self._book.files[i + 1], self._book.files[i]
+                self._book.files[i + 1],
+                self._book.files[i],
             )
         self._book.chapters[i], self._book.chapters[i + 1] = (
-            self._book.chapters[i + 1], self._book.chapters[i]
+            self._book.chapters[i + 1],
+            self._book.chapters[i],
         )
         self._reindex_chapters()
         self._chapter_table.populate(self._book.chapters)
@@ -1251,7 +1277,9 @@ class MainWindow(QMainWindow):
 
         chapters = deepcopy(self._book.chapters)
         times_ms = self._chapter_table.times_ms()
-        for i, (ch, new_title) in enumerate(zip(chapters, self._chapter_table.titles())):
+        for i, (ch, new_title) in enumerate(
+            zip(chapters, self._chapter_table.titles())
+        ):
             ch.title = new_title
             if i < len(times_ms) and times_ms[i] is not None:
                 ch.start_time = times_ms[i] / 1000.0

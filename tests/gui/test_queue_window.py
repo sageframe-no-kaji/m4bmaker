@@ -10,7 +10,6 @@ from m4bmaker.gui.job import Job, JobStatus, job_from_book
 from m4bmaker.gui.queue_manager import QueueManager
 from m4bmaker.gui.queue_window import QueueWindow, _COL_STATUS, _COL_TITLE
 from m4bmaker.models import Book, BookMetadata
-from PySide6.QtCore import Qt
 
 
 def _job(title: str = "Book") -> Job:

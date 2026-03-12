@@ -135,8 +135,13 @@ class LoadM4bWorker(QThread):
 
             ffmpeg = find_ffmpeg()
             cover_path = extract_cover_from_audio(self._path, ffmpeg)
-            book = Book(files=[self._path], chapters=chapters, metadata=metadata, cover=cover_path,
-                        total_duration=total_duration)
+            book = Book(
+                files=[self._path],
+                chapters=chapters,
+                metadata=metadata,
+                cover=cover_path,
+                total_duration=total_duration,
+            )
             self.finished.emit((book, total_duration))
         except SystemExit as exc:
             self.error.emit(str(exc))
@@ -186,7 +191,7 @@ class SplitWorker(QThread):
     """Export each chapter of an .m4b file as a separate audio file (stream-copy)."""
 
     progress = Signal(str, float)  # message, 0.0–1.0
-    finished = Signal(object)      # output_dir: Path
+    finished = Signal(object)  # output_dir: Path
     error = Signal(str)
 
     def __init__(
@@ -215,19 +220,27 @@ class SplitWorker(QThread):
                     else self._total_duration
                 )
 
-                safe_title = "".join(
-                    c if c.isalnum() or c in " ._-" else "_" for c in ch.title
-                ).strip() or f"chapter_{i + 1:02d}"
+                safe_title = (
+                    "".join(
+                        c if c.isalnum() or c in " ._-" else "_" for c in ch.title
+                    ).strip()
+                    or f"chapter_{i + 1:02d}"
+                )
                 out_file = self._output_dir / f"{i + 1:02d} - {safe_title}{ext}"
 
                 self.progress.emit(f"Splitting {i + 1}/{total}: {ch.title}", i / total)
 
                 cmd = [
-                    ffmpeg, "-y",
-                    "-ss", str(start),
-                    "-to", str(end),
-                    "-i", str(self._source),
-                    "-c", "copy",
+                    ffmpeg,
+                    "-y",
+                    "-ss",
+                    str(start),
+                    "-to",
+                    str(end),
+                    "-i",
+                    str(self._source),
+                    "-c",
+                    "copy",
                     str(out_file),
                 ]
                 result = _sp.run(cmd, capture_output=True, text=True)

@@ -727,9 +727,9 @@ class TestChapterTableUndo:
 
     def test_undo_set_chapter_time(self):
         old_text = self.t.item(0, ChapterTable.COL_TIME).text()  # type: ignore[union-attr]  # noqa: E501
-        old_ms = self.t.item(  # type: ignore[union-attr]
-            0, ChapterTable.COL_TIME
-        ).data(1)  # Qt.ItemDataRole.UserRole == 1 after Qt.UserRole alias
+        old_ms = self.t.item(0, ChapterTable.COL_TIME).data(  # type: ignore[union-attr]
+            1
+        )  # Qt.ItemDataRole.UserRole == 1 after Qt.UserRole alias
         self.t.set_chapter_time(0, 90_000)  # 1 min 30 sec
         assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:30"  # type: ignore[union-attr]  # noqa: E501
         self.t._undo_stack.undo()

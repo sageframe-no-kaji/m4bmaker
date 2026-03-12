@@ -41,7 +41,9 @@ _STATUS_LABELS = {
 class QueueWindow(QMainWindow):
     """Secondary window showing the batch encode queue."""
 
-    def __init__(self, queue_manager: QueueManager, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, queue_manager: QueueManager, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self._qm = queue_manager
         self.setWindowTitle("Encode Queue")
@@ -71,9 +73,15 @@ class QueueWindow(QMainWindow):
         self._table = QTableWidget(0, 3)
         self._table.setObjectName("queueTable")
         self._table.setHorizontalHeaderLabels(["Title", "Status", "Progress"])
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self._table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self._table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Fixed
+        )
+        self._table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Fixed
+        )
         self._table.setColumnWidth(1, 90)
         self._table.setColumnWidth(2, 160)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -169,7 +177,9 @@ class QueueWindow(QMainWindow):
 
         active = self._qm.active_jobs
         if active:
-            self._status_lbl.setText(f"Encoding: {active[0].title}  {active[0].status_message}")
+            self._status_lbl.setText(
+                f"Encoding: {active[0].title}  {active[0].status_message}"
+            )
         elif running:
             self._status_lbl.setText("Processing…")
         else:
@@ -222,4 +232,5 @@ class QueueWindow(QMainWindow):
 
     def apply_stylesheet(self, dark: bool) -> None:
         from m4bmaker.gui.styles import get_stylesheet
+
         self.setStyleSheet(get_stylesheet(dark))

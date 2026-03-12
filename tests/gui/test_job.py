@@ -9,7 +9,6 @@ import pytest
 from m4bmaker.gui.job import Job, JobStatus, job_from_book
 from m4bmaker.models import Book, BookMetadata, Chapter
 
-
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -70,7 +69,9 @@ def test_title_falls_back_to_output_stem():
 # ── is_done property ──────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("status", [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED])
+@pytest.mark.parametrize(
+    "status", [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]
+)
 def test_is_done_true_for_terminal_states(status):
     j = Job(status=status)
     assert j.is_done is True
@@ -94,7 +95,9 @@ def test_job_from_book_deep_copies_book():
 
 def test_job_from_book_encodes_settings():
     book = _make_book()
-    j = job_from_book(book, Path("/out/x.m4b"), bitrate="128k", stereo=True, sample_rate=44100)
+    j = job_from_book(
+        book, Path("/out/x.m4b"), bitrate="128k", stereo=True, sample_rate=44100
+    )
     assert j.bitrate == "128k"
     assert j.stereo is True
     assert j.sample_rate == 44100

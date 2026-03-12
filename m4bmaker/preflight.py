@@ -169,7 +169,9 @@ def format_preflight_report(analysis: AudioAnalysis) -> str:
         f"  {analysis.file_count} file(s) detected",
     ]
     if analysis.total_duration_seconds > 0:
-        lines.append(f"  Total duration: {_fmt_duration(analysis.total_duration_seconds)}")
+        lines.append(
+            f"  Total duration: {_fmt_duration(analysis.total_duration_seconds)}"
+        )
     if analysis.sample_rates:
         lines.append(f"  Sample rates: {_fmt_sr(analysis.sample_rates)}")
     if analysis.channels:

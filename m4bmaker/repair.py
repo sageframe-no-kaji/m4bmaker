@@ -194,7 +194,9 @@ def apply_repair(files: list[Path], result: RepairResult) -> list[Path]:
     Preserves the original order.  Files that were not repaired are
     returned as-is; repaired files are replaced with the cleaned copy.
     """
-    mapping: dict[Path, Path] = {orig: cleaned for orig, cleaned in result.repaired_paths}
+    mapping: dict[Path, Path] = {
+        orig: cleaned for orig, cleaned in result.repaired_paths
+    }
     return [mapping.get(p, p) for p in files]
 
 
@@ -208,5 +210,7 @@ def format_repair_report(result: RepairResult) -> str:
         "Cleaned copies created before encoding.",
     ]
     if result.error_paths:
-        lines.append(f"  ({len(result.error_paths)} file(s) could not be repaired and will be used as-is)")
+        lines.append(
+            f"  ({len(result.error_paths)} file(s) could not be repaired and will be used as-is)"
+        )
     return "\n".join(lines)

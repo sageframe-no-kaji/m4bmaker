@@ -359,6 +359,7 @@ class TestSplitWorker:
         results = []
 
         import subprocess
+
         mock_result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with patch("subprocess.run", return_value=mock_result):
             worker = SplitWorker(source, self._chapters(tmp_path), 60.0, out_dir)
@@ -377,6 +378,7 @@ class TestSplitWorker:
         errors = []
 
         import subprocess
+
         mock_result = subprocess.CompletedProcess(
             [], 1, stdout="", stderr="ffmpeg died"
         )
@@ -396,6 +398,7 @@ class TestSplitWorker:
         out_dir = tmp_path / "deep" / "chapters"
 
         import subprocess
+
         mock_result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with patch("subprocess.run", return_value=mock_result):
             worker = SplitWorker(source, self._chapters(tmp_path), 60.0, out_dir)

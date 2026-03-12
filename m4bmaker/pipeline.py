@@ -169,7 +169,8 @@ def run_pipeline(
             else:
                 # Fallback: assume equal-length files (chapters-file case).
                 last_duration = (
-                    working_book.chapters[1].start_time - working_book.chapters[0].start_time
+                    working_book.chapters[1].start_time
+                    - working_book.chapters[0].start_time
                     if len(working_book.chapters) > 1
                     else 0.0
                 )
@@ -183,7 +184,9 @@ def run_pipeline(
         _cb("Generating chapter markers…", 0.0)
         meta_file = tmp_path / "ffmetadata.txt"
         concat_file = tmp_path / "concat.txt"
-        write_ffmetadata(working_book.chapters, working_book.metadata, meta_file, total_duration_s)
+        write_ffmetadata(
+            working_book.chapters, working_book.metadata, meta_file, total_duration_s
+        )
         write_concat_list(active_files, concat_file)
 
         # ── Encode ───────────────────────────────────────────────────────

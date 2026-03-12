@@ -89,8 +89,13 @@ def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
         dest = tmp_dir / "cover.jpg"
         subprocess.run(  # noqa: S603
             [
-                ffmpeg, "-y", "-i", str(file),
-                "-an", "-vcodec", "copy",
+                ffmpeg,
+                "-y",
+                "-i",
+                str(file),
+                "-an",
+                "-vcodec",
+                "copy",
                 str(dest),
             ],
             capture_output=True,
@@ -104,6 +109,7 @@ def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
     # Attempt 2: mutagen — handles .m4b/.m4a with iTunes-style covr atom
     try:
         from mutagen.mp4 import MP4
+
         audio = MP4(str(file))
         covr = audio.tags.get("covr") if audio.tags else None
         if covr:
@@ -118,7 +124,8 @@ def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
 
     # Attempt 3: mutagen — handles MP3 ID3 APIC (attached picture) frames
     try:
-        from mutagen.id3 import ID3, APIC
+        from mutagen.id3 import ID3  # noqa: F401 (APIC accessed via getall)
+
         tags = ID3(str(file))
         apic_frames = tags.getall("APIC")
         if apic_frames:

@@ -14,9 +14,9 @@ _INSTALL_HINT = (
 
 # Common locations not on the minimal PATH inside a .app bundle
 _EXTRA_DIRS = [
-    "/opt/homebrew/bin",   # Apple Silicon Homebrew
-    "/usr/local/bin",      # Intel Homebrew / manual installs
-    "/opt/local/bin",      # MacPorts
+    "/opt/homebrew/bin",  # Apple Silicon Homebrew
+    "/usr/local/bin",  # Intel Homebrew / manual installs
+    "/opt/local/bin",  # MacPorts
 ]
 
 
