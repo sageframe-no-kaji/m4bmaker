@@ -17,6 +17,7 @@ from m4bmaker.encoder import encode, write_concat_list
 from m4bmaker.metadata import extract_metadata
 from m4bmaker.models import Book, BookMetadata, PipelineResult
 from m4bmaker.scanner import scan_audio_files
+from m4bmaker.utils import find_ffmpeg
 
 
 def load_audiobook(
@@ -65,8 +66,7 @@ def load_audiobook(
 
     # Fallback: extract embedded cover from first audio file if none found on disk
     if cover is None and files:
-        _ffmpeg = __import__("shutil").which("ffmpeg") or "ffmpeg"
-        cover = extract_cover_from_audio(files[0], _ffmpeg)
+        cover = extract_cover_from_audio(files[0], find_ffmpeg())
 
     return Book(
         files=files,

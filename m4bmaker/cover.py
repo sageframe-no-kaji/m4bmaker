@@ -116,6 +116,23 @@ def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
     except Exception:  # noqa: BLE001
         pass
 
+    # Attempt 3: mutagen — handles MP3 ID3 APIC (attached picture) frames
+    try:
+        from mutagen.id3 import ID3, APIC
+        tags = ID3(str(file))
+        apic_frames = tags.getall("APIC")
+        if apic_frames:
+            # Prefer front cover (picture type 3) if present, else take the first
+            frame = next((f for f in apic_frames if f.type == 3), apic_frames[0])
+            ext = ".jpg" if "jpeg" in frame.mime.lower() else ".png"
+            tmp_dir = Path(_tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+            dest = tmp_dir / f"cover{ext}"
+            dest.write_bytes(frame.data)
+            if dest.stat().st_size > 100:
+                return dest
+    except Exception:  # noqa: BLE001
+        pass
+
     return None
 
 
