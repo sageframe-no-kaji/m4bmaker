@@ -538,8 +538,8 @@ class MainWindow(QMainWindow):
         ch_tools_row.addWidget(self._ch_up_btn)
         ch_tools_row.addWidget(self._ch_down_btn)
         ch_tools_row.addStretch()
-        self._ch_remove_btn = QPushButton("Remove")
-        self._ch_remove_btn.setToolTip("Remove selected file from book")
+        self._ch_remove_btn = QPushButton("Remove File")
+        self._ch_remove_btn.setToolTip("Remove selected file from book (build mode only)")
         self._ch_remove_btn.setEnabled(False)
         self._ch_remove_btn.clicked.connect(self._on_chapter_remove)
         ch_tools_row.addWidget(self._ch_remove_btn)
@@ -979,13 +979,14 @@ class MainWindow(QMainWindow):
                 self._book.chapters[i].title = title
 
     def _update_chapter_buttons(self) -> None:
-        """Enable/disable Up/Down/Remove based on selection and mode."""
+        """Show/enable Up/Down/Remove File in build mode; hide entirely in edit mode."""
         if not hasattr(self, "_ch_up_btn"):
             return
-        if self._book is None or self._mode != "build":
-            self._ch_up_btn.setEnabled(False)
-            self._ch_down_btn.setEnabled(False)
-            self._ch_remove_btn.setEnabled(False)
+        in_build = self._book is not None and self._mode == "build"
+        self._ch_up_btn.setVisible(in_build)
+        self._ch_down_btn.setVisible(in_build)
+        self._ch_remove_btn.setVisible(in_build)
+        if not in_build:
             return
         row = self._chapter_table.currentRow()
         n = self._chapter_table.rowCount()
