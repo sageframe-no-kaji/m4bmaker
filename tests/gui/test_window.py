@@ -11,6 +11,28 @@ Covers:
   - Error handling: load error, convert error, missing ffmpeg
   - UI remains enabled/disabled at correct points (responsiveness proxy)
   - Chapters tab enabled only after load
+
+RUNNING TESTS
+-------------
+Always run with QT_QPA_PLATFORM=offscreen to avoid a real display:
+
+    QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/gui/test_window.py
+
+If pytest runs appear to hang, check for zombie processes first:
+
+    ps aux | grep pytest | grep -v grep
+
+Qt tests can get stuck in uninterruptible sleep (state "UE" on macOS) when a
+QThread is destroyed while still running — kill -9 won't work on them and they
+survive until reboot.  To avoid accumulating them:
+  - Run headless tests in a *background* process redirecting to a file, then
+    read the file after it finishes:
+      QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest ... > /tmp/out.txt 2>&1 &
+      sleep 30 && cat /tmp/out.txt
+  - The _load_multi() helper here calls _apply_book_to_ui() directly (not
+    _on_load_finished()) for exactly this reason — _on_load_finished spawns a
+    PreflightWorker thread that calls ffprobe via subprocess, and if the QThread
+    is still alive at teardown Qt aborts the process.
 """
 
 from __future__ import annotations
