@@ -565,16 +565,29 @@ class MainWindow(QMainWindow):
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)
 
-        # Insert Time button — sets selected chapter start to player position
+        # Navigation + Insert Time row
         insert_row = QHBoxLayout()
         insert_row.setContentsMargins(0, 0, 0, 0)
+        insert_row.setSpacing(4)
+        self._ch_prev_btn = QPushButton("⏮")
+        self._ch_prev_btn.setFixedWidth(36)
+        self._ch_prev_btn.setToolTip("Previous chapter")
+        self._ch_prev_btn.setEnabled(False)
+        self._ch_prev_btn.clicked.connect(self._on_chapter_prev)
+        self._ch_next_btn = QPushButton("⏭")
+        self._ch_next_btn.setFixedWidth(36)
+        self._ch_next_btn.setToolTip("Next chapter")
+        self._ch_next_btn.setEnabled(False)
+        self._ch_next_btn.clicked.connect(self._on_chapter_next)
+        insert_row.addWidget(self._ch_prev_btn)
+        insert_row.addWidget(self._ch_next_btn)
+        insert_row.addStretch()
         self._insert_time_btn = QPushButton("⇥ Insert Time")
         self._insert_time_btn.setToolTip(
             "Set selected chapter start time to current playback position"
         )
         self._insert_time_btn.setEnabled(False)
         self._insert_time_btn.clicked.connect(self._on_insert_time)
-        insert_row.addStretch()
         insert_row.addWidget(self._insert_time_btn)
         layout.addLayout(insert_row)
 
@@ -931,10 +944,15 @@ class MainWindow(QMainWindow):
         self, row: int, _col: int, _prev_row: int, _prev_col: int
     ) -> None:
         self._update_chapter_buttons()
+        n = self._chapter_table.rowCount()
         if self._book is None or row < 0 or row >= len(self._book.chapters):
             self._insert_time_btn.setEnabled(False)
+            self._ch_prev_btn.setEnabled(False)
+            self._ch_next_btn.setEnabled(False)
             return
         self._insert_time_btn.setEnabled(True)
+        self._ch_prev_btn.setEnabled(row > 0)
+        self._ch_next_btn.setEnabled(row < n - 1)
         ch = self._book.chapters[row]
         start_ms = int(ch.start_time * 1000)
         # In edit mode the source is the .m4b itself; in build mode each chapter
@@ -952,12 +970,33 @@ class MainWindow(QMainWindow):
                 self._player.load_paused(src, start_ms)
 
     def _on_insert_time(self) -> None:
-        """Set the selected chapter's start time to the current player position."""
+        """Set the selected chapter's start time to the current player position.
+
+        In edit mode the player loads the single .m4b so positions are
+        already global.  In build mode each chapter has its own source
+        file, so the player position is file-local; we add the
+        cumulative offset of that file to get the global chapter time.
+        """
         row = self._chapter_table.currentRow()
-        if row < 0:
+        if row < 0 or self._book is None:
             return
         ms = self._player.current_position_ms
+        if self._mode == "build" and row < len(self._book.chapters):
+            # cumulative offset of this file in the final audiobook
+            ms += int(self._book.chapters[row].start_time * 1000)
         self._chapter_table.set_chapter_time(row, ms)
+
+    def _on_chapter_prev(self) -> None:
+        """Select the previous chapter row and load it in the player."""
+        row = self._chapter_table.currentRow()
+        if row > 0:
+            self._chapter_table.setCurrentCell(row - 1, ChapterTable.COL_TITLE)
+
+    def _on_chapter_next(self) -> None:
+        """Select the next chapter row and load it in the player."""
+        row = self._chapter_table.currentRow()
+        if row < self._chapter_table.rowCount() - 1:
+            self._chapter_table.setCurrentCell(row + 1, ChapterTable.COL_TITLE)
 
     # ── Chapter file management (build mode only) ─────────────────────────────
 
