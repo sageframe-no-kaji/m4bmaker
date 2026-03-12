@@ -130,6 +130,7 @@ class MainWindow(QMainWindow):
         self._mode: str = "build"  # "build" or "edit"
         self._m4b_total_duration: float = 0.0
         self._chapter_durations: list[float] = []
+        self._chapters_merged: bool = False
         self._load_worker: Optional[LoadWorker] = None
         self._m4b_load_worker: Optional[LoadM4bWorker] = None
         self._convert_worker: Optional[ConvertWorker] = None
@@ -519,6 +520,7 @@ class MainWindow(QMainWindow):
 
         self._chapter_table = ChapterTable()
         self._chapter_table.currentCellChanged.connect(self._on_chapter_selected)
+        self._chapter_table.itemSelectionChanged.connect(self._update_chapter_buttons)
         layout.addWidget(self._chapter_table, stretch=1)
 
         # Move / Remove toolbar (build mode only)
@@ -538,6 +540,15 @@ class MainWindow(QMainWindow):
         ch_tools_row.addWidget(self._ch_up_btn)
         ch_tools_row.addWidget(self._ch_down_btn)
         ch_tools_row.addStretch()
+        self._ch_merge_btn = QPushButton("Merge")
+        self._ch_merge_btn.setToolTip(
+            "Merge selected consecutive rows into one chapter —\n"
+            "all audio still encodes, just fewer chapter markers.\n"
+            "Shift-click to select a range."
+        )
+        self._ch_merge_btn.setEnabled(False)
+        self._ch_merge_btn.clicked.connect(self._on_chapter_merge)
+        ch_tools_row.addWidget(self._ch_merge_btn)
         self._ch_remove_btn = QPushButton("Remove File")
         self._ch_remove_btn.setToolTip("Remove selected file from book (build mode only)")
         self._ch_remove_btn.setEnabled(False)
@@ -548,7 +559,7 @@ class MainWindow(QMainWindow):
         hint = QLabel(
             "Double-click or press a key to edit a title  ·  "
             "Enter = next row  ·  Shift+Enter = previous row  ·  "
-            "Right-click for bulk tools"
+            "Shift-click to select a range for Merge  ·  Right-click for bulk tools"
         )
         hint.setStyleSheet("color: #7a7a7a; font-size: 11px;")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -741,6 +752,7 @@ class MainWindow(QMainWindow):
         self._cover_widget.set_cover(book.cover)
         self._chapter_table.populate(book.chapters)
         self._chapter_durations = self._derive_durations(book)
+        self._chapters_merged = False
         self._update_output_preview()
         self._update_controls()
         self._set_status(
@@ -979,20 +991,34 @@ class MainWindow(QMainWindow):
                 self._book.chapters[i].title = title
 
     def _update_chapter_buttons(self) -> None:
-        """Show/enable Up/Down/Remove File in build mode; hide entirely in edit mode."""
+        """Show/enable chapter toolbar buttons based on mode, merge state, and selection."""
         if not hasattr(self, "_ch_up_btn"):
             return
         in_build = self._book is not None and self._mode == "build"
-        self._ch_up_btn.setVisible(in_build)
-        self._ch_down_btn.setVisible(in_build)
-        self._ch_remove_btn.setVisible(in_build)
+        # After a merge, files and chapters diverge in count — hide file-level ops
+        show_file_ops = in_build and not self._chapters_merged
+        self._ch_up_btn.setVisible(show_file_ops)
+        self._ch_down_btn.setVisible(show_file_ops)
+        self._ch_remove_btn.setVisible(show_file_ops)
+        self._ch_merge_btn.setVisible(in_build)
         if not in_build:
+            self._ch_merge_btn.setEnabled(False)
             return
-        row = self._chapter_table.currentRow()
-        n = self._chapter_table.rowCount()
-        self._ch_up_btn.setEnabled(row > 0)
-        self._ch_down_btn.setEnabled(0 <= row < n - 1)
-        self._ch_remove_btn.setEnabled(row >= 0 and n > 1)
+        if show_file_ops:
+            row = self._chapter_table.currentRow()
+            n = self._chapter_table.rowCount()
+            self._ch_up_btn.setEnabled(row > 0)
+            self._ch_down_btn.setEnabled(0 <= row < n - 1)
+            self._ch_remove_btn.setEnabled(row >= 0 and n > 1)
+        # Enable Merge when 2+ consecutive rows are selected
+        selected = sorted(
+            {idx.row() for idx in self._chapter_table.selectionModel().selectedRows()}
+        )
+        is_consecutive = (
+            len(selected) >= 2
+            and selected == list(range(selected[0], selected[-1] + 1))
+        )
+        self._ch_merge_btn.setEnabled(is_consecutive)
 
     def _on_chapter_move_up(self) -> None:
         row = self._chapter_table.currentRow()
@@ -1048,6 +1074,43 @@ class MainWindow(QMainWindow):
         new_row = min(row, self._chapter_table.rowCount() - 1)
         if new_row >= 0:
             self._chapter_table.setCurrentCell(new_row, ChapterTable.COL_TITLE)
+        self._set_status(
+            f"{len(self._book.files)} file(s) · {len(self._book.chapters)} chapter(s)."
+        )
+
+    def _on_chapter_merge(self) -> None:
+        """Merge selected consecutive rows into a single chapter.
+
+        All source files are still encoded in full — only the chapter markers
+        collapse.  The merged chapter uses the first selected row's title and
+        start time; subsequent selected rows are absorbed into it.
+        """
+        if self._book is None:
+            return
+        selected = sorted(
+            {idx.row() for idx in self._chapter_table.selectionModel().selectedRows()}
+        )
+        if len(selected) < 2:
+            return
+        if selected != list(range(selected[0], selected[-1] + 1)):
+            return  # non-consecutive; button should already be disabled
+
+        self._sync_titles_from_table()
+
+        first = selected[0]
+        merged_dur = sum(self._chapter_durations[r] for r in selected)
+        self._chapter_durations[first] = merged_dur
+        for r in reversed(selected[1:]):
+            del self._chapter_durations[r]
+            del self._book.chapters[r]
+            # book.files is intentionally left intact — all audio still encodes
+
+        self._reindex_chapters()
+        self._chapter_table.populate(self._book.chapters)
+        self._chapter_table.setCurrentCell(first, ChapterTable.COL_TITLE)
+
+        self._chapters_merged = True
+        self._update_chapter_buttons()
         self._set_status(
             f"{len(self._book.files)} file(s) · {len(self._book.chapters)} chapter(s)."
         )
