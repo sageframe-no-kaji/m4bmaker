@@ -22,12 +22,26 @@ _EXTRA_DIRS = [
 
 def _which(name: str) -> str | None:
     """Like shutil.which but checks bundled app binaries first, then Homebrew."""
-    # When frozen by PyInstaller, bundled binaries land in sys._MEIPASS
+    # When frozen by PyInstaller (--onefile): sys._MEIPASS is the extraction dir
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         candidate = os.path.join(meipass, name)
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
+
+    # When frozen as a macOS .app bundle (--onedir + BUNDLE):
+    # binaries land in Contents/Frameworks/, which is a sibling of Contents/MacOS/
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        # Check same dir as executable (covers onedir non-bundle)
+        candidate = os.path.join(exe_dir, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+        # Check Contents/Frameworks/ (macOS .app bundle)
+        frameworks = os.path.normpath(os.path.join(exe_dir, "..", "Frameworks", name))
+        if os.path.isfile(frameworks) and os.access(frameworks, os.X_OK):
+            return frameworks
+
     path = shutil.which(name)
     if path:
         return path
