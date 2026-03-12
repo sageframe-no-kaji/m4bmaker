@@ -529,12 +529,12 @@ class MainWindow(QMainWindow):
         ch_tools_row.setSpacing(4)
         self._ch_up_btn = QPushButton("↑")
         self._ch_up_btn.setFixedWidth(32)
-        self._ch_up_btn.setToolTip("Move selected file up")
+        self._ch_up_btn.setToolTip("Move chapter up")
         self._ch_up_btn.setEnabled(False)
         self._ch_up_btn.clicked.connect(self._on_chapter_move_up)
         self._ch_down_btn = QPushButton("↓")
         self._ch_down_btn.setFixedWidth(32)
-        self._ch_down_btn.setToolTip("Move selected file down")
+        self._ch_down_btn.setToolTip("Move chapter down")
         self._ch_down_btn.setEnabled(False)
         self._ch_down_btn.clicked.connect(self._on_chapter_move_down)
         ch_tools_row.addWidget(self._ch_up_btn)
@@ -994,17 +994,28 @@ class MainWindow(QMainWindow):
         """Show/enable chapter toolbar buttons based on mode, merge state, and selection."""
         if not hasattr(self, "_ch_up_btn"):
             return
-        in_build = self._book is not None and self._mode == "build"
-        # After a merge, files and chapters diverge in count — hide file-level ops
-        show_file_ops = in_build and not self._chapters_merged
-        self._ch_up_btn.setVisible(show_file_ops)
-        self._ch_down_btn.setVisible(show_file_ops)
-        self._ch_remove_btn.setVisible(show_file_ops)
-        self._ch_merge_btn.setVisible(in_build)
-        if not in_build:
+        has_book = self._book is not None
+        in_edit  = has_book and self._mode == "edit"
+        in_build = has_book and self._mode == "build"
+        # After a merge in build mode files/chapters diverge — hide file-reorder ops.
+        # In edit mode the count always differs (1 file, many chapters) so never hide.
+        build_merged = in_build and self._chapters_merged
+        show_reorder = has_book and not build_merged
+        self._ch_up_btn.setVisible(show_reorder)
+        self._ch_down_btn.setVisible(show_reorder)
+        self._ch_remove_btn.setVisible(show_reorder)
+        self._ch_merge_btn.setVisible(has_book)
+        if not has_book:
             self._ch_merge_btn.setEnabled(False)
             return
-        if show_file_ops:
+        # Remove button label is context-sensitive
+        if in_edit:
+            self._ch_remove_btn.setText("Remove Chapter")
+            self._ch_remove_btn.setToolTip("Remove selected chapter marker")
+        else:
+            self._ch_remove_btn.setText("Remove File")
+            self._ch_remove_btn.setToolTip("Remove selected file from book")
+        if show_reorder:
             row = self._chapter_table.currentRow()
             n = self._chapter_table.rowCount()
             self._ch_up_btn.setEnabled(row > 0)
@@ -1029,9 +1040,10 @@ class MainWindow(QMainWindow):
         self._chapter_durations[i], self._chapter_durations[i - 1] = (
             self._chapter_durations[i - 1], self._chapter_durations[i]
         )
-        self._book.files[i], self._book.files[i - 1] = (
-            self._book.files[i - 1], self._book.files[i]
-        )
+        if self._mode == "build":
+            self._book.files[i], self._book.files[i - 1] = (
+                self._book.files[i - 1], self._book.files[i]
+            )
         self._book.chapters[i], self._book.chapters[i - 1] = (
             self._book.chapters[i - 1], self._book.chapters[i]
         )
@@ -1051,9 +1063,10 @@ class MainWindow(QMainWindow):
         self._chapter_durations[i], self._chapter_durations[i + 1] = (
             self._chapter_durations[i + 1], self._chapter_durations[i]
         )
-        self._book.files[i], self._book.files[i + 1] = (
-            self._book.files[i + 1], self._book.files[i]
-        )
+        if self._mode == "build":
+            self._book.files[i], self._book.files[i + 1] = (
+                self._book.files[i + 1], self._book.files[i]
+            )
         self._book.chapters[i], self._book.chapters[i + 1] = (
             self._book.chapters[i + 1], self._book.chapters[i]
         )
@@ -1067,7 +1080,8 @@ class MainWindow(QMainWindow):
             return
         self._sync_titles_from_table()
         del self._chapter_durations[row]
-        del self._book.files[row]
+        if self._mode == "build":
+            del self._book.files[row]
         del self._book.chapters[row]
         self._reindex_chapters()
         self._chapter_table.populate(self._book.chapters)
@@ -1109,7 +1123,8 @@ class MainWindow(QMainWindow):
         self._chapter_table.populate(self._book.chapters)
         self._chapter_table.setCurrentCell(first, ChapterTable.COL_TITLE)
 
-        self._chapters_merged = True
+        if self._mode == "build":
+            self._chapters_merged = True
         self._update_chapter_buttons()
         self._set_status(
             f"{len(self._book.files)} file(s) · {len(self._book.chapters)} chapter(s)."
