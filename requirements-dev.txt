@@ -18,3 +18,5 @@ Pillow>=10.0
 
 # macOS .app bundle packaging
 pyinstaller>=6.0
+# Provides static ffmpeg/ffprobe binaries (arm64 + x86_64) used in m4bmaker.spec
+static-ffmpeg>=2.5

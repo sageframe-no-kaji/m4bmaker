@@ -8,8 +8,9 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 pyside6_datas, pyside6_binaries, pyside6_hidden = collect_all("PySide6")
 
 # Bundle ffmpeg and ffprobe so the app is fully self-contained (no system install needed)
-_FFMPEG_BIN = "/opt/homebrew/bin/ffmpeg"
-_FFPROBE_BIN = "/opt/homebrew/bin/ffprobe"
+# static_ffmpeg provides arm64/x86_64 builds that only depend on macOS system frameworks.
+from static_ffmpeg import run as _sfr
+_FFMPEG_BIN, _FFPROBE_BIN = _sfr.get_or_fetch_platform_executables_else_raise()
 
 # Our own resources (icon, svg)
 app_datas = collect_data_files(
