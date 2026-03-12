@@ -8,13 +8,13 @@ can stay in sync without polling.
 
 from __future__ import annotations
 
-import shutil
 import threading
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QThread, Signal
 
 from m4bmaker.gui.job import Job, JobStatus
+from m4bmaker.utils import find_ffmpeg, find_ffprobe
 
 if TYPE_CHECKING:
     pass
@@ -44,8 +44,8 @@ class JobWorker(QThread):
     def run(self) -> None:
         from m4bmaker.pipeline import run_pipeline
 
-        ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
-        ffprobe = shutil.which("ffprobe") or "ffprobe"
+        ffmpeg = find_ffmpeg()
+        ffprobe = find_ffprobe()
 
         def _cb(msg: str, frac: float) -> None:
             self.progress.emit(self._job.id, msg, frac)

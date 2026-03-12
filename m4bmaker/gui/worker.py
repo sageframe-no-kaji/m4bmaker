@@ -6,13 +6,13 @@ thread never blocks.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
 from m4bmaker.models import Book
 from m4bmaker.pipeline import load_audiobook, run_pipeline
+from m4bmaker.utils import find_ffmpeg, find_ffprobe
 
 
 class LoadWorker(QThread):
@@ -27,7 +27,7 @@ class LoadWorker(QThread):
 
     def run(self) -> None:
         try:
-            ffprobe = shutil.which("ffprobe") or "ffprobe"
+            ffprobe = find_ffprobe()
             book = load_audiobook(self._folder, ffprobe)
             self.finished.emit(book)
         except SystemExit as exc:
@@ -60,8 +60,8 @@ class ConvertWorker(QThread):
 
     def run(self) -> None:
         try:
-            ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
-            ffprobe = shutil.which("ffprobe") or "ffprobe"
+            ffmpeg = find_ffmpeg()
+            ffprobe = find_ffprobe()
             result = run_pipeline(
                 book=self._book,
                 output_path=self._output_path,
@@ -95,7 +95,7 @@ class PreflightWorker(QThread):
 
     def run(self) -> None:
         try:
-            ffprobe = shutil.which("ffprobe") or "ffprobe"
+            ffprobe = find_ffprobe()
             from m4bmaker.preflight import run_preflight
 
             analysis = run_preflight(self._files, ffprobe)
@@ -118,7 +118,7 @@ class LoadM4bWorker(QThread):
 
     def run(self) -> None:
         try:
-            ffprobe = shutil.which("ffprobe") or "ffprobe"
+            ffprobe = find_ffprobe()
             from m4bmaker.m4b_editor import load_m4b_chapters
             from m4bmaker.metadata import extract_metadata
             from m4bmaker.models import BookMetadata
@@ -133,7 +133,7 @@ class LoadM4bWorker(QThread):
             )
             from m4bmaker.cover import extract_cover_from_audio
 
-            ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+            ffmpeg = find_ffmpeg()
             cover_path = extract_cover_from_audio(self._path, ffmpeg)
             book = Book(files=[self._path], chapters=chapters, metadata=metadata, cover=cover_path,
                         total_duration=total_duration)
@@ -165,7 +165,7 @@ class SaveChaptersWorker(QThread):
 
     def run(self) -> None:
         try:
-            ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+            ffmpeg = find_ffmpeg()
             from m4bmaker.m4b_editor import save_m4b_chapters
 
             save_m4b_chapters(
@@ -202,7 +202,7 @@ class SplitWorker(QThread):
         try:
             import subprocess as _sp
 
-            ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+            ffmpeg = find_ffmpeg()
             self._output_dir.mkdir(parents=True, exist_ok=True)
             total = len(self._chapters)
             ext = self._source.suffix or ".m4a"

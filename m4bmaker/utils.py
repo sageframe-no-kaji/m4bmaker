@@ -21,7 +21,13 @@ _EXTRA_DIRS = [
 
 
 def _which(name: str) -> str | None:
-    """Like shutil.which but also checks common Homebrew locations."""
+    """Like shutil.which but checks bundled app binaries first, then Homebrew."""
+    # When frozen by PyInstaller, bundled binaries land in sys._MEIPASS
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidate = os.path.join(meipass, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
     path = shutil.which(name)
     if path:
         return path

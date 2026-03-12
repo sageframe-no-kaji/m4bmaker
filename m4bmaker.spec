@@ -7,6 +7,10 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 # Pull in all PySide6 binaries, data, and hidden imports so Qt plugins load.
 pyside6_datas, pyside6_binaries, pyside6_hidden = collect_all("PySide6")
 
+# Bundle ffmpeg and ffprobe so the app is fully self-contained (no system install needed)
+_FFMPEG_BIN = "/opt/homebrew/bin/ffmpeg"
+_FFPROBE_BIN = "/opt/homebrew/bin/ffprobe"
+
 # Our own resources (icon, svg)
 app_datas = collect_data_files(
     "m4bmaker",
@@ -14,7 +18,10 @@ app_datas = collect_data_files(
 )
 
 all_datas = pyside6_datas + app_datas
-all_binaries = pyside6_binaries
+all_binaries = pyside6_binaries + [
+    (_FFMPEG_BIN, "."),   # bundled inside m4bmaker.app/Contents/MacOS/
+    (_FFPROBE_BIN, "."),
+]
 all_hidden = pyside6_hidden + [
     # Core package
     "m4bmaker",
