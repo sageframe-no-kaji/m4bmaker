@@ -585,7 +585,7 @@ class MainWindow(QMainWindow):
             "Shift-click to select a range for Merge  ·  Right-click for bulk tools"
         )
         hint.setStyleSheet("color: #7a7a7a; font-size: 11px;")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(hint)
 
         # Player row — prev/next injected directly into the player's button row
