@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from m4bmaker.models import BookMetadata, Chapter
+from m4bmaker.utils import subprocess_flags
 
 # Matches leading digits optionally followed by separators (space/dash/dot/underscore).
 # Examples stripped: "01 - ", "1.", "02_", "003 "
@@ -39,6 +40,7 @@ def get_duration(file: Path, ffprobe: str) -> float:
             capture_output=True,
             text=True,
             check=True,
+            **subprocess_flags(),
         )
     except subprocess.CalledProcessError as exc:
         sys.exit(

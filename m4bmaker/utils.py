@@ -92,6 +92,14 @@ def find_ffprobe() -> str:
     return path
 
 
+def subprocess_flags() -> dict:
+    """Return kwargs that suppress console windows on Windows frozen builds."""
+    if sys.platform == "win32" and getattr(sys, "frozen", False):
+        import subprocess as _sp
+        return {"creationflags": _sp.CREATE_NO_WINDOW}
+    return {}
+
+
 def log(msg: str) -> None:
     """Print a timestamped progress message to stdout."""
     print(msg, flush=True)

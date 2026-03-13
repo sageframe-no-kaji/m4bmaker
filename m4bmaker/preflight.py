@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import subprocess
 from collections import Counter
+
+from m4bmaker.utils import subprocess_flags
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -66,7 +68,7 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
         "a:0",
         str(path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, **subprocess_flags())
 
     sample_rate: int | None = None
     channels: int | None = None

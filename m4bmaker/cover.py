@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
+import tempfile as _tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+from m4bmaker.utils import subprocess_flags
 
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png"})
 
@@ -80,9 +84,6 @@ def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
     back to mutagen for .m4b/.m4a files where the art is stored in the iTunes
     ``covr`` atom (which ffmpeg reports as a ``bin_data`` data stream).
     """
-    import subprocess
-    import tempfile as _tempfile
-
     # Attempt 1: ffmpeg video-stream extraction (works for most containers)
     try:
         tmp_dir = Path(_tempfile.mkdtemp(prefix="m4bmaker_cover_"))
@@ -100,6 +101,7 @@ def extract_cover_from_audio(file: Path, ffmpeg: str = "ffmpeg") -> Path | None:
             ],
             capture_output=True,
             timeout=15,
+            **subprocess_flags(),
         )
         if dest.exists() and dest.stat().st_size > 100:
             return dest

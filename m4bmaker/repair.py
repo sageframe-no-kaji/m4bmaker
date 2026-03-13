@@ -27,6 +27,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from m4bmaker.utils import subprocess_flags
+
 # ffprobe stderr strings that indicate corruption / structural damage
 _CORRUPTION_MARKERS = (
     "header missing",
@@ -81,7 +83,7 @@ def needs_repair(path: Path, ffprobe: str) -> bool:
         str(path),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, **subprocess_flags())
     except OSError:
         # ffprobe not found or not executable — assume no repair needed
         return False
@@ -133,7 +135,7 @@ def repair_file(source: Path, dest_dir: Path, ffmpeg: str) -> Path:
         "copy",  # stream copy; no re-encoding
         str(cleaned),
     ]
-    subprocess.run(cmd, capture_output=True, text=True, check=True)
+    subprocess.run(cmd, capture_output=True, text=True, check=True, **subprocess_flags())
     return cleaned
 
 

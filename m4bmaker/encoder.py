@@ -8,6 +8,8 @@ import threading
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from m4bmaker.utils import subprocess_flags
+
 
 def _format_ms(ms: int) -> str:
     """Format a millisecond count as H:MM:SS."""
@@ -159,6 +161,7 @@ def encode(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            **subprocess_flags(),
         )
     except FileNotFoundError:
         sys.exit(f"Error: ffmpeg executable not found at '{ffmpeg}'.")
