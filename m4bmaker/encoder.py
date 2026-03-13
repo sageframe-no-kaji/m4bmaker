@@ -68,8 +68,11 @@ def write_concat_list(files: list[Path], dest: Path) -> None:
     """
     lines: list[str] = []
     for path in files:
-        # Escape single-quotes inside the path (ffmpeg concat format requires it).
-        escaped = str(path.resolve()).replace("'", "'\\''")
+        # Use forward-slash paths (as_posix) so ffmpeg's concat demuxer doesn't
+        # misinterpret Windows backslashes as escape sequences.
+        # Escape single-quotes and backslashes per ffmpeg concat demuxer rules.
+        posix_path = path.resolve().as_posix()
+        escaped = posix_path.replace("'", "\\'")
         lines.append(f"file '{escaped}'\n")
     dest.write_text("".join(lines), encoding="utf-8")
 
