@@ -1,4 +1,4 @@
-name: Build
+name: Build Windows
 
 on:
   push:
@@ -7,47 +7,6 @@ on:
   workflow_dispatch:   # allow manual runs from Actions tab
 
 jobs:
-  build-macos:
-    name: Build macOS (.dmg)
-    runs-on: macos-14   # Apple Silicon (arm64)
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-          pip install PySide6 static_ffmpeg
-
-      - name: Build .app
-        run: pyinstaller -y m4bmaker.spec
-
-      - name: Create DMG
-        run: |
-          brew install create-dmg
-          create-dmg \
-            --volname "m4Bookmaker" \
-            --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 128 \
-            --icon "m4bmaker.app" 150 185 \
-            --hide-extension "m4bmaker.app" \
-            --app-drop-link 450 185 \
-            "dist/m4Bookmaker-mac.dmg" \
-            "dist/m4bmaker.app"
-
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: m4Bookmaker-mac
-          path: dist/m4Bookmaker-mac.dmg
-
   build-windows:
     name: Build Windows (.exe installer)
     runs-on: windows-latest
@@ -75,29 +34,8 @@ jobs:
           choco install innosetup -y --no-progress
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
-      - name: Upload EXE artifact
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: m4Bookmaker-windows
+          name: m4Bookmaker-windows-setup
           path: dist/m4Bookmaker-windows-setup.exe
-
-  release:
-    name: Attach to GitHub Release
-    needs: [build-macos, build-windows]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create release and upload assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/m4Bookmaker-mac/m4Bookmaker-mac.dmg
-            artifacts/m4Bookmaker-windows/m4Bookmaker-windows-setup.exe
-          generate_release_notes: true
