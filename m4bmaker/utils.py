@@ -25,13 +25,23 @@ def _which(name: str) -> str | None:
     # On Windows the executable has a .exe extension
     names = [name + ".exe", name] if sys.platform == "win32" else [name]
 
-    # When frozen by PyInstaller (--onefile): sys._MEIPASS is the extraction dir
+    # When frozen by PyInstaller: sys._MEIPASS is the data dir
+    # (_internal/ in onedir, temp dir in onefile).
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         for n in names:
             candidate = os.path.join(meipass, n)
             if os.path.isfile(candidate):
                 return candidate
+            # static_ffmpeg's hook places binaries in a platform subdir (e.g. win32/)
+            try:
+                for entry in os.scandir(meipass):
+                    if entry.is_dir():
+                        candidate = os.path.join(entry.path, n)
+                        if os.path.isfile(candidate):
+                            return candidate
+            except OSError:
+                pass
 
     # When frozen as a macOS .app bundle (--onedir + BUNDLE):
     # binaries land in Contents/Frameworks/, which is a sibling of Contents/MacOS/
