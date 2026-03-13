@@ -23,6 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+          pip install PySide6 static_ffmpeg
 
       - name: Build .app
         run: pyinstaller -y m4bmaker.spec
@@ -63,14 +64,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+          pip install PySide6 static_ffmpeg
 
       - name: Build .exe
         run: pyinstaller -y m4bmaker-windows.spec
 
       - name: Build installer
+        shell: cmd
         run: |
           choco install innosetup -y --no-progress
-          iscc installer.iss
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4

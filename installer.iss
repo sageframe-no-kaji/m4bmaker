@@ -1,11 +1,11 @@
 ; Inno Setup script for m4Bookmaker Windows installer
-; Called by GitHub Actions after PyInstaller produces dist\m4bmaker\
+; Called by GitHub Actions after PyInstaller produces dist\m4Bookmaker\
 
 #define AppName "m4Bookmaker"
-#define AppVersion "0.1.0"
+#define AppVersion "1.0.0"
 #define AppPublisher "Sageframe"
 #define AppURL "https://m4bookmaker.sageframe.net"
-#define AppExeName "m4bmaker.exe"
+#define AppExeName "m4Bookmaker.exe"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -17,9 +17,12 @@ AppSupportURL={#AppURL}/help.html
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
+UninstallDisplayIcon={app}\{#AppExeName}
+SetupIconFile=m4bmaker\gui\resources\audiobookbinder.ico
+LicenseFile=LICENSE
 OutputDir=dist
 OutputBaseFilename=m4Bookmaker-windows-setup
-Compression=lzma
+Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest   ; install to user dir without admin prompt
@@ -31,7 +34,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\m4bmaker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\m4Bookmaker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
