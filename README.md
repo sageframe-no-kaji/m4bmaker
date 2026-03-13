@@ -1,137 +1,191 @@
-# m4bmaker
+<div align="center">
 
-**Build beautiful audiobooks from folders of audio files — in seconds.**
+<img src="https://m4bookmaker.sageframe.net/assets/icons/app-icon.png" width="128" alt="m4Bookmaker icon" />
 
-m4bmaker converts a directory of audio files into a clean, chapterized **.m4b audiobook** with metadata, cover art, and proper chapter markers. It works as a desktop GUI app, a command-line tool, and a scriptable pipeline.
+# m4Bookmaker
 
-Free and open source. Available on macOS.
+**Convert a folder of audio files into a clean M4B audiobook — in seconds.**
 
----
+Automatic chapters · cover art · metadata · audio repair · no ffmpeg setup required.
 
-⭐ **Star this repo if m4bmaker saves you time.**
-☕ **Buy me a coffee:** https://buymeacoffee.com/sageframe
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](#installation)
+[![Website](https://img.shields.io/badge/Website-m4bookmaker.sageframe.net-c45a2d)](https://m4bookmaker.sageframe.net)
+
+<br />
+
+<a href="https://m4bookmaker.sageframe.net">
+  <img src="https://m4bookmaker.sageframe.net/assets/img/m4Bookmaker.png" width="720" alt="m4Bookmaker — main window" />
+</a>
+
+</div>
+
+<br />
+
+## Why m4Bookmaker?
+
+Most audiobook tools expect perfect input. Real audiobook files are messy — inconsistent formats, corrupted frames, missing headers, numbered filenames. m4Bookmaker handles all of it automatically so you get a clean `.m4b` without touching a terminal or configuring ffmpeg.
+
+**Free and open source.** A [$4.99 direct download](https://m4bookmaker.sageframe.net) is available if you want to support development.
 
 ---
 
 ## Features
 
-### 📚 Automatic Chapter Creation
-Drop a folder of audio files and m4bmaker generates chapters automatically — one per file, with titles cleaned from track numbers and prefixes.
+<table>
+<tr>
+<td width="50%">
+
+### Automatic Chapters
+Drop a folder and chapters are created from filenames — track numbers and prefixes stripped automatically.
 
 ```
-01 - Prologue.mp3       →  Prologue
-02 - The Journey.mp3    →  The Journey
-03 - Arrival.mp3        →  Arrival
+01 - Prologue.mp3    →  Prologue
+02 - The Journey.mp3 →  The Journey
+03 - Arrival.mp3     →  Arrival
 ```
 
-### ✏️ Chapter Editor
-Rename chapters, adjust timestamps, and reorder — all inline, before encoding. No nested menus.
+</td>
+<td width="50%">
 
-### 🎧 Built-in Audio Preview Player
-A lightweight playback player lets you scrub through the source audio anA lightweight playback player lets you scrub through the source audio aseeksA lightweight playback player lets you scrub through the source audio anA lightweight playback player lets you scrub through the source audio aseeksA lightweight playback player lets you scrub through the source audio anurce.
+### Chapter Editor
+Rename, reorder, merge, split, and adjust chapter timestamps inline. No nested dialogs — everything edits in place.
 
-### 🔄 Rechaptering (Edit Mode)
-Load an existing `.m4b` to rename chapters, adjust timestamps, and write the changes back — without re-encoding the audio.
+<img src="https://m4bookmaker.sageframe.net/assets/img/chapter.png" width="360" alt="Chapter editor" />
 
-### 🖼 Automatic Cover Art
-The largest image in the source directory is automatically used as the audiobook cover. Override with `--cover` if needed.
+</td>
+</tr>
+<tr>
+<td>
 
-### 🛡 Robust Audio Repair
-Many audiobook downloads contain damaged files. m4bmaker automatically detects and repairs:
-- corrupted MP3 frames
-- missing or invalid VBR/Xing headers
-- embedded artwork in source tracks
-- inconsistent audio stream layouts
+### Built-in Audio Player
+Scrub through source audio, seek to any chapter boundary, and preview before encoding.
 
-Files are normalized before encoding so the final `.m4b` is clean and stable.
+<img src="https://m4bookmaker.sageframe.net/assets/img/player.png" width="360" alt="Audio player" />
 
-### 🔍 Preflight Audio Analysis
-Before encoding, m4bmaker analyzes all input files and reports sample rate consistency, channel layout (mono/stereo), and bitrate distribution. Encoding settings are automatically matched to the source material.
+</td>
+<td>
 
-### 📋 Batch Queue
-Stage multiple audiobook jobs and process them sequentially — HandBrake-style. Add jobs to the queue, start the queue, and walk away.
+### Rechaptering (Edit Mode)
+Load an existing `.m4b` to rename chapters, adjust timestamps, and write changes back — **without re-encoding** the audio.
 
-### 🚀 Multiple Windows
-Press `⌘N` to open a new independent window. Each window runs its own encode in parallel with no shared state.
+<img src="https://m4bookmaker.sageframe.net/assets/img/edit.png" width="360" alt="Edit mode" />
 
-### ⚙️ Full CLI Support
-Everything available in the GUI is also scriptable:
+</td>
+</tr>
+<tr>
+<td>
 
-```bash
-m4bmaker ./Dune \
-  --title "Dune" \
-  --author "Frank Herbert" \
-  --narrator "Scott Brick"
-```
+### Batch Queue
+Stage multiple audiobooks and process them sequentially — HandBrake-style. Start the queue and walk away.
+
+<img src="https://m4bookmaker.sageframe.net/assets/img/queue.png" width="360" alt="Batch queue" />
+
+</td>
+<td>
+
+### Audio Repair
+Automatically detects and repairs corrupted MP3 frames, missing VBR/Xing headers, embedded artwork, and inconsistent stream layouts before encoding.
+
+</td>
+</tr>
+</table>
+
+**Also includes:**
+- **Automatic cover art** — largest image in the directory is used automatically
+- **Preflight analysis** — sample rate, channel layout, and bitrate are matched to source material
+- **Multiple windows** — `⌘N` opens independent windows, each encoding in parallel
+- **Full CLI** — everything in the GUI is scriptable from the command line
 
 ---
 
 ## Installation
 
-### macOS (App Store)
-Download **m4bmaker** from the Mac App Store. ffmpeg is bundled — no additional setup required.
+### Download (recommended)
+
+Get the signed, notarized macOS app from the website:
+
+**[m4bookmaker.sageframe.net](https://m4bookmaker.sageframe.net)**
+
+ffmpeg is bundled — nothing else to install.
 
 ### From Source
 
-**Requirements:** Python 3.11+, ffmpeg
+Requires **Python 3.11+** and **ffmpeg**.
 
 ```bash
-# Install ffmpeg
 brew install ffmpeg
 
-# Clone and install
-git clone https://github.cgit clone https://github.cgit cit
+git clone https://github.com/sageframe-no-kaji/m4bmaker.git
 cd m4bmaker
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
+
+# Launch the GUI
+python -m m4bmaker.gui.app
+
+# Or use the CLI
+m4bmaker ./MyBook --title "My Book" --author "Author Name"
 ```
 
 ---
 
-## Quick Start
+## CLI Usage
 
 ```bash
-# Convert a folder of audio files
+# Basic conversion
 m4bmaker ./MyBook
 
 # With metadata
 m4bmaker ./MyBook \
-  --title "My Book" \
-  --author "Author Name" \
-  --narrator "Narrator Name"
+  --title "Dune" \
+  --author "Frank Herbert" \
+  --narrator "Scott Brick"
 
-# Custom cover art
-m4bmaker ./MyBook --cover cover.jpg
+# Custom cover and output
+m4bmaker ./MyBook --cover cover.jpg --output ~/Audiobooks/
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--title` | Book title |
+| `--author` | Author name |
+| `--narrator` | Narrator name |
+| `--cover` | Path to cover image |
+| `--output` | Output directory |
+| `--bitrate` | AAC bitrate (default: matches source) |
+| `--stereo` | Force stereo output |
+| `--no-prompt` | Skip interactive prompts |
 
 ---
 
-## Supported Input Formats
+## Supported Formats
 
-`mp3` · `m4a` · `aac` · `flac` · `wav` · `ogg`
+**Input:** `mp3` · `m4a` · `aac` · `flac` · `wav` · `ogg` — formats can be mixed in the same directory.
 
-Formats can be mixed in the same directory.
+**Output:** `.m4b` (AAC in MP4 container with chapter metadata)
 
 ---
 
 ## Contributing
 
-Contributions are wContributions are wBUTING.mdContributions are wContributions are wBUTING.mdConyleContrilines.
-
-Areas where Areas where Aciated:
-- testing on large or unusual audiobook collections
-- - tadata edge cases
-- GUI improvements
-- documentation
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
 
 ---
 
 ## License
 
-GPL-3.0 License · © 2026 Andrew T. Marcus
+**GPL-3.0** · © 2026 Andrew T. Marcus
 
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version. See [LICENSE](LICENSE) for details.
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+
+**[Website](https://m4bookmaker.sageframe.net)** · **[Help Docs](https://m4bookmaker.sageframe.net/help.html)** · **[Report a Bug](https://github.com/sageframe-no-kaji/m4bmaker/issues)**
+
+Made by [Sageframe](https://github.com/sageframe-no-kaji)
+
+</div>

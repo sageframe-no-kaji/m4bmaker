@@ -91,6 +91,7 @@ _BITRATES = ["32k", "48k", "64k", "96k", "128k", "192k", "256k", "320k"]
 _DEFAULT_BITRATE = "96k"
 _DONATE_URL = "https://buymeacoffee.com/sageframe"
 _GITHUB_URL = "https://github.com/sageframe-no-kaji"
+_SAGEFRAME_URL = "https://sageframe.net"
 _BUG_REPORT_URL = "https://tally.so/r/1AKQPW"
 
 # Sageframe brand SVG (embedded so the app has no file dependency)
@@ -284,7 +285,7 @@ class MainWindow(QMainWindow):
         v.addWidget(author_lbl)
 
         sf_lbl = QLabel(
-            f'<a href="{_GITHUB_URL}" style="color: #7a7a7a; text-decoration: none;">Sageframe</a>'
+            f'<a href="{_SAGEFRAME_URL}" style="color: #7a7a7a; text-decoration: none;">Sageframe</a>'
         )
         sf_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sf_lbl.setOpenExternalLinks(True)
@@ -669,7 +670,7 @@ class MainWindow(QMainWindow):
         sf_icon_lbl.setStyleSheet("background: transparent;")
         btn_row.addWidget(sf_icon_lbl)
         sf_lbl = QLabel(
-            f'<a href="{_GITHUB_URL}" style="color: #7a7a7a; text-decoration: none;">'
+            f'<a href="{_SAGEFRAME_URL}" style="color: #7a7a7a; text-decoration: none;">'
             "Sageframe</a>"
         )
         sf_lbl.setOpenExternalLinks(True)
