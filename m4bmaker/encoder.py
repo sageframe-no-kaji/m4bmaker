@@ -48,7 +48,7 @@ def _progress_reader(
             frac = min(1.0, current_ms / total_ms)
             if progress_callback is not None:
                 progress_callback(frac)
-            if sys.stdout.isatty():
+            if sys.stdout is not None and sys.stdout.isatty():
                 bar = _render_bar(frac, bar_width)
                 pct = int(frac * 100)
                 elapsed = _format_ms(current_ms)
@@ -194,7 +194,7 @@ def encode(
         reader.join()
         stderr_thread.join()
 
-    if sys.stdout.isatty():
+    if sys.stdout is not None and sys.stdout.isatty():
         if proc.returncode == 0 and total_ms > 0:
             bar = _render_bar(1.0, 30)
             total_str = _format_ms(total_ms)
