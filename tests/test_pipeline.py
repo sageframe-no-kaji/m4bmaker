@@ -34,6 +34,12 @@ def _make_popen_mock() -> MagicMock:
 
 
 class TestLoadAudiobook:
+    @pytest.fixture(autouse=True)
+    def _mock_ffmpeg(self) -> None:  # noqa: ANN001
+        """load_audiobook may call find_ffmpeg() for cover extraction."""
+        with patch("m4bmaker.pipeline.find_ffmpeg", return_value="/usr/bin/ffmpeg"):
+            yield
+
     def test_returns_book(self, tmp_path: Path) -> None:
         stub = tmp_path / "01 - Prologue.mp3"
         stub.write_bytes(b"\x00")

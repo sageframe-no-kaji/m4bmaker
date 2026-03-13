@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -316,7 +317,7 @@ class TestFullPipeline:
         assert "My Book" in output
         # Should contain subdir separators, not just a flat filename
         rel = output[len(str(tmp_path)) :]
-        assert rel.count("/") >= 3  # /Jane Doe/My Book/filename
+        assert rel.count(os.sep) >= 3  # /Jane Doe/My Book/filename
 
     def test_flat_flag_produces_flat_output(self, tmp_path: Path) -> None:
         """--flat writes directly into the source dir without subfolders."""
@@ -326,8 +327,8 @@ class TestFullPipeline:
         output = cmd[-1]
         assert output.startswith(str(tmp_path))
         rel = output[len(str(tmp_path)) :]
-        # Only one separator: /filename.m4b
-        assert rel.count("/") == 1
+        # Only one separator: /filename.m4b (or \filename.m4b on Windows)
+        assert rel.count(os.sep) == 1
         assert rel.endswith(".m4b")
 
     def test_output_dir_flag_sets_base_directory(self, tmp_path: Path) -> None:
