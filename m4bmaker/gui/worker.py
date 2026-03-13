@@ -12,7 +12,7 @@ from PySide6.QtCore import QThread, Signal
 
 from m4bmaker.models import Book
 from m4bmaker.pipeline import load_audiobook, run_pipeline
-from m4bmaker.utils import find_ffmpeg, find_ffprobe
+from m4bmaker.utils import find_ffmpeg, find_ffprobe, subprocess_flags
 
 
 class LoadWorker(QThread):
@@ -241,9 +241,11 @@ class SplitWorker(QThread):
                     str(self._source),
                     "-c",
                     "copy",
+                    "-avoid_negative_ts",
+                    "make_zero",
                     str(out_file),
                 ]
-                result = _sp.run(cmd, capture_output=True, text=True)
+                result = _sp.run(cmd, capture_output=True, text=True, **subprocess_flags())
                 if result.returncode != 0:
                     raise RuntimeError(
                         f"ffmpeg failed on chapter {i + 1}: {result.stderr.strip()}"
