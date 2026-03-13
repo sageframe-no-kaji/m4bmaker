@@ -584,11 +584,14 @@ class ChapterTable(QTableWidget):
         menu.addSeparator()
         menu.addAction("Remove Numeric Prefixes", self._remove_numeric)
         menu.addAction("Add Sequential Numeric Prefix", self._add_sequential_prefix)
+        menu.addAction("Number as \"Chapter X\"", self._number_as_chapter)
         menu.addAction("Add Prefix…", self._add_prefix)
         menu.addAction("Add Suffix…", self._add_suffix)
         menu.addSeparator()
         menu.addAction("Title Case", self._title_case)
         menu.addAction("Sentence Case", self._sentence_case)
+        menu.addSeparator()
+        menu.addAction("Clear Titles", self._clear_titles)
         menu.exec(self.mapToGlobal(pos))
 
     def _selected_rows(self) -> list[int]:
@@ -691,6 +694,27 @@ class ChapterTable(QTableWidget):
             if item:
                 t = item.text()
                 item.setText(t[:1].upper() + t[1:].lower() if t else t)
+        after = self._snapshot_titles()
+        if before != after:
+            self._undo_stack.push(_TitlesCommand(self, before, after))
+
+    def _number_as_chapter(self) -> None:
+        before = self._snapshot_titles()
+        rows = self._selected_rows()
+        for seq, row in enumerate(rows, start=1):
+            item = self.item(row, self.COL_TITLE)
+            if item:
+                item.setText(f"Chapter {seq}")
+        after = self._snapshot_titles()
+        if before != after:
+            self._undo_stack.push(_TitlesCommand(self, before, after))
+
+    def _clear_titles(self) -> None:
+        before = self._snapshot_titles()
+        for row in self._selected_rows():
+            item = self.item(row, self.COL_TITLE)
+            if item:
+                item.setText("")
         after = self._snapshot_titles()
         if before != after:
             self._undo_stack.push(_TitlesCommand(self, before, after))
