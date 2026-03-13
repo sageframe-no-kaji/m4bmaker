@@ -245,7 +245,7 @@ class SplitWorker(QThread):
                     "make_zero",
                     str(out_file),
                 ]
-                result = _sp.run(cmd, capture_output=True, text=True, **subprocess_flags())
+                result = _sp.run(cmd, capture_output=True, encoding="utf-8", **subprocess_flags())
                 if result.returncode != 0:
                     raise RuntimeError(
                         f"ffmpeg failed on chapter {i + 1}: {result.stderr.strip()}"

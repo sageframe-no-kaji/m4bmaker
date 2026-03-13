@@ -38,7 +38,7 @@ def get_duration(file: Path, ffprobe: str) -> float:
         result = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=True,
             **subprocess_flags(),
         )

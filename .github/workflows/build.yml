@@ -25,6 +25,12 @@ jobs:
           pip install -r requirements-dev.txt
           pip install PySide6 static_ffmpeg
 
+      - name: Run tests
+        run: |
+          set QT_QPA_PLATFORM=offscreen
+          python -m pytest tests/ --ignore=tests/gui -q --tb=short
+        shell: cmd
+
       - name: Build .exe
         run: pyinstaller -y m4bmaker-windows.spec
 

@@ -83,7 +83,7 @@ def needs_repair(path: Path, ffprobe: str) -> bool:
         str(path),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, **subprocess_flags())
+        result = subprocess.run(cmd, capture_output=True, encoding="utf-8", **subprocess_flags())
     except OSError:
         # ffprobe not found or not executable — assume no repair needed
         return False
@@ -135,7 +135,7 @@ def repair_file(source: Path, dest_dir: Path, ffmpeg: str) -> Path:
         "copy",  # stream copy; no re-encoding
         str(cleaned),
     ]
-    subprocess.run(cmd, capture_output=True, text=True, check=True, **subprocess_flags())
+    subprocess.run(cmd, capture_output=True, encoding="utf-8", check=True, **subprocess_flags())
     return cleaned
 
 

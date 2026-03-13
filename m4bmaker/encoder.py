@@ -163,7 +163,7 @@ def encode(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            encoding="utf-8",
             **subprocess_flags(),
         )
     except FileNotFoundError:

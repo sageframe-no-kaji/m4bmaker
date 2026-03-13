@@ -68,7 +68,7 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
         "a:0",
         str(path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, **subprocess_flags())
+    result = subprocess.run(cmd, capture_output=True, encoding="utf-8", **subprocess_flags())
 
     sample_rate: int | None = None
     channels: int | None = None

@@ -36,7 +36,7 @@ def load_m4b_chapters(path: Path, ffprobe: str) -> tuple[list[Chapter], float]:
         str(path),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, **subprocess_flags())
+        result = subprocess.run(cmd, capture_output=True, encoding="utf-8", check=True, **subprocess_flags())
     except subprocess.CalledProcessError as exc:
         sys.exit(f"Error reading '{path.name}': {exc.stderr.strip()}")
 
@@ -103,7 +103,7 @@ def save_m4b_chapters(
             str(out_path),
         ]
         try:
-            subprocess.run(cmd, capture_output=True, text=True, check=True, **subprocess_flags())
+            subprocess.run(cmd, capture_output=True, encoding="utf-8", check=True, **subprocess_flags())
         except subprocess.CalledProcessError as exc:
             sys.exit(f"Error saving chapters to '{dest.name}': {exc.stderr.strip()}")
 
