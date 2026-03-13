@@ -138,6 +138,8 @@ def encode(
         "-ac",
         str(channels),
         *(["-ar", str(sample_rate)] if sample_rate is not None else []),
+        "-metadata",
+        "stik=2",  # iTunes media type: Audiobook (required by Apple Books)
         "-movflags",
         "+faststart",  # optimise for streaming
         "-progress",
