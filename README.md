@@ -1,8 +1,23 @@
+<div align="center">
+
+<img src="https://m4bookmaker.sageframe.net/assets/icons/app-icon.png" width="96" alt="m4Bookmaker icon" />
+
 # m4Bookmaker
 
 Convert a folder of audio files into a clean M4B audiobook — in seconds.
 
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](#installation)
+[![Windows](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows&logoColor=white)](#installation)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#from-source)
+
+</div>
+
 Drag in a folder, adjust your chapters, hit Convert. m4Bookmaker handles the rest — chapters, cover art, metadata, and even repairs broken audio files automatically.
+
+<div align="center">
+<img src="https://m4bookmaker.sageframe.net/assets/img/convert.png" width="640" alt="m4Bookmaker — main window" />
+</div>
 
 **[Website](https://m4bookmaker.sageframe.net)** · **[Help & Docs](https://m4bookmaker.sageframe.net/help.html)** · **[Report a Bug](https://github.com/sageframe-no-kaji/m4bmaker/issues)**
 
@@ -19,6 +34,10 @@ Drag in a folder, adjust your chapters, hit Convert. m4Bookmaker handles the res
 - **Automatic cover art** — largest image in the directory is used
 - **Multiple windows** — each encoding in parallel
 - **Full CLI** — everything in the GUI is scriptable from the command line
+
+<div align="center">
+<img src="https://m4bookmaker.sageframe.net/assets/img/chapter.png" width="640" alt="m4Bookmaker — chapter editor" />
+</div>
 
 ---
 
