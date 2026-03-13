@@ -554,6 +554,13 @@ class MainWindow(QMainWindow):
         ch_tools_row.addWidget(self._ch_up_btn)
         ch_tools_row.addWidget(self._ch_down_btn)
         ch_tools_row.addStretch()
+        self._insert_time_btn = QPushButton("\u21a6 Insert Time")
+        self._insert_time_btn.setToolTip(
+            "Set selected chapter start time to current playback position"
+        )
+        self._insert_time_btn.setEnabled(False)
+        self._insert_time_btn.clicked.connect(self._on_insert_time)
+        ch_tools_row.addWidget(self._insert_time_btn)
         self._ch_merge_btn = QPushButton("Merge")
         self._ch_merge_btn.setToolTip(
             "Merge selected consecutive rows into one chapter —\n"
@@ -581,10 +588,8 @@ class MainWindow(QMainWindow):
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(hint)
 
-        # Navigation + Insert Time row
-        insert_row = QHBoxLayout()
-        insert_row.setContentsMargins(0, 0, 0, 0)
-        insert_row.setSpacing(4)
+        # Player row — prev/next injected directly into the player's button row
+        self._player = AudioPlayerWidget()
         self._ch_prev_btn = QPushButton("⏮")
         self._ch_prev_btn.setFixedWidth(36)
         self._ch_prev_btn.setToolTip("Previous chapter")
@@ -595,19 +600,10 @@ class MainWindow(QMainWindow):
         self._ch_next_btn.setToolTip("Next chapter")
         self._ch_next_btn.setEnabled(False)
         self._ch_next_btn.clicked.connect(self._on_chapter_next)
-        insert_row.addWidget(self._ch_prev_btn)
-        insert_row.addWidget(self._ch_next_btn)
-        insert_row.addStretch()
-        self._insert_time_btn = QPushButton("⇥ Insert Time")
-        self._insert_time_btn.setToolTip(
-            "Set selected chapter start time to current playback position"
-        )
-        self._insert_time_btn.setEnabled(False)
-        self._insert_time_btn.clicked.connect(self._on_insert_time)
-        insert_row.addWidget(self._insert_time_btn)
-        layout.addLayout(insert_row)
-
-        self._player = AudioPlayerWidget()
+        # Insert prev/next before play button in the player's row layout
+        player_row = self._player.layout().itemAt(0).layout()
+        player_row.insertWidget(0, self._ch_next_btn)
+        player_row.insertWidget(0, self._ch_prev_btn)
         layout.addWidget(self._player)
         return tab
 
