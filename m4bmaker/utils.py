@@ -8,8 +8,8 @@ import sys
 
 _INSTALL_HINT = (
     "  macOS (Homebrew): brew install ffmpeg\n"
-    "  Ubuntu/Debian:    sudo apt install ffmpeg\n"
-    "  Docker:           see docs/docker.md"
+    "  Windows:          winget install Gyan.FFmpeg\n"
+    "  Ubuntu/Debian:    sudo apt install ffmpeg"
 )
 
 # Common locations not on the minimal PATH inside a .app bundle
@@ -22,25 +22,32 @@ _EXTRA_DIRS = [
 
 def _which(name: str) -> str | None:
     """Like shutil.which but checks bundled app binaries first, then Homebrew."""
+    # On Windows the executable has a .exe extension
+    names = [name + ".exe", name] if sys.platform == "win32" else [name]
+
     # When frozen by PyInstaller (--onefile): sys._MEIPASS is the extraction dir
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        candidate = os.path.join(meipass, name)
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
+        for n in names:
+            candidate = os.path.join(meipass, n)
+            if os.path.isfile(candidate):
+                return candidate
 
     # When frozen as a macOS .app bundle (--onedir + BUNDLE):
     # binaries land in Contents/Frameworks/, which is a sibling of Contents/MacOS/
     if getattr(sys, "frozen", False):
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-        # Check same dir as executable (covers onedir non-bundle)
-        candidate = os.path.join(exe_dir, name)
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-        # Check Contents/Frameworks/ (macOS .app bundle)
-        frameworks = os.path.normpath(os.path.join(exe_dir, "..", "Frameworks", name))
-        if os.path.isfile(frameworks) and os.access(frameworks, os.X_OK):
-            return frameworks
+        for n in names:
+            # Check same dir as executable (covers onedir non-bundle + Windows)
+            candidate = os.path.join(exe_dir, n)
+            if os.path.isfile(candidate):
+                return candidate
+            # Check Contents/Frameworks/ (macOS .app bundle)
+            frameworks = os.path.normpath(
+                os.path.join(exe_dir, "..", "Frameworks", n)
+            )
+            if os.path.isfile(frameworks):
+                return frameworks
 
     path = shutil.which(name)
     if path:
