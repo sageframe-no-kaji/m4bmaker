@@ -65,7 +65,9 @@ class TestLoadAudiobook:
     def test_start_time_in_seconds_cumulative(self, tmp_path: Path) -> None:
         for i in [1, 2]:
             (tmp_path / f"0{i}.mp3").write_bytes(b"\x00")
-        durations = [10.0, 20.0]
+        # build_chapters calls get_duration for each file (10, 20),
+        # then load_audiobook calls get_duration once more for files[-1] (20).
+        durations = [10.0, 20.0, 20.0]
         call_count = [0]
 
         def _side_effect(cmd: list[str], **kw: object) -> MagicMock:

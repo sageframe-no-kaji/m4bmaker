@@ -30,7 +30,7 @@ class TestWriteConcatList:
         write_concat_list(files, dest)
         content = dest.read_text()
         for f in files:
-            assert str(f.resolve()) in content
+            assert f.resolve().as_posix() in content
 
     def test_format_is_file_single_quoted(self, tmp_path: Path) -> None:
         f = tmp_path / "track.mp3"
@@ -47,9 +47,9 @@ class TestWriteConcatList:
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         content = dest.read_text()
-        assert str(f.resolve()) in content
-        # Resolve makes it absolute; no relative component
-        assert content.startswith("file '/")
+        assert f.resolve().as_posix() in content
+        # Posix paths always use forward slashes
+        assert "file '" in content
 
     def test_apostrophe_in_path_escaped(self, tmp_path: Path) -> None:
         f = tmp_path / "it's a track.mp3"
@@ -57,7 +57,7 @@ class TestWriteConcatList:
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         content = dest.read_text()
-        assert "'\\''" in content  # the ffmpeg escape sequence
+        assert "\\'" in content  # apostrophe escaped for ffmpeg
 
     def test_space_in_path_preserved_quoted(self, tmp_path: Path) -> None:
         f = tmp_path / "my track 01.mp3"

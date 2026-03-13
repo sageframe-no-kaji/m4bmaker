@@ -154,6 +154,7 @@ def _run_pipeline(
     with (
         patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
         patch("m4bmaker.chapters.get_duration", return_value=duration),
+        patch("m4bmaker.pipeline.get_duration", return_value=duration),
         patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_ffmpeg_popen),
         patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
         patch("m4bmaker.repair.needs_repair", return_value=False),
@@ -243,6 +244,7 @@ class TestFullPipeline:
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
+            patch("m4bmaker.pipeline.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.repair.needs_repair", return_value=False),
@@ -287,6 +289,7 @@ class TestFullPipeline:
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=5.0),
+            patch("m4bmaker.pipeline.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.repair.needs_repair", return_value=False),
@@ -297,7 +300,7 @@ class TestFullPipeline:
 
         assert written, "concat file was never written"
         for f in audio_files:
-            assert str(f.resolve()) in written[0]
+            assert f.resolve().as_posix() in written[0]
 
     def test_fallback_to_audiobook_m4b_when_no_title(self, tmp_path: Path) -> None:
         """When metadata has no title, _output_path falls back to audiobook.m4b."""
@@ -876,6 +879,7 @@ class TestInteractiveChapterEdit:
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=10.0),
+            patch("m4bmaker.pipeline.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.repair.needs_repair", return_value=False),
@@ -936,6 +940,7 @@ class TestChaptersFileIntegration:
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters.get_duration", return_value=10.0),
+            patch("m4bmaker.pipeline.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.repair.needs_repair", return_value=False),
