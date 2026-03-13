@@ -25,6 +25,10 @@ _STRIP = [
     "qmlformat",        # QML formatter binary
     "Assistant.app",    # Qt Assistant docs app
     "Linguist.app",     # Qt Linguist translation tool
+    "Designer.app",    # Qt Designer UI tool
+    "Designer__dot__app",
+    "Assistant__dot__app",
+    "Linguist__dot__app",
 ]
 
 def _keep(path):
@@ -186,3 +190,16 @@ app = BUNDLE(
         ],
     },
 )
+
+# Post-bundle cleanup: remove nested Qt .app bundles that _STRIP couldn't
+# catch at the data-collection stage (they arrive via the Qt framework copy).
+import shutil as _shutil
+import os as _os
+_APP_BUNDLE = "dist/m4bmaker.app"
+for _root, _dirs, _ in _os.walk(_APP_BUNDLE):
+    for _d in list(_dirs):
+        if any(pat in _d for pat in _STRIP):
+            _p = _os.path.join(_root, _d)
+            print(f"[spec cleanup] removing {_p}")
+            _shutil.rmtree(_p, ignore_errors=True)
+            _dirs.remove(_d)
