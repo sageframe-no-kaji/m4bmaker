@@ -944,12 +944,26 @@ class MainWindow(QMainWindow):
             self._preflight_sample_rate = next(iter(a.sample_rates))  # type: ignore[union-attr]
         else:
             self._preflight_sample_rate = None  # mixed rates — let ffmpeg decide
-        # Snap bitrate to the closest available option matching the source
+        # Snap bitrate to the best AAC default given the source.
+        # For MP3/MP2 sources AAC achieves equivalent quality at ~75% of the
+        # source bitrate, so we apply that discount before snapping — e.g.
+        # 128k MP3 → 96k AAC, 112k MP3 → 96k AAC, 96k MP3 → 64k AAC.
+        # For all other codecs (AAC, FLAC, WAV …) we snap without discount.
         if a.bit_rates:  # type: ignore[union-attr]
             dominant_bps = a.bit_rates.most_common(1)[0][0]  # type: ignore[union-attr]
             dominant_kbps = dominant_bps // 1000
+            dominant_codec = (
+                a.codecs.most_common(1)[0][0]  # type: ignore[union-attr]
+                if a.codecs  # type: ignore[union-attr]
+                else ""
+            )
+            if dominant_codec in ("mp3", "mp2"):
+                target_kbps = int(dominant_kbps * 0.75)
+            else:
+                target_kbps = dominant_kbps
             _avail = [int(r.rstrip("k")) for r in _BITRATES]
-            closest = min(_avail, key=lambda x: abs(x - dominant_kbps))
+            # On a tie defer to the higher step (safer quality).
+            closest = min(_avail, key=lambda x: (abs(x - target_kbps), -x))
             self._bitrate_combo.setCurrentText(f"{closest}k")
         # Snap mono/stereo to match source channels
         if len(a.channels) == 1:  # type: ignore[union-attr]
@@ -973,9 +987,13 @@ class MainWindow(QMainWindow):
         self._ch_prev_btn.setEnabled(row > 0)
         self._ch_next_btn.setEnabled(row < n - 1)
         ch = self._book.chapters[row]
-        start_ms = int(ch.start_time * 1000)
-        # In edit mode the source is the .m4b itself; in build mode each chapter
-        # carries its own source_file.
+        # In edit mode the source is the single .m4b, so ch.start_time is the
+        # correct seek position within that file.  In build mode each chapter is
+        # its own source file, so we always seek to the beginning of that file.
+        if self._mode == "edit":
+            start_ms = int(ch.start_time * 1000)
+        else:
+            start_ms = 0
         if self._mode == "edit" and self._folder_zone.path() is not None:
             src = self._folder_zone.path()
         else:
