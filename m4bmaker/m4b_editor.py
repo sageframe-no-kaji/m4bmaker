@@ -95,6 +95,8 @@ def save_m4b_chapters(
             "1",
             "-c",
             "copy",
+            "-brand",
+            "M4B ",  # ftyp major brand — required for iOS Books
             str(out_path),
         ]
         try:

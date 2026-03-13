@@ -140,6 +140,8 @@ def encode(
         *(["-ar", str(sample_rate)] if sample_rate is not None else []),
         "-metadata",
         "stik=2",  # iTunes media type: Audiobook (required by Apple Books)
+        "-brand",
+        "M4B ",  # ftyp major brand — required for iOS Books to recognise as audiobook
         "-movflags",
         "+faststart",  # optimise for streaming
         "-progress",
