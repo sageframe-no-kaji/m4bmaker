@@ -126,11 +126,16 @@ def encode(
     ]
 
     if cover is not None:
+        # Determine whether the cover can be muxed as-is or needs transcoding.
+        # M4B (MP4) only supports JPEG and PNG cover art; formats like WebP
+        # must be transcoded to MJPEG.
+        _ext = Path(cover).suffix.lower()
+        _copy_cover = _ext in {".jpg", ".jpeg", ".png"}
         cmd += [
             "-map",
             "2:v",  # map cover image from input 2
             "-c:v",
-            "copy",
+            "copy" if _copy_cover else "mjpeg",
             "-disposition:v",
             "attached_pic",
         ]
