@@ -1084,22 +1084,28 @@ class MainWindow(QMainWindow):
             self._ch_merge_btn.setEnabled(False)
             return
         # Remove button label is context-sensitive
+        selected = sorted(
+            {idx.row() for idx in self._chapter_table.selectionModel().selectedRows()}
+        )
+        sel_count = len(selected)
         if in_edit:
-            self._ch_remove_btn.setText("Remove Chapter")
-            self._ch_remove_btn.setToolTip("Remove selected chapter marker")
+            label = f"Remove {sel_count} Chapters" if sel_count > 1 else "Remove Chapter"
+            self._ch_remove_btn.setText(label)
+            self._ch_remove_btn.setToolTip("Remove selected chapter marker(s)")
         else:
-            self._ch_remove_btn.setText("Remove File")
-            self._ch_remove_btn.setToolTip("Remove selected file from book")
+            label = f"Remove {sel_count} Files" if sel_count > 1 else "Remove File"
+            self._ch_remove_btn.setText(label)
+            self._ch_remove_btn.setToolTip(
+                "Remove selected file(s) from book\n"
+                "Shift-click or Ctrl-click to select multiple."
+            )
         if show_reorder:
             row = self._chapter_table.currentRow()
             n = self._chapter_table.rowCount()
             self._ch_up_btn.setEnabled(row > 0)
             self._ch_down_btn.setEnabled(0 <= row < n - 1)
-            self._ch_remove_btn.setEnabled(row >= 0 and n > 1)
+            self._ch_remove_btn.setEnabled(sel_count > 0 and sel_count < n)
         # Enable Merge when 2+ consecutive rows are selected
-        selected = sorted(
-            {idx.row() for idx in self._chapter_table.selectionModel().selectedRows()}
-        )
         is_consecutive = len(selected) >= 2 and selected == list(
             range(selected[0], selected[-1] + 1)
         )
@@ -1155,17 +1161,25 @@ class MainWindow(QMainWindow):
         self._chapter_table.setCurrentCell(i + 1, ChapterTable.COL_TITLE)
 
     def _on_chapter_remove(self) -> None:
-        row = self._chapter_table.currentRow()
-        if row < 0 or self._book is None:
+        if self._book is None:
+            return
+        selected = sorted(
+            {idx.row() for idx in self._chapter_table.selectionModel().selectedRows()}
+        )
+        if not selected:
+            return
+        # Must keep at least one row
+        if len(selected) >= self._chapter_table.rowCount():
             return
         self._sync_titles_from_table()
-        del self._chapter_durations[row]
-        if self._mode == "build":
-            del self._book.files[row]
-        del self._book.chapters[row]
+        for row in reversed(selected):
+            del self._chapter_durations[row]
+            if self._mode == "build":
+                del self._book.files[row]
+            del self._book.chapters[row]
         self._reindex_chapters()
         self._chapter_table.populate(self._book.chapters)
-        new_row = min(row, self._chapter_table.rowCount() - 1)
+        new_row = min(selected[0], self._chapter_table.rowCount() - 1)
         if new_row >= 0:
             self._chapter_table.setCurrentCell(new_row, ChapterTable.COL_TITLE)
         self._set_status(
