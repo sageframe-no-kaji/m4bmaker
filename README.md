@@ -15,6 +15,8 @@ Convert a folder of audio files into a clean M4B audiobook — in seconds.
 
 ⭐ [Watch this repo (Releases only)](https://github.com/sageframe-no-kaji/m4bmaker/subscription) to get notified when a new version drops.
 
+**[Website](https://m4bookmaker.sageframe.net) · [Help & Docs](https://m4bookmaker.sageframe.net/help.html) · [Report a Bug](https://github.com/sageframe-no-kaji/m4bmaker/issues/new)**
+
 </div>
 
 Drag in a folder, adjust your chapters, hit Convert. m4Bookmaker handles the rest — chapters, cover art, metadata, and even repairs broken audio files automatically.
