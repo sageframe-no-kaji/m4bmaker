@@ -6,9 +6,11 @@
 
 Convert a folder of audio files into a clean M4B audiobook — in seconds.
 
+[![PyPI](https://img.shields.io/pypi/v/m4bmaker?color=blue)](https://pypi.org/project/m4bmaker/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![macOS](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](#installation)
 [![Windows](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows&logoColor=white)](#installation)
+[![Linux](https://img.shields.io/badge/Linux-supported-FCC624?logo=linux&logoColor=black)](#from-pypi)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#from-source)
 
 </div>
@@ -51,16 +53,40 @@ Get the signed, notarized macOS app or the Windows installer:
 
 ffmpeg is bundled — nothing else to install.
 
+### From PyPI
+
+Works on macOS, Windows, and Linux. Requires Python 3.11+ and ffmpeg.
+
+```bash
+pip install m4bmaker
+```
+
+Or with the optional GUI:
+
+```bash
+pip install m4bmaker[gui]
+```
+
+Install ffmpeg if you don't have it:
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu / Debian
+sudo apt install ffmpeg
+
+# Windows (winget)
+winget install ffmpeg
+```
+
 ### From source
 
 Requires Python 3.11+ and ffmpeg.
 
 ```bash
-brew install ffmpeg
 git clone https://github.com/sageframe-no-kaji/m4bmaker.git
 cd m4bmaker
-python3 -m venv .venv
-source .venv/bin/activate
 pip install -e .
 ```
 
