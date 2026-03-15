@@ -13,6 +13,8 @@ Convert a folder of audio files into a clean M4B audiobook — in seconds.
 [![Linux](https://img.shields.io/badge/Linux-supported-FCC624?logo=linux&logoColor=black)](#from-pypi)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#from-source)
 
+⭐ [Watch this repo (Releases only)](https://github.com/sageframe-no-kaji/m4bmaker/subscription) to get notified when a new version drops.
+
 </div>
 
 Drag in a folder, adjust your chapters, hit Convert. m4Bookmaker handles the rest — chapters, cover art, metadata, and even repairs broken audio files automatically.
