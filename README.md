@@ -27,6 +27,8 @@ Drag in a folder, adjust your chapters, hit Convert. m4Bookmaker handles the res
 
 **[Website](https://m4bookmaker.sageframe.net)** · **[Help & Docs](https://m4bookmaker.sageframe.net/help.html)** · **[Report a Bug](https://github.com/sageframe-no-kaji/m4bmaker/issues)**
 
+**Development Process:** This project was built using the [Ho System](https://atmarcus.net/work/ho-system), a structured methodology for human-AI collaborative development. The human makes every design decision. The AI implements under direction. There is verification at every step.
+
 ---
 
 ## What it does
