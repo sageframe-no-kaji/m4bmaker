@@ -62,18 +62,25 @@ def _progress_reader(
 def write_concat_list(files: list[Path], dest: Path) -> None:
     """Write an ffmpeg concat demuxer file to *dest*.
 
-    Each path is escaped: single-quotes inside filenames are doubled,
-    and the whole path is wrapped in single-quotes, as required by the
-    ffmpeg concat demuxer format.
+    Uses unquoted paths with backslash-escaped special characters.  ffmpeg's
+    concat demuxer (tested up to 8.x) does not treat ``\'`` inside a
+    single-quoted string as an escape — the apostrophe terminates the string.
+    The only reliable approach is to leave paths unquoted and escape each
+    special character individually with a leading backslash.
     """
     lines: list[str] = []
     for path in files:
-        # Use forward-slash paths (as_posix) so ffmpeg's concat demuxer doesn't
-        # misinterpret Windows backslashes as escape sequences.
-        # Escape single-quotes and backslashes per ffmpeg concat demuxer rules.
         posix_path = path.resolve().as_posix()
-        escaped = posix_path.replace("'", "\\'")
-        lines.append(f"file '{escaped}'\n")
+        # Backslash must be escaped first to avoid double-escaping.
+        escaped = (
+            posix_path
+            .replace("\\", "\\\\")
+            .replace(" ", "\\ ")
+            .replace("'", "\\'")
+            .replace('"', '\\"')
+            .replace("#", "\\#")
+        )
+        lines.append(f"file {escaped}\n")
     dest.write_text("".join(lines), encoding="utf-8")
 
 

@@ -32,14 +32,14 @@ class TestWriteConcatList:
         for f in files:
             assert f.resolve().as_posix() in content
 
-    def test_format_is_file_single_quoted(self, tmp_path: Path) -> None:
+    def test_format_is_file_unquoted(self, tmp_path: Path) -> None:
         f = tmp_path / "track.mp3"
         f.write_bytes(b"\x00")
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         line = dest.read_text().strip()
-        assert line.startswith("file '")
-        assert line.endswith("'")
+        assert line.startswith("file /")
+        assert "'" not in line  # no single-quote wrapping
 
     def test_absolute_paths_used(self, tmp_path: Path) -> None:
         f = tmp_path / "track.mp3"
@@ -48,8 +48,8 @@ class TestWriteConcatList:
         write_concat_list([f], dest)
         content = dest.read_text()
         assert f.resolve().as_posix() in content
-        # Posix paths always use forward slashes
-        assert "file '" in content
+        # Posix paths always use forward slashes; unquoted format, no wrapping quotes
+        assert content.startswith("file /")
 
     def test_apostrophe_in_filename_escaped(self, tmp_path: Path) -> None:
         f = tmp_path / "it's a track.mp3"
@@ -70,16 +70,15 @@ class TestWriteConcatList:
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         line = dest.read_text().strip()
-        # Must be "file '<posix-path-with-escaped-apostrophe>'"
-        assert line.startswith("file '")
-        assert line.endswith("'")
+        # Unquoted format: starts with "file /", no wrapping quotes
+        assert line.startswith("file /")
         assert "\\'" in line  # apostrophe in directory component escaped
         # The filename itself must be unmodified (no apostrophe in it)
         assert "track01.mp3" in line
 
     def test_apostrophe_concat_line_exact_format(self, tmp_path: Path) -> None:
-        # Verify the complete concat demuxer line format matches the ffmpeg spec:
-        # file '<path-with-escaped-single-quotes>'
+        # Verify the complete concat demuxer line format: unquoted path with
+        # backslash-escaped apostrophes and spaces.
         parent = tmp_path / "O'Brien Audiobooks"
         parent.mkdir()
         f = parent / "O'Brien Chapter 1.mp3"
@@ -88,8 +87,15 @@ class TestWriteConcatList:
         write_concat_list([f], dest)
         line = dest.read_text().strip()
         posix = f.resolve().as_posix()
-        expected_inner = posix.replace("'", "\\'")
-        assert line == f"file '{expected_inner}'"
+        escaped = (
+            posix
+            .replace("\\", "\\\\")
+            .replace(" ", "\\ ")
+            .replace("'", "\\'")
+            .replace('"', '\\"')
+            .replace("#", "\\#")
+        )
+        assert line == f"file {escaped}"
 
     def test_multiple_apostrophes_in_path_all_escaped(self, tmp_path: Path) -> None:
         parent = tmp_path / "it's troy's"
@@ -129,13 +135,13 @@ class TestWriteConcatList:
         assert str(concat) in cmd
         assert str(output) in cmd
 
-    def test_space_in_path_preserved_quoted(self, tmp_path: Path) -> None:
+    def test_space_in_path_backslash_escaped(self, tmp_path: Path) -> None:
         f = tmp_path / "my track 01.mp3"
         f.write_bytes(b"\x00")
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         content = dest.read_text()
-        assert "my track 01.mp3" in content
+        assert "my\\ track\\ 01.mp3" in content  # spaces are backslash-escaped
 
     def test_file_is_utf8(self, tmp_path: Path) -> None:
         f = tmp_path / "café.mp3"
