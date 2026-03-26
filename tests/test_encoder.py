@@ -51,13 +51,83 @@ class TestWriteConcatList:
         # Posix paths always use forward slashes
         assert "file '" in content
 
-    def test_apostrophe_in_path_escaped(self, tmp_path: Path) -> None:
+    def test_apostrophe_in_filename_escaped(self, tmp_path: Path) -> None:
         f = tmp_path / "it's a track.mp3"
         f.write_bytes(b"\x00")
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         content = dest.read_text()
         assert "\\'" in content  # apostrophe escaped for ffmpeg
+
+    def test_apostrophe_in_parent_directory_escaped(self, tmp_path: Path) -> None:
+        # Regression test for issue #8: reporter's path was
+        # "The Listener's Bible ESV/..." — apostrophe in the directory name,
+        # not the filename.  The concat demuxer line must escape it the same way.
+        parent = tmp_path / "The Listener's Bible ESV"
+        parent.mkdir()
+        f = parent / "track01.mp3"
+        f.write_bytes(b"\x00")
+        dest = tmp_path / "concat.txt"
+        write_concat_list([f], dest)
+        line = dest.read_text().strip()
+        # Must be "file '<posix-path-with-escaped-apostrophe>'"
+        assert line.startswith("file '")
+        assert line.endswith("'")
+        assert "\\'" in line  # apostrophe in directory component escaped
+        # The filename itself must be unmodified (no apostrophe in it)
+        assert "track01.mp3" in line
+
+    def test_apostrophe_concat_line_exact_format(self, tmp_path: Path) -> None:
+        # Verify the complete concat demuxer line format matches the ffmpeg spec:
+        # file '<path-with-escaped-single-quotes>'
+        parent = tmp_path / "O'Brien Audiobooks"
+        parent.mkdir()
+        f = parent / "O'Brien Chapter 1.mp3"
+        f.write_bytes(b"\x00")
+        dest = tmp_path / "concat.txt"
+        write_concat_list([f], dest)
+        line = dest.read_text().strip()
+        posix = f.resolve().as_posix()
+        expected_inner = posix.replace("'", "\\'")
+        assert line == f"file '{expected_inner}'"
+
+    def test_multiple_apostrophes_in_path_all_escaped(self, tmp_path: Path) -> None:
+        parent = tmp_path / "it's troy's"
+        parent.mkdir()
+        f = parent / "can't stop.mp3"
+        f.write_bytes(b"\x00")
+        dest = tmp_path / "concat.txt"
+        write_concat_list([f], dest)
+        line = dest.read_text().strip()
+        # Three apostrophes total across dir + filename — all must be escaped
+        assert line.count("\\'") == 3
+
+    def test_encode_passes_concat_path_as_list_arg(self, tmp_path: Path) -> None:
+        # Apostrophe safety at the subprocess level: the concat file path is
+        # passed as a list element, never interpolated into a shell string.
+        # A path with an apostrophe must survive the round-trip through Popen.
+        parent = tmp_path / "The Listener's Bible"
+        parent.mkdir()
+        concat = parent / "concat.txt"
+        meta = parent / "meta.txt"
+        output = parent / "out.m4b"
+        for p in (concat, meta):
+            p.write_bytes(b"\x00")
+
+        captured: list[list[str]] = []
+
+        def _fake_popen(cmd: list[str], **_: object) -> MagicMock:
+            captured.append(list(cmd))
+            return _popen_mock()
+
+        with patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_popen):
+            encode(concat, meta, None, output, "96k", 1, "ffmpeg")
+
+        cmd = captured[0]
+        # The path containing the apostrophe must appear verbatim as its own
+        # list element — no shell quoting, no mangling.
+        assert str(concat) in cmd
+        assert str(output) in cmd
 
     def test_space_in_path_preserved_quoted(self, tmp_path: Path) -> None:
         f = tmp_path / "my track 01.mp3"
