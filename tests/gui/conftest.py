@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -25,3 +26,16 @@ def qapp():
         app = QApplication(sys.argv)
     yield app
     # Do NOT call app.quit() — pytest-qt style; let the process clean up.
+
+
+@pytest.fixture(autouse=True)
+def _no_update_thread():
+    """Prevent UpdateChecker from spawning a real network thread in tests.
+
+    Tests that specifically test UpdateChecker behaviour patch the class or
+    its methods themselves; this fixture only guards MainWindow instantiations
+    that don't care about the update check and would otherwise start a live
+    network request and a background QThread.
+    """
+    with patch("m4bmaker.gui.updater.UpdateChecker.start"):
+        yield

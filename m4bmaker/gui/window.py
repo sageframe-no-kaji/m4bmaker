@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -79,6 +80,7 @@ from m4bmaker.gui.job import job_from_book
 from m4bmaker.gui.prefs import get as _prefs_get, set as _prefs_set
 from m4bmaker.gui.queue_manager import QueueManager
 from m4bmaker.gui.queue_window import QueueWindow
+from m4bmaker.gui.updater import UpdateChecker, _RELEASES_URL
 from m4bmaker.preflight import format_preflight_summary
 
 try:
@@ -160,6 +162,11 @@ class MainWindow(QMainWindow):
         if _prefs_get("dark_mode"):
             self._dark_action.setChecked(True)
             self._toggle_dark_mode()
+
+        # Start background update check (once per session, fails silently).
+        self._update_checker = UpdateChecker(self)
+        self._update_checker.update_available.connect(self._show_update_bar)
+        self._update_checker.start()
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -318,7 +325,21 @@ class MainWindow(QMainWindow):
         links.addWidget(ko_lbl)
         links.addStretch()
         v.addLayout(links)
-        v.addSpacing(22)
+        v.addSpacing(16)
+
+        privacy_lbl = QLabel(
+            'Checks GitHub for updates on startup. '
+            '<a href="https://github.com/sageframe-no-kaji/m4bmaker#privacy--network-activity" '
+            'style="color: #7a7a7a;">Privacy info</a>'
+        )
+        privacy_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        privacy_lbl.setOpenExternalLinks(True)
+        privacy_lbl.setStyleSheet(
+            "font-size: 11px; color: #9a9a9a; background: transparent;"
+        )
+        privacy_lbl.setWordWrap(True)
+        v.addWidget(privacy_lbl)
+        v.addSpacing(10)
 
         ok_btn = QPushButton("OK")
         ok_btn.setFixedWidth(88)
@@ -341,11 +362,71 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(16, 16, 16, 16)
         outer.setSpacing(10)
 
+        # Update notification bar — hidden until UpdateChecker signals.
+        self._update_bar = self._build_update_bar()
+        outer.addWidget(self._update_bar)
+
         outer.addWidget(self._build_folder_section())
         outer.addWidget(self._build_tabs(), stretch=1)
         outer.addLayout(self._build_bottom_bar())
 
         self._update_controls()
+
+    def _build_update_bar(self) -> QFrame:
+        """Build the dismissible info bar shown when a new version is available."""
+        bar = QFrame()
+        bar.setObjectName("updateBar")
+        bar.setStyleSheet(
+            "QFrame#updateBar {"
+            "  background: #2563eb;"
+            "  border-radius: 6px;"
+            "  padding: 0px;"
+            "}"
+        )
+        bar.setFixedHeight(36)
+        bar.hide()
+
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 0, 8, 0)
+        row.setSpacing(8)
+
+        self._update_label = QLabel()
+        self._update_label.setStyleSheet("color: white; font-size: 13px;")
+        row.addWidget(self._update_label, stretch=1)
+
+        download_btn = QPushButton("Download")
+        download_btn.setStyleSheet(
+            "QPushButton {"
+            "  color: white; background: transparent;"
+            "  border: 1px solid white; border-radius: 4px;"
+            "  padding: 2px 8px; font-size: 12px;"
+            "}"
+            "QPushButton:hover { background: rgba(255,255,255,0.15); }"
+        )
+        download_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(_RELEASES_URL))
+        )
+        row.addWidget(download_btn)
+
+        dismiss_btn = QPushButton("×")
+        dismiss_btn.setFixedSize(24, 24)
+        dismiss_btn.setStyleSheet(
+            "QPushButton {"
+            "  color: white; background: transparent; border: none; font-size: 16px;"
+            "}"
+            "QPushButton:hover { background: rgba(255,255,255,0.15); border-radius: 4px; }"
+        )
+        dismiss_btn.clicked.connect(bar.hide)
+        row.addWidget(dismiss_btn)
+
+        return bar
+
+    def _show_update_bar(self, new_version: str) -> None:
+        """Slot called by UpdateChecker when a newer release is available."""
+        self._update_label.setText(
+            f"✨  m4Bookmaker {new_version} is available."
+        )
+        self._update_bar.show()
 
     # ── Folder section ────────────────────────────────────────────────────────
 

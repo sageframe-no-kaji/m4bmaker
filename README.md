@@ -137,6 +137,21 @@ m4bmaker <folder> [options]
 
 ---
 
+## Privacy & network activity
+
+m4Bookmaker is fully local — it never uploads your audio files or metadata.
+
+**Update checker:** On startup, the GUI makes a single outbound request to the GitHub Releases API to check whether a newer version is available:
+
+```
+GET https://api.github.com/repos/sageframe-no-kaji/m4bmaker/releases/latest
+User-Agent: m4bmaker/<version>
+```
+
+This sends your IP address and the installed version number to GitHub's API. No other data is transmitted. The check runs silently in the background and fails silently if you are offline. The CLI (`m4bmaker` command) makes no network calls at all.
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
