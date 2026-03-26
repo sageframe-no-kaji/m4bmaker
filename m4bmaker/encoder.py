@@ -67,6 +67,14 @@ def write_concat_list(files: list[Path], dest: Path) -> None:
     single-quoted string as an escape — the apostrophe terminates the string.
     The only reliable approach is to leave paths unquoted and escape each
     special character individually with a leading backslash.
+
+    .. warning::
+        Unit tests for this function can only assert on the *string content* of
+        the concat file, not on ffmpeg's actual parsing of it.  If you change
+        the escaping strategy, verify with a live ffmpeg run against a path that
+        contains the characters you are trying to escape.  This was learned the
+        hard way: the original ``file 'path\\'s'`` approach passed all unit
+        tests but silently truncated the path at runtime (issue #8).
     """
     lines: list[str] = []
     for path in files:

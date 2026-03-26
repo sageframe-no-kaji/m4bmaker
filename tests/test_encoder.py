@@ -19,6 +19,15 @@ from m4bmaker.encoder import (
 # ---------------------------------------------------------------------------
 # write_concat_list
 # ---------------------------------------------------------------------------
+# NOTE: These tests verify that write_concat_list produces the expected string
+# output, but they cannot verify that ffmpeg will actually parse that output
+# correctly.  ffmpeg's concat demuxer has subtle quoting rules that differ
+# across versions and are not fully representable by string inspection alone.
+# If you change the escaping strategy here, run a live end-to-end test against
+# a real directory whose name contains the characters you are changing.
+# (See issue #8 for an example of unit tests that passed but the live encode
+# failed because ffmpeg silently misinterpreted the quoting.)
+# ---------------------------------------------------------------------------
 
 
 class TestWriteConcatList:
