@@ -3,6 +3,7 @@
 # (see README.md — Docker / system install instructions)
 mutagen>=1.47
 natsort>=8.4
+platformdirs>=4.0
 
 # GUI dependency (Qt bindings)
 PySide6>=6.6

@@ -30,6 +30,7 @@ classifiers = [
 dependencies = [
     "mutagen>=1.47",
     "natsort>=8.4",
+    "platformdirs>=4.0",
 ]
 
 [project.optional-dependencies]

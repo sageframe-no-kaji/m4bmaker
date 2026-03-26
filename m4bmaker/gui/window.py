@@ -76,6 +76,7 @@ from m4bmaker.gui.worker import (
     SplitWorker,
 )
 from m4bmaker.gui.job import job_from_book
+from m4bmaker.gui.prefs import get as _prefs_get, set as _prefs_set
 from m4bmaker.gui.queue_manager import QueueManager
 from m4bmaker.gui.queue_window import QueueWindow
 from m4bmaker.preflight import format_preflight_summary
@@ -154,6 +155,11 @@ class MainWindow(QMainWindow):
 
         self._build_menu_bar()
         self._build_ui()
+
+        # Restore persisted theme preference.
+        if _prefs_get("dark_mode"):
+            self._dark_action.setChecked(True)
+            self._toggle_dark_mode()
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -237,6 +243,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_dark_mode(self) -> None:
         self._dark_mode = self._dark_action.isChecked()
+        _prefs_set("dark_mode", self._dark_mode)
         QApplication.instance().setStyleSheet(get_stylesheet(self._dark_mode))
         if hasattr(self, "_dark_btn"):
             self._dark_btn.setText("☀️" if self._dark_mode else "🌙")
@@ -1089,7 +1096,9 @@ class MainWindow(QMainWindow):
         )
         sel_count = len(selected)
         if in_edit:
-            label = f"Remove {sel_count} Chapters" if sel_count > 1 else "Remove Chapter"
+            label = (
+                f"Remove {sel_count} Chapters" if sel_count > 1 else "Remove Chapter"
+            )
             self._ch_remove_btn.setText(label)
             self._ch_remove_btn.setToolTip("Remove selected chapter marker(s)")
         else:
