@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.0.1] - 2026-03-26
+
+### Added
+
+- **Update checker** — `m4bmaker/gui/updater.py` (`UpdateChecker(QThread)`) queries
+  the GitHub Releases API on startup via stdlib `urllib` (no new runtime dependency).
+  A dismissible blue info bar appears at the top of the main window when a newer
+  release is found; the bar is hidden by default and includes a Download link.
+- **Privacy disclosure** — About dialog and README now document the single outbound
+  network call made by the update checker (IP address + User-Agent sent to GitHub API).
+- **Dark mode persistence** — `m4bmaker/gui/prefs.py` stores user preferences in
+  `platformdirs.user_config_dir('m4bmaker')/prefs.json`. The dark mode toggle state
+  is saved on change and restored on startup, surviving application restarts.
+- **`platformdirs>=4.0`** added to `requirements.txt` and `pyproject.toml`
+  (was a transitive dependency; now made explicit).
+- **`PySide6>=6.6`** added to `requirements.txt` so that
+  `pip install -r requirements.txt` is self-contained for GUI users.
+
+### Fixed
+
+- Paths containing an apostrophe in a *parent directory* (e.g. `/Dad's Books/`)
+  now escape correctly in the ffmpeg concat list. The existing `replace("'", "\\'")
+  ` logic already operated on the full path; five new tests document and verify this
+  for both filename and directory-level apostrophes.
+
+---
+
 ### Added
 
 - **`m4bmaker/utils.py`** — `find_ffmpeg()` / `find_ffprobe()` with Homebrew/apt

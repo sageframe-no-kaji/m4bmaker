@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m4bmaker"
-version = "1.0.0"
+version = "1.0.1"
 description = "Convert a directory of audio files into a single .m4b audiobook with chapters, cover art, and metadata"
 readme = "README.md"
 license = "GPL-3.0-or-later"

@@ -327,10 +327,13 @@ class MainWindow(QMainWindow):
         v.addLayout(links)
         v.addSpacing(16)
 
+        _privacy_url = (
+            "https://github.com/sageframe-no-kaji/m4bmaker"
+            "#privacy--network-activity"
+        )
         privacy_lbl = QLabel(
             'Checks GitHub for updates on startup. '
-            '<a href="https://github.com/sageframe-no-kaji/m4bmaker#privacy--network-activity" '
-            'style="color: #7a7a7a;">Privacy info</a>'
+            f'<a href="{_privacy_url}" style="color: #7a7a7a;">Privacy info</a>'
         )
         privacy_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         privacy_lbl.setOpenExternalLinks(True)
@@ -414,7 +417,8 @@ class MainWindow(QMainWindow):
             "QPushButton {"
             "  color: white; background: transparent; border: none; font-size: 16px;"
             "}"
-            "QPushButton:hover { background: rgba(255,255,255,0.15); border-radius: 4px; }"
+            "QPushButton:hover {"
+            " background: rgba(255,255,255,0.15); border-radius: 4px; }"
         )
         dismiss_btn.clicked.connect(bar.hide)
         row.addWidget(dismiss_btn)
