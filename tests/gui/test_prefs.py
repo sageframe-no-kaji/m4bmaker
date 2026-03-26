@@ -51,6 +51,10 @@ class TestLoad:
         result = load()
         assert result["dark_mode"] is False
 
+    def test_check_for_updates_defaults_to_true(self) -> None:
+        result = load()
+        assert result["check_for_updates"] is True
+
     def test_returns_dict(self) -> None:
         assert isinstance(load(), dict)
 
@@ -120,6 +124,9 @@ class TestSetGet:
     def test_get_default_when_no_file(self) -> None:
         assert get("dark_mode") is False
 
+    def test_get_check_for_updates_default(self) -> None:
+        assert get("check_for_updates") is True
+
     def test_set_persists_and_get_returns_it(self) -> None:
         set("dark_mode", True)
         assert get("dark_mode") is True
@@ -128,6 +135,10 @@ class TestSetGet:
         set("dark_mode", True)
         set("dark_mode", False)
         assert get("dark_mode") is False
+
+    def test_set_check_for_updates_false_persists(self) -> None:
+        set("check_for_updates", False)
+        assert get("check_for_updates") is False
 
 
 # ---------------------------------------------------------------------------
@@ -209,4 +220,59 @@ class TestMainWindowPrefsPersistence:
         win._dark_action.setChecked(False)
         win._toggle_dark_mode()
         assert get("dark_mode") is False
+        win.close()
+
+# ---------------------------------------------------------------------------
+# MainWindow integration — check_for_updates toggle (closes issue #6 follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateCheckerToggle:
+    def test_update_checker_not_started_when_disabled(self, qapp: object) -> None:
+        """UpdateChecker.start must not be called when pref is False."""
+        set("check_for_updates", False)
+        with patch("m4bmaker.gui.updater.UpdateChecker.start") as mock_start:
+            win = MainWindow()
+            mock_start.assert_not_called()
+        win.close()
+
+    def test_update_checker_started_when_enabled(self, qapp: object) -> None:
+        """UpdateChecker.start must be called exactly once when pref is True."""
+        set("check_for_updates", True)
+        with patch("m4bmaker.gui.updater.UpdateChecker.start") as mock_start:
+            win = MainWindow()
+            mock_start.assert_called_once()
+        win.close()
+
+    def test_toggle_update_check_persists_false(self, qapp: object) -> None:
+        """Calling _toggle_update_check(False) writes False to prefs."""
+        win = MainWindow()
+        win._toggle_update_check(False)
+        assert get("check_for_updates") is False
+        win.close()
+
+    def test_toggle_update_check_persists_true(self, qapp: object) -> None:
+        """Calling _toggle_update_check(True) writes True to prefs."""
+        set("check_for_updates", False)
+        win = MainWindow()
+        win._toggle_update_check(True)
+        assert get("check_for_updates") is True
+        win.close()
+
+    def test_updates_action_checked_state_matches_pref_false(
+        self, qapp: object
+    ) -> None:
+        """Menu action initial checked state reflects saved pref (False)."""
+        set("check_for_updates", False)
+        win = MainWindow()
+        assert win._updates_action.isChecked() is False
+        win.close()
+
+    def test_updates_action_checked_state_matches_pref_true(
+        self, qapp: object
+    ) -> None:
+        """Menu action initial checked state reflects saved pref (True)."""
+        set("check_for_updates", True)
+        win = MainWindow()
+        assert win._updates_action.isChecked() is True
         win.close()
