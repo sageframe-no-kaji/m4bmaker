@@ -164,9 +164,11 @@ class MainWindow(QMainWindow):
             self._toggle_dark_mode()
 
         # Start background update check (once per session, fails silently).
+        # Respects the "Check for Updates on Startup" preference.
         self._update_checker = UpdateChecker(self)
         self._update_checker.update_available.connect(self._show_update_bar)
-        self._update_checker.start()
+        if _prefs_get("check_for_updates"):
+            self._update_checker.start()
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
 
@@ -214,6 +216,14 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
+        help_menu.addSeparator()
+
+        self._updates_action = QAction("Check for Updates on Startup", self)
+        self._updates_action.setCheckable(True)
+        self._updates_action.setChecked(bool(_prefs_get("check_for_updates")))
+        self._updates_action.toggled.connect(self._toggle_update_check)
+        help_menu.addAction(self._updates_action)
+
         bug_action = QAction("Report a Bug…", self)
         bug_action.triggered.connect(
             lambda: QDesktopServices.openUrl(QUrl(_BUG_REPORT_URL))
@@ -247,6 +257,9 @@ class MainWindow(QMainWindow):
     def _on_dark_mode_btn(self) -> None:
         self._dark_action.setChecked(not self._dark_action.isChecked())
         self._toggle_dark_mode()
+
+    def _toggle_update_check(self, enabled: bool) -> None:
+        _prefs_set("check_for_updates", enabled)
 
     def _toggle_dark_mode(self) -> None:
         self._dark_mode = self._dark_action.isChecked()
@@ -329,7 +342,8 @@ class MainWindow(QMainWindow):
 
         _privacy_url = "https://m4bookmaker.sageframe.net/help.html#privacy"
         privacy_lbl = QLabel(
-            'Checks GitHub for updates on startup. '
+            'Checks GitHub for updates on startup '
+            '(disable: Help → Check for Updates on Startup). '
             f'<a href="{_privacy_url}" style="color: #7a7a7a;">Privacy info</a>'
         )
         privacy_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)

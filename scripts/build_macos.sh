@@ -74,11 +74,48 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 echo "==> Built: $APP_PATH"
 
-# ── Ad-hoc codesign (required to run on Apple Silicon without Gatekeeper) ─────
+# ── Codesign ──────────────────────────────────────────────────────────────────
+# PyInstaller ad-hoc signs the bundle during build. We must re-sign with our
+# Developer ID, but --deep re-signs inner binaries in the wrong order and
+# invalidates them. Instead we sign inside-out manually, then sign the bundle.
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
     echo "==> Signing with identity: $CODESIGN_IDENTITY"
-    codesign --deep --force --options runtime \
-        --sign "$CODESIGN_IDENTITY" "$APP_PATH"
+    ENTITLEMENTS="$SCRIPT_DIR/entitlements.plist"
+
+    # 1. Sign all dylibs and .so files first (deepest layer)
+    echo "    Signing dylibs..."
+    find "$APP_PATH/Contents" \( -name "*.dylib" -o -name "*.so" \) | while read -r f; do
+        codesign --force --options runtime \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$CODESIGN_IDENTITY" "$f"
+    done
+
+    # 2. Sign any non-dylib executables in Frameworks (Qt plugin binaries)
+    echo "    Signing framework executables..."
+    find "$APP_PATH/Contents/Frameworks" -type f ! -name "*.dylib" ! -name "*.so" | while read -r f; do
+        file "$f" | grep -q "Mach-O" && \
+            codesign --force --options runtime \
+                --entitlements "$ENTITLEMENTS" \
+                --sign "$CODESIGN_IDENTITY" "$f" || true
+    done
+
+    # 3. Sign executables in Contents/MacOS
+    echo "    Signing main executables..."
+    find "$APP_PATH/Contents/MacOS" -type f | while read -r f; do
+        codesign --force --options runtime \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$CODESIGN_IDENTITY" "$f"
+    done
+
+    # 4. Sign the app bundle itself (no --deep)
+    echo "    Signing app bundle..."
+    codesign --force --options runtime \
+        --entitlements "$ENTITLEMENTS" \
+        --sign "$CODESIGN_IDENTITY" \
+        "$APP_PATH"
+
+    # 5. Verify
+    codesign --verify --deep --strict "$APP_PATH" && echo "==> Signature verified OK"
 else
     echo "==> Ad-hoc signing (local use only)"
     codesign --deep --force --sign - "$APP_PATH"
@@ -101,8 +138,15 @@ if $BUILD_DMG; then
     rm -rf "$STAGING"
     echo "==> DMG: dist/$DMG_NAME"
 
-    # ── Notarize (only if credentials are set) ────────────────────────────────
-    if [[ -n "${NOTARIZE_APPLE_ID:-}" && -n "${NOTARIZE_PASSWORD:-}" && -n "${NOTARIZE_TEAM_ID:-}" ]]; then
+    # ── Notarize (only if keychain profile or legacy env vars are set) ─────────
+    if [[ -n "${NOTARIZE_KEYCHAIN_PROFILE:-}" ]]; then
+        echo "==> Submitting for notarization (keychain profile: $NOTARIZE_KEYCHAIN_PROFILE)…"
+        xcrun notarytool submit "dist/$DMG_NAME" \
+            --keychain-profile "$NOTARIZE_KEYCHAIN_PROFILE" \
+            --wait
+        xcrun stapler staple "dist/$DMG_NAME"
+        echo "==> Notarization complete."
+    elif [[ -n "${NOTARIZE_APPLE_ID:-}" && -n "${NOTARIZE_PASSWORD:-}" && -n "${NOTARIZE_TEAM_ID:-}" ]]; then
         echo "==> Submitting for notarization…"
         xcrun notarytool submit "dist/$DMG_NAME" \
             --apple-id  "$NOTARIZE_APPLE_ID" \

@@ -25,6 +25,7 @@ _PREFS_FILE = "prefs.json"
 # Defaults ─ returned when the file is absent or a key is missing.
 _DEFAULTS: dict[str, object] = {
     "dark_mode": False,
+    "check_for_updates": True,
 }
 
 
