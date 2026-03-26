@@ -327,10 +327,7 @@ class MainWindow(QMainWindow):
         v.addLayout(links)
         v.addSpacing(16)
 
-        _privacy_url = (
-            "https://github.com/sageframe-no-kaji/m4bmaker"
-            "#privacy--network-activity"
-        )
+        _privacy_url = "https://m4bookmaker.sageframe.net/help.html#privacy"
         privacy_lbl = QLabel(
             'Checks GitHub for updates on startup. '
             f'<a href="{_privacy_url}" style="color: #7a7a7a;">Privacy info</a>'
