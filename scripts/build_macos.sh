@@ -140,7 +140,9 @@ if $BUILD_DMG; then
     echo "==> Creating $DMG_NAME"
 
     STAGING="$(mktemp -d)"
-    cp -r "$APP_PATH" "$STAGING/"
+    # Use ditto (not cp -r) — cp -r follows symlinks, destroying .framework
+    # bundle structure and invalidating code signatures.
+    ditto "$APP_PATH" "$STAGING/$(basename "$APP_PATH")"
     ln -s /Applications "$STAGING/Applications"
 
     hdiutil create \
