@@ -90,16 +90,30 @@ if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
             --sign "$CODESIGN_IDENTITY" "$f"
     done
 
-    # 2. Sign any non-dylib executables in Frameworks (Qt plugin binaries)
-    echo "    Signing framework executables..."
-    find "$APP_PATH/Contents/Frameworks" -type f ! -name "*.dylib" ! -name "*.so" | while read -r f; do
+    # 2. Sign all .framework bundles inside-out (longest path = deepest = first).
+    # PyInstaller copies the full Qt .framework directories; Apple requires the
+    # bundle directory itself to be signed, not just the binary inside it.
+    echo "    Signing framework bundles..."
+    find "$APP_PATH/Contents" -name "*.framework" -type d | \
+        awk '{ print length($0), $0 }' | sort -rn | awk '{print $2}' | \
+        while read -r fw; do
+            codesign --force --options runtime \
+                --entitlements "$ENTITLEMENTS" \
+                --sign "$CODESIGN_IDENTITY" "$fw"
+        done
+
+    # 3. Sign any loose Mach-O executables in Frameworks that are not
+    # dylibs/so files and are not inside a .framework bundle.
+    echo "    Signing loose framework executables..."
+    find "$APP_PATH/Contents/Frameworks" -type f \
+        ! -name "*.dylib" ! -name "*.so" ! -path "*.framework/*" | while read -r f; do
         file "$f" | grep -q "Mach-O" && \
             codesign --force --options runtime \
                 --entitlements "$ENTITLEMENTS" \
                 --sign "$CODESIGN_IDENTITY" "$f" || true
     done
 
-    # 3. Sign executables in Contents/MacOS
+    # 4. Sign executables in Contents/MacOS
     echo "    Signing main executables..."
     find "$APP_PATH/Contents/MacOS" -type f | while read -r f; do
         codesign --force --options runtime \
@@ -107,14 +121,14 @@ if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
             --sign "$CODESIGN_IDENTITY" "$f"
     done
 
-    # 4. Sign the app bundle itself (no --deep)
+    # 5. Sign the app bundle itself (no --deep)
     echo "    Signing app bundle..."
     codesign --force --options runtime \
         --entitlements "$ENTITLEMENTS" \
         --sign "$CODESIGN_IDENTITY" \
         "$APP_PATH"
 
-    # 5. Verify
+    # 6. Verify
     codesign --verify --deep --strict "$APP_PATH" && echo "==> Signature verified OK"
 else
     echo "==> Ad-hoc signing (local use only)"
