@@ -1,5 +1,9 @@
 name: Build Windows
 
+# Produces a private Windows installer artifact (not a public GitHub Release).
+# Download from the Actions run → Artifacts → m4Bookmaker-windows-setup.zip.
+# Then upload the unzipped .exe to Payhip manually.
+
 on:
   push:
     tags:
@@ -11,6 +15,9 @@ jobs:
     name: Build Windows (.exe installer)
     runs-on: windows-latest
     steps:
+      # NOTE: Use @v4 for checkout and @v5 for setup-python.
+      # actions/checkout@v6 and actions/setup-python@v6 do not exist and will
+      # cause the job to fail with a cryptic "Could not find" error.
       - uses: actions/checkout@v4
 
       - name: Set up Python
@@ -24,11 +31,15 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install PySide6 static_ffmpeg
+          # pip install -e . is required even though requirements are already
+          # installed: without it, pytest cannot import the m4bmaker package
+          # itself (only its dependencies are on sys.path).
           pip install -e .
 
       - name: Run tests
         run: |
           set QT_QPA_PLATFORM=offscreen
+          rem GUI tests require a real display; skip them in CI
           python -m pytest tests/ --ignore=tests/gui -q --tb=short
         shell: cmd
 

@@ -47,6 +47,8 @@ class TestWriteConcatList:
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         line = dest.read_text().strip()
+        # Assert "file " not "file /" — on Windows paths start with "C:/",
+        # so checking for a leading slash would fail in CI.
         assert line.startswith("file ")
         assert f.resolve().as_posix() in line
         assert "'" not in line  # no single-quote wrapping
@@ -58,7 +60,9 @@ class TestWriteConcatList:
         write_concat_list([f], dest)
         content = dest.read_text()
         assert f.resolve().as_posix() in content
-        # Posix paths always use forward slashes; unquoted format, no wrapping quotes
+        # Assert "file " not "file /" — on Windows paths start with "C:/",
+        # so checking for a leading slash would fail in CI.
+        # as_posix() converts backslashes to forward slashes for both platforms.
         assert content.startswith("file ")
 
     def test_apostrophe_in_filename_escaped(self, tmp_path: Path) -> None:
