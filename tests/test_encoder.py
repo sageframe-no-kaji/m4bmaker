@@ -47,7 +47,8 @@ class TestWriteConcatList:
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         line = dest.read_text().strip()
-        assert line.startswith("file /")
+        assert line.startswith("file ")
+        assert f.resolve().as_posix() in line
         assert "'" not in line  # no single-quote wrapping
 
     def test_absolute_paths_used(self, tmp_path: Path) -> None:
@@ -58,7 +59,7 @@ class TestWriteConcatList:
         content = dest.read_text()
         assert f.resolve().as_posix() in content
         # Posix paths always use forward slashes; unquoted format, no wrapping quotes
-        assert content.startswith("file /")
+        assert content.startswith("file ")
 
     def test_apostrophe_in_filename_escaped(self, tmp_path: Path) -> None:
         f = tmp_path / "it's a track.mp3"
@@ -79,8 +80,8 @@ class TestWriteConcatList:
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         line = dest.read_text().strip()
-        # Unquoted format: starts with "file /", no wrapping quotes
-        assert line.startswith("file /")
+        # Unquoted format: starts with "file ", no wrapping quotes
+        assert line.startswith("file ")
         assert "\\'" in line  # apostrophe in directory component escaped
         # The filename itself must be unmodified (no apostrophe in it)
         assert "track01.mp3" in line
