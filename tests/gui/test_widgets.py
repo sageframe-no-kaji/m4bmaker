@@ -269,11 +269,11 @@ class TestChapterTablePopulate:
 
     def test_timestamp_mm_ss(self):
         self.t.populate([_make_chapter(1, 75.0, "T")])  # 1 min 15 sec
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15"  # type: ignore[union-attr]  # noqa: E501
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15.000"  # type: ignore[union-attr]  # noqa: E501
 
     def test_timestamp_h_mm_ss(self):
         self.t.populate([_make_chapter(1, 3661.0, "T")])  # 1h 1m 1s
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:01:01"  # type: ignore[union-attr]  # noqa: E501
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:01:01.000"  # type: ignore[union-attr]  # noqa: E501
 
     def test_title_column_editable(self):
         self.t.populate([_make_chapter(1, 0.0, "Hello")])
@@ -731,7 +731,7 @@ class TestChapterTableUndo:
             1
         )  # Qt.ItemDataRole.UserRole == 1 after Qt.UserRole alias
         self.t.set_chapter_time(0, 90_000)  # 1 min 30 sec
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:30"  # type: ignore[union-attr]  # noqa: E501
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:30.000"  # type: ignore[union-attr]  # noqa: E501
         self.t._undo_stack.undo()
         assert self.t.item(0, ChapterTable.COL_TIME).text() == old_text  # type: ignore[union-attr]  # noqa: E501
         assert (
@@ -743,3 +743,46 @@ class TestChapterTableUndo:
         self.t.set_chapter_time(-1, 5000)
         self.t.set_chapter_time(self.t.rowCount(), 5000)
         assert not self.t._undo_stack.canUndo()
+
+
+# ── _ms_to_display (Phase 3) ──────────────────────────────────────────────────────
+
+
+from m4bmaker.gui.widgets import _ms_to_display  # noqa: E402
+
+
+class TestMsToDisplay:
+    def test_zero(self):
+        assert _ms_to_display(0) == "0:00.000"
+
+    def test_whole_seconds(self):
+        assert _ms_to_display(5000) == "0:05.000"
+
+    def test_sub_second(self):
+        assert _ms_to_display(5450) == "0:05.450"
+
+    def test_minutes(self):
+        assert _ms_to_display(75_000) == "1:15.000"
+
+    def test_minutes_with_millis(self):
+        assert _ms_to_display(75_123) == "1:15.123"
+
+    def test_boundary_one_hour(self):
+        assert _ms_to_display(3_600_000) == "1:00:00.000"
+
+    def test_hours(self):
+        assert _ms_to_display(3_661_000) == "1:01:01.000"
+
+    def test_hours_with_millis(self):
+        assert _ms_to_display(3_661_500) == "1:01:01.500"
+
+    def test_large_minutes_no_hours(self):
+        assert _ms_to_display(3599_000) == "59:59.000"
+
+    def test_millis_zero_padded(self):
+        # 1 ms should format as .001 not .1
+        assert _ms_to_display(1) == "0:00.001"
+
+    def test_millis_ten_padded(self):
+        # 10 ms should format as .010
+        assert _ms_to_display(10) == "0:00.010"

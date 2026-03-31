@@ -403,6 +403,21 @@ class _TitleDelegate(QStyledItemDelegate):
             self._table._undo_stack.push(_TitlesCommand(self._table, before, after))
 
 
+# ── ChapterTable helpers ─────────────────────────────────────────────────────
+
+
+def _ms_to_display(ms: int) -> str:
+    """Format *ms* milliseconds as ``M:SS.mmm`` or ``H:MM:SS.mmm``."""
+    total_s = ms // 1000
+    millis = ms % 1000
+    h = total_s // 3600
+    m = (total_s % 3600) // 60
+    s = total_s % 60
+    if h:
+        return f"{h}:{m:02d}:{s:02d}.{millis:03d}"
+    return f"{m}:{s:02d}.{millis:03d}"
+
+
 # ── ChapterTable ──────────────────────────────────────────────────────────────
 
 
@@ -434,7 +449,7 @@ class ChapterTable(QTableWidget):
         hh.setSectionResizeMode(self.COL_TIME, QHeaderView.ResizeMode.Fixed)
         hh.setSectionResizeMode(self.COL_TITLE, QHeaderView.ResizeMode.Stretch)
         self.setColumnWidth(self.COL_NUM, 48)
-        self.setColumnWidth(self.COL_TIME, 76)
+        self.setColumnWidth(self.COL_TIME, 90)
 
         self.verticalHeader().setVisible(False)
         self.setAlternatingRowColors(True)
@@ -470,11 +485,7 @@ class ChapterTable(QTableWidget):
             self.setItem(row, self.COL_NUM, n)
 
             # Column 1 — start time (read-only)
-            t = ch.start_time
-            h = int(t // 3600)
-            m = int((t % 3600) // 60)
-            s = int(t % 60)
-            ts = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+            ts = _ms_to_display(int(ch.start_time * 1000))
             ti = QTableWidgetItem(ts)
             ti.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
             ti.setForeground(QColor(_INK_MUTED))
@@ -521,11 +532,7 @@ class ChapterTable(QTableWidget):
 
     def _do_set_time(self, row: int, ms: int) -> None:
         """Apply a time change without pushing to the undo stack."""
-        t = ms / 1000.0
-        h = int(t // 3600)
-        m = int((t % 3600) // 60)
-        s = int(t % 60)
-        ts = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        ts = _ms_to_display(ms)
         item = self.item(row, self.COL_TIME)
         if item:
             item.setText(ts)
