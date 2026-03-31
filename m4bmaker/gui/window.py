@@ -281,9 +281,18 @@ class MainWindow(QMainWindow):
         self._extra_windows.append(win)
 
     def _open_m4b_file(self) -> None:
-        """Open a .m4b file via dialog and load it in edit mode."""
+        """Open a .m4b file via dialog and load it in edit mode.
+
+        DontUseNativeDialog is required on macOS: the native NSOpenPanel filters
+        by UTI rather than extension, and .m4b has no registered UTI, so m4b
+        files are greyed-out and unselectable in the native picker.
+        """
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open M4B File", "", "M4B Audiobooks (*.m4b)"
+            self,
+            "Open M4B File",
+            "",
+            "M4B Audiobooks (*.m4b)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if path:
             self._folder_zone.set_path(Path(path))
