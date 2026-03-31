@@ -188,6 +188,11 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(lambda: self._folder_zone._browse())
         file_menu.addAction(open_action)
 
+        open_m4b_action = QAction("Open M4B File\u2026", self)
+        open_m4b_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        open_m4b_action.triggered.connect(self._open_m4b_file)
+        file_menu.addAction(open_m4b_action)
+
         file_menu.addSeparator()
 
         quit_action = QAction("Quit m4Bookmaker", self)
@@ -274,6 +279,14 @@ class MainWindow(QMainWindow):
         win = MainWindow()
         win.show()
         self._extra_windows.append(win)
+
+    def _open_m4b_file(self) -> None:
+        """Open a .m4b file via dialog and load it in edit mode."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open M4B File", "", "M4B Audiobooks (*.m4b)"
+        )
+        if path:
+            self._folder_zone.set_path(Path(path))
 
     def _show_about(self) -> None:
         dlg = QDialog(self)

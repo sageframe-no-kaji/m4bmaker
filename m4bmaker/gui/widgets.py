@@ -91,7 +91,7 @@ class FolderDropZone(QFrame):
 
         self._edit = QLineEdit()
         placeholder = (
-            "Drag a folder or .m4b file here, or click Browse…"
+            "Drag a folder or .m4b file here  \u00b7  Browse for folder  \u00b7  File \u25b8 Open M4B File\u2026"
             if self._accept_m4b
             else "Drag a folder here or click Browse…"
         )

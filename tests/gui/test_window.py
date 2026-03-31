@@ -1396,3 +1396,51 @@ class TestUpdateChapterButtons:
         w, _ = win
         w._update_chapter_buttons()
         assert w._ch_merge_btn.isHidden()
+
+
+# ── Open M4B File (Phase 1) ───────────────────────────────────────────────────
+
+
+class TestOpenM4bFile:
+    def test_open_m4b_dialog_calls_set_path(self, win, tmp_path):
+        """_open_m4b_file() forwards the chosen path to the folder zone."""
+        w, _ = win
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        received: list = []
+        w._folder_zone.folder_changed.connect(received.append)
+        with patch(
+            "m4bmaker.gui.window.QFileDialog.getOpenFileName",
+            return_value=(str(m4b), ""),
+        ):
+            w._open_m4b_file()
+        assert received == [m4b]
+
+    def test_open_m4b_dialog_cancelled_is_noop(self, win):
+        """Cancelled dialog must not change the folder zone."""
+        w, _ = win
+        received: list = []
+        w._folder_zone.folder_changed.connect(received.append)
+        with patch(
+            "m4bmaker.gui.window.QFileDialog.getOpenFileName",
+            return_value=("", ""),
+        ):
+            w._open_m4b_file()
+        assert received == []
+
+    def test_open_m4b_routes_to_edit_mode(self, win, tmp_path):
+        """Loading a .m4b via _open_m4b_file() switches app to edit mode."""
+        w, _ = win
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        with (
+            patch(
+                "m4bmaker.gui.window.QFileDialog.getOpenFileName",
+                return_value=(str(m4b), ""),
+            ),
+            patch("m4bmaker.gui.window.LoadM4bWorker") as MockW,
+        ):
+            MockW.return_value = MagicMock()
+            w._open_m4b_file()
+        assert w._mode == "edit"
+        assert w._mode_badge.text() == "Edit"
