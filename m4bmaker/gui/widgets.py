@@ -403,6 +403,38 @@ class _TitleDelegate(QStyledItemDelegate):
             self._table._undo_stack.push(_TitlesCommand(self._table, before, after))
 
 
+class _TimeDelegate(QStyledItemDelegate):
+    """Delegate for the Time column.
+
+    Parses ``[H:]M:SS[.mmm]`` input on commit.  Invalid input is silently
+    discarded and the cell reverts to its previous value without touching
+    the undo stack.  Valid input is applied through
+    :meth:`ChapterTable.set_chapter_time` so it participates in undo.
+    """
+
+    def __init__(self, table: "ChapterTable") -> None:
+        super().__init__(table)
+        self._table = table
+
+    def createEditor(self, parent, option, index):  # type: ignore[no-untyped-def]  # noqa: E501
+        editor = QLineEdit(parent)
+        editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return editor
+
+    def setEditorData(self, editor, index) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
+        editor.setText(index.data() or "")
+        editor.selectAll()
+
+    def setModelData(self, editor, model, index) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
+        ms = _parse_time_input(editor.text())
+        if ms is None:
+            return  # invalid input — leave the cell unchanged
+        self._table.set_chapter_time(index.row(), ms)
+
+    def updateEditorGeometry(self, editor, option, index) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
+        editor.setGeometry(option.rect)
+
+
 # ── ChapterTable helpers ─────────────────────────────────────────────────────
 
 
@@ -416,6 +448,31 @@ def _ms_to_display(ms: int) -> str:
     if h:
         return f"{h}:{m:02d}:{s:02d}.{millis:03d}"
     return f"{m}:{s:02d}.{millis:03d}"
+
+
+def _parse_time_input(text: str) -> "int | None":
+    """Parse ``[H:]M:SS[.mmm]`` text to milliseconds, or return *None* if invalid.
+
+    Accepts:
+      * ``M:SS``         e.g. ``1:30``
+      * ``M:SS.mmm``     e.g. ``1:30.500``
+      * ``H:MM:SS``      e.g. ``1:01:30``
+      * ``H:MM:SS.mmm``  e.g. ``1:01:30.500``
+
+    Seconds must be in [0, 59].  Milliseconds are 1–3 digits (right-padded).
+    """
+    text = text.strip()
+    m = re.fullmatch(r"(\d+):([0-5]\d):([0-5]\d)(?:\.(\d{1,3}))?", text)
+    if m:
+        h, mins, secs, frac = m.groups()
+        millis = int(frac.ljust(3, "0")) if frac else 0
+        return (int(h) * 3600 + int(mins) * 60 + int(secs)) * 1000 + millis
+    m = re.fullmatch(r"(\d+):([0-5]\d)(?:\.(\d{1,3}))?", text)
+    if m:
+        mins, secs, frac = m.groups()
+        millis = int(frac.ljust(3, "0")) if frac else 0
+        return (int(mins) * 60 + int(secs)) * 1000 + millis
+    return None
 
 
 # ── ChapterTable ──────────────────────────────────────────────────────────────
@@ -460,6 +517,7 @@ class ChapterTable(QTableWidget):
             | QAbstractItemView.EditTrigger.SelectedClicked
         )
         self.setItemDelegateForColumn(self.COL_TITLE, _TitleDelegate(self))
+        self.setItemDelegateForColumn(self.COL_TIME, _TimeDelegate(self))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
@@ -484,10 +542,14 @@ class ChapterTable(QTableWidget):
             n.setForeground(QColor(_INK_MUTED))
             self.setItem(row, self.COL_NUM, n)
 
-            # Column 1 — start time (read-only)
+            # Column 1 — start time (editable via _TimeDelegate)
             ts = _ms_to_display(int(ch.start_time * 1000))
             ti = QTableWidgetItem(ts)
-            ti.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+            ti.setFlags(
+                Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsEditable
+            )
             ti.setForeground(QColor(_INK_MUTED))
             ti.setData(Qt.ItemDataRole.UserRole, None)  # None = unmodified
             self.setItem(row, self.COL_TIME, ti)

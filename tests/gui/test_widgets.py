@@ -786,3 +786,145 @@ class TestMsToDisplay:
     def test_millis_ten_padded(self):
         # 10 ms should format as .010
         assert _ms_to_display(10) == "0:00.010"
+
+
+# ── _parse_time_input + _TimeDelegate (Phase 4) ───────────────────────────────
+
+
+from m4bmaker.gui.widgets import _parse_time_input  # noqa: E402
+
+
+class TestParseTimeInput:
+    def test_m_ss(self):
+        assert _parse_time_input("1:30") == 90_000
+
+    def test_m_ss_with_millis(self):
+        assert _parse_time_input("1:30.500") == 90_500
+
+    def test_m_ss_with_short_millis(self):
+        # 1-digit fraction → right-padded: .5 == .500
+        assert _parse_time_input("1:30.5") == 90_500
+
+    def test_m_ss_with_two_digit_millis(self):
+        # 2-digit fraction → right-padded: .45 == .450
+        assert _parse_time_input("1:30.45") == 90_450
+
+    def test_h_mm_ss(self):
+        assert _parse_time_input("1:01:00") == 3_660_000
+
+    def test_h_mm_ss_with_millis(self):
+        assert _parse_time_input("1:01:00.250") == 3_660_250
+
+    def test_zero(self):
+        assert _parse_time_input("0:00") == 0
+
+    def test_zero_with_millis(self):
+        assert _parse_time_input("0:00.000") == 0
+
+    def test_leading_whitespace_stripped(self):
+        assert _parse_time_input("  1:30  ") == 90_000
+
+    def test_invalid_empty(self):
+        assert _parse_time_input("") is None
+
+    def test_invalid_seconds_out_of_range(self):
+        # seconds > 59 must reject
+        assert _parse_time_input("1:60") is None
+
+    def test_invalid_no_colon(self):
+        assert _parse_time_input("130") is None
+
+    def test_invalid_letters(self):
+        assert _parse_time_input("one:30") is None
+
+    def test_invalid_negative(self):
+        assert _parse_time_input("-1:30") is None
+
+    def test_invalid_trailing_garbage(self):
+        assert _parse_time_input("1:30abc") is None
+
+
+class TestTimeDelegate:
+    """Integration: _TimeDelegate wired into ChapterTable.COL_TIME."""
+
+    @pytest.fixture(autouse=True)
+    def table(self, qapp):
+        from m4bmaker.gui.widgets import ChapterTable
+        self.t = ChapterTable()
+        self.t.populate([_make_chapter(1, 75.0, "Title")])  # 1:15.000
+        yield
+        self.t.close()
+
+    def test_time_cell_is_editable(self):
+        """COL_TIME items must have ItemIsEditable flag."""
+        item = self.t.item(0, ChapterTable.COL_TIME)
+        assert item is not None
+        assert bool(item.flags() & Qt.ItemFlag.ItemIsEditable)
+
+    def test_valid_input_updates_display(self, qapp):
+        """Valid typed time updates the cell display and UserRole data."""
+        from m4bmaker.gui.widgets import _TimeDelegate
+        from unittest.mock import MagicMock
+
+        delegate = _TimeDelegate(self.t)
+        editor = MagicMock()
+        editor.text.return_value = "2:15.500"
+        model = MagicMock()
+        index = MagicMock()
+        index.row.return_value = 0
+
+        delegate.setModelData(editor, model, index)
+
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "2:15.500"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_TIME).data(Qt.ItemDataRole.UserRole) == 135_500  # type: ignore[union-attr]
+
+    def test_invalid_input_leaves_cell_unchanged(self, qapp):
+        """Invalid typed time must not change the cell at all."""
+        from m4bmaker.gui.widgets import _TimeDelegate
+        from unittest.mock import MagicMock
+
+        original_text = self.t.item(0, ChapterTable.COL_TIME).text()  # "1:15.000"
+        delegate = _TimeDelegate(self.t)
+        editor = MagicMock()
+        editor.text.return_value = "not_a_time"
+        model = MagicMock()
+        index = MagicMock()
+        index.row.return_value = 0
+
+        delegate.setModelData(editor, model, index)
+
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == original_text  # type: ignore[union-attr]
+
+    def test_valid_input_is_undoable(self, qapp):
+        """Changes made via the delegate participate in undo."""
+        from m4bmaker.gui.widgets import _TimeDelegate
+        from unittest.mock import MagicMock
+
+        delegate = _TimeDelegate(self.t)
+        editor = MagicMock()
+        editor.text.return_value = "3:00.000"
+        model = MagicMock()
+        index = MagicMock()
+        index.row.return_value = 0
+
+        delegate.setModelData(editor, model, index)
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "3:00.000"  # type: ignore[union-attr]
+
+        self.t._undo_stack.undo()
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15.000"  # type: ignore[union-attr]
+
+    def test_zero_ms_is_valid(self, qapp):
+        """Timestamp 0:00 is valid and must not be rejected."""
+        from m4bmaker.gui.widgets import _TimeDelegate
+        from unittest.mock import MagicMock
+
+        delegate = _TimeDelegate(self.t)
+        editor = MagicMock()
+        editor.text.return_value = "0:00"
+        model = MagicMock()
+        index = MagicMock()
+        index.row.return_value = 0
+
+        delegate.setModelData(editor, model, index)
+
+        assert self.t.item(0, ChapterTable.COL_TIME).data(Qt.ItemDataRole.UserRole) == 0  # type: ignore[union-attr]
