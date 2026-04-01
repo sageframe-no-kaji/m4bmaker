@@ -283,19 +283,23 @@ class MainWindow(QMainWindow):
     def _open_m4b_file(self) -> None:
         """Open a .m4b file via dialog and load it in edit mode.
 
-        DontUseNativeDialog is required on macOS: the native NSOpenPanel filters
-        by UTI rather than extension, and .m4b has no registered UTI, so m4b
+        We use an instance-based QFileDialog rather than the static
+        getOpenFileName() because on macOS the static helper ignores
+        DontUseNativeDialog and falls back to NSOpenPanel, which filters
+        by UTI rather than extension. .m4b has no registered UTI, so
         files are greyed-out and unselectable in the native picker.
+        The instance + setOption approach forces the cross-platform Qt picker.
         """
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open M4B File",
-            "",
-            "M4B Audiobooks (*.m4b)",
-            options=QFileDialog.Option.DontUseNativeDialog,
-        )
-        if path:
-            self._folder_zone.set_path(Path(path))
+        dlg = QFileDialog(self)
+        dlg.setWindowTitle("Open M4B File")
+        dlg.setNameFilter("M4B Audiobooks (*.m4b)")
+        dlg.setFileMode(QFileDialog.FileMode.ExistingFile)
+        dlg.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        if not dlg.exec():
+            return
+        paths = dlg.selectedFiles()
+        if paths:
+            self._folder_zone.set_path(Path(paths[0]))
 
     def _show_about(self) -> None:
         dlg = QDialog(self)
