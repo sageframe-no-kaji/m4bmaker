@@ -11,6 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.2] - 2026-04-02
+
+### Added
+
+- **Edit mode** — `File > Open M4B File…` (⌘O) loads an existing `.m4b` into a new
+  Edit mode. The app switches to an **Edit** mode badge and displays the chapter
+  list for review and modification; cover art, metadata, and duration are pre-filled.
+- **Add Chapter button** — In Edit mode a new "Add Chapter" button inserts a chapter
+  at the current playhead position, automatically renaming subsequent chapters.
+- **Millisecond precision** — Chapter timestamps in the table are now displayed and
+  editable to millisecond precision (`HH:MM:SS.mmm`), preserving sub-second accuracy
+  when editing and saving.
+- **Direct timestamp editing** — Clicking any timestamp cell in the chapter table
+  opens an in-place editor. Edited values are validated; invalid entries revert.
+- **Native macOS file picker** — "Edit…" button uses `osascript choose file`
+  (real NSOpenPanel) so all files are visible and selectable; extension is validated
+  after selection.
+- **Build… / Edit… button labels** — "Browse" renamed to "Build…" and "Open M4B"
+  to "Edit…" with tooltips that match the mode badge names per macOS HIG convention.
+
+### Fixed
+
+- **macOS scanning hang** — `LoadM4bWorker` previously called `ffmpeg` via
+  `subprocess` from a QThread. On macOS, Qt multimedia holds CoreAudio locks on
+  the main thread; the forked child inherits them, causing a permanent deadlock.
+  Cover art is now extracted via mutagen only (`MP4.covr`, then ID3 `APIC`
+  fallback) — pure Python, no subprocess, fork-safe.
+
+---
+
 ## [1.0.1] - 2026-03-26
 
 ### Added
