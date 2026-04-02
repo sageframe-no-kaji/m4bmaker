@@ -142,7 +142,62 @@ class TestFolderDropZone:
         assert not self.w._clear_btn.isVisible()
 
 
+class TestFolderDropZoneM4b:
+    """Tests for the accept_m4b=True variant — Edit… button / _browse_m4b."""
+
+    @pytest.fixture(autouse=True)
+    def widget(self, qapp):
+        self.w = FolderDropZone(accept_m4b=True)
+        yield
+        self.w.close()
+
+    def test_browse_m4b_sets_path(self, tmp_path: Path):
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
+        with patch(macos_patch, return_value=str(m4b)):
+            self.w._browse_m4b()
+        assert self.w.path() == m4b
+
+    def test_browse_m4b_cancelled_is_noop(self):
+        macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
+        with patch(macos_patch, return_value=""):
+            self.w._browse_m4b()
+        assert self.w.path() is None
+
+    def test_browse_m4b_wrong_extension_shows_warning(self, tmp_path: Path):
+        mp3 = tmp_path / "audio.mp3"
+        mp3.write_bytes(b"\x00")
+        received: list = []
+        self.w.folder_changed.connect(received.append)
+        macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
+        with (
+            patch(macos_patch, return_value=str(mp3)),
+            patch("m4bmaker.gui.widgets.QMessageBox.warning") as mock_warn,
+        ):
+            self.w._browse_m4b()
+        mock_warn.assert_called_once()
+        assert received == []
+
+    def test_drag_enter_m4b_accepted(self, tmp_path: Path):
+        f = tmp_path / "book.m4b"
+        f.write_bytes(b"\x00")
+        mime = _mime_with_file(f)
+        event = _make_drag_enter_event(mime)
+        self.w.dragEnterEvent(event)
+        event.acceptProposedAction.assert_called_once()
+
+    def test_drop_m4b_sets_path(self, tmp_path: Path):
+        f = tmp_path / "book.m4b"
+        f.write_bytes(b"\x00")
+        mime = _mime_with_file(f)
+        event = _make_drop_event(mime)
+        self.w.dropEvent(event)
+        assert self.w.path() == f
+
+
 class TestCoverWidget:
+
     @pytest.fixture(autouse=True)
     def widget(self, qapp):
         self.w = CoverWidget()

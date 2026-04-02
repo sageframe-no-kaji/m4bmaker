@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QPushButton,
     QStyledItemDelegate,
     QTableWidget,
@@ -91,15 +92,16 @@ class FolderDropZone(QFrame):
 
         self._edit = QLineEdit()
         placeholder = (
-            "Drag a folder or .m4b file here  \u00b7  Browse for folder  \u00b7  File \u25b8 Open M4B File\u2026"
+            "Drag a folder or .m4b file here"
+            "  \u00b7  Build\u2026 for new  \u00b7  Edit\u2026 for existing"
             if self._accept_m4b
-            else "Drag a folder here or click Browse…"
+            else "Drag a folder here or click Build\u2026"
         )
         self._edit.setPlaceholderText(placeholder)
         self._edit.setReadOnly(True)
         layout.addWidget(self._edit)
 
-        self._clear_btn = QPushButton("✕")
+        self._clear_btn = QPushButton("\u2715")
         self._clear_btn.setFixedSize(26, 26)
         self._clear_btn.setObjectName("clearBtn")
         self._clear_btn.setToolTip("Clear")
@@ -107,11 +109,20 @@ class FolderDropZone(QFrame):
         self._clear_btn.clicked.connect(self._on_clear_clicked)
         layout.addWidget(self._clear_btn)
 
-        btn = QPushButton("Browse")
+        btn = QPushButton("Build\u2026")
         btn.setFixedWidth(80)
         btn.setFixedHeight(34)
+        btn.setToolTip("Choose a folder of audio files to build a new M4B")
         btn.clicked.connect(self._browse)
         layout.addWidget(btn)
+
+        if self._accept_m4b:
+            m4b_btn = QPushButton("Edit\u2026")
+            m4b_btn.setFixedWidth(80)
+            m4b_btn.setFixedHeight(34)
+            m4b_btn.setToolTip("Choose an existing .m4b file to edit its chapters")
+            m4b_btn.clicked.connect(self._browse_m4b)
+            layout.addWidget(m4b_btn)
 
     # ── public interface ──────────────────────────────────────────────────────
 
@@ -127,9 +138,61 @@ class FolderDropZone(QFrame):
     # ── actions ───────────────────────────────────────────────────────────────
 
     def _browse(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select Audiobook Folder")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Audiobook Folder to Build"
+        )
         if folder:
             self.set_path(Path(folder))
+
+    def _browse_m4b(self) -> None:
+        """Open a native file picker for .m4b files.
+
+        On macOS: uses osascript (AppleScript ``choose file``) to open the
+        real NSOpenPanel with no type filter — avoids the UTI grey-out issue.
+        On other platforms: falls back to QFileDialog with DontUseNativeDialog.
+        """
+        import sys as _sys
+
+        if _sys.platform == "darwin":
+            path = self._browse_m4b_macos()
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Edit M4B Chapters",
+                "",
+                "M4B Audiobooks (*.m4b);;All Files (*)",
+                "",
+                QFileDialog.Option.DontUseNativeDialog,
+            )
+
+        if path and path.lower().endswith(".m4b"):
+            self.set_path(Path(path))
+        elif path:
+            QMessageBox.warning(
+                self,
+                "Not an M4B",
+                f"'{Path(path).name}' is not an .m4b file.",
+            )
+
+    @staticmethod
+    def _browse_m4b_macos() -> str:
+        """Invoke AppleScript ``choose file`` — returns POSIX path or ''."""
+        import subprocess
+        script = (
+            'set theFile to choose file with prompt "Select an M4B audiobook"\n'
+            "return POSIX path of theFile"
+        )
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            return result.stdout.strip()
+        except Exception:  # noqa: BLE001
+            # osascript unavailable or user cancelled (exit 1) — return empty
+            return ""
 
     def _on_clear_clicked(self) -> None:
         self._edit.setText("")

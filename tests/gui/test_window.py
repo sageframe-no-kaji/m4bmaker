@@ -45,7 +45,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QFileDialog  # noqa: F401, E402
+from PySide6.QtWidgets import QApplication  # noqa: F401, E402
 
 from m4bmaker.gui.window import MainWindow  # noqa: E402
 from m4bmaker.gui.widgets import ChapterTable  # noqa: E402
@@ -1409,13 +1409,11 @@ class TestOpenM4bFile:
         m4b.write_bytes(b"\x00")
         received: list = []
         w._folder_zone.folder_changed.connect(received.append)
-        with patch("m4bmaker.gui.window.QFileDialog") as MockDlg:
-            inst = MagicMock()
-            inst.exec.return_value = True
-            inst.selectedFiles.return_value = [str(m4b)]
-            MockDlg.return_value = inst
-            MockDlg.FileMode = QFileDialog.FileMode
-            MockDlg.Option = QFileDialog.Option
+
+        def _fake_browse():
+            w._folder_zone.set_path(m4b)
+
+        with patch.object(w._folder_zone, "_browse_m4b", _fake_browse):
             w._open_m4b_file()
         assert received == [m4b]
 
@@ -1424,12 +1422,7 @@ class TestOpenM4bFile:
         w, _ = win
         received: list = []
         w._folder_zone.folder_changed.connect(received.append)
-        with patch("m4bmaker.gui.window.QFileDialog") as MockDlg:
-            inst = MagicMock()
-            inst.exec.return_value = False
-            MockDlg.return_value = inst
-            MockDlg.FileMode = QFileDialog.FileMode
-            MockDlg.Option = QFileDialog.Option
+        with patch.object(w._folder_zone, "_browse_m4b", lambda: None):
             w._open_m4b_file()
         assert received == []
 
@@ -1438,16 +1431,14 @@ class TestOpenM4bFile:
         w, _ = win
         m4b = tmp_path / "book.m4b"
         m4b.write_bytes(b"\x00")
+
+        def _fake_browse():
+            w._folder_zone.set_path(m4b)
+
         with (
-            patch("m4bmaker.gui.window.QFileDialog") as MockDlg,
+            patch.object(w._folder_zone, "_browse_m4b", _fake_browse),
             patch("m4bmaker.gui.window.LoadM4bWorker") as MockW,
         ):
-            inst = MagicMock()
-            inst.exec.return_value = True
-            inst.selectedFiles.return_value = [str(m4b)]
-            MockDlg.return_value = inst
-            MockDlg.FileMode = QFileDialog.FileMode
-            MockDlg.Option = QFileDialog.Option
             MockW.return_value = MagicMock()
             w._open_m4b_file()
         assert w._mode == "edit"
