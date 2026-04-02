@@ -142,7 +142,62 @@ class TestFolderDropZone:
         assert not self.w._clear_btn.isVisible()
 
 
+class TestFolderDropZoneM4b:
+    """Tests for the accept_m4b=True variant — Edit… button / _browse_m4b."""
+
+    @pytest.fixture(autouse=True)
+    def widget(self, qapp):
+        self.w = FolderDropZone(accept_m4b=True)
+        yield
+        self.w.close()
+
+    def test_browse_m4b_sets_path(self, tmp_path: Path):
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
+        with patch(macos_patch, return_value=str(m4b)):
+            self.w._browse_m4b()
+        assert self.w.path() == m4b
+
+    def test_browse_m4b_cancelled_is_noop(self):
+        macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
+        with patch(macos_patch, return_value=""):
+            self.w._browse_m4b()
+        assert self.w.path() is None
+
+    def test_browse_m4b_wrong_extension_shows_warning(self, tmp_path: Path):
+        mp3 = tmp_path / "audio.mp3"
+        mp3.write_bytes(b"\x00")
+        received: list = []
+        self.w.folder_changed.connect(received.append)
+        macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
+        with (
+            patch(macos_patch, return_value=str(mp3)),
+            patch("m4bmaker.gui.widgets.QMessageBox.warning") as mock_warn,
+        ):
+            self.w._browse_m4b()
+        mock_warn.assert_called_once()
+        assert received == []
+
+    def test_drag_enter_m4b_accepted(self, tmp_path: Path):
+        f = tmp_path / "book.m4b"
+        f.write_bytes(b"\x00")
+        mime = _mime_with_file(f)
+        event = _make_drag_enter_event(mime)
+        self.w.dragEnterEvent(event)
+        event.acceptProposedAction.assert_called_once()
+
+    def test_drop_m4b_sets_path(self, tmp_path: Path):
+        f = tmp_path / "book.m4b"
+        f.write_bytes(b"\x00")
+        mime = _mime_with_file(f)
+        event = _make_drop_event(mime)
+        self.w.dropEvent(event)
+        assert self.w.path() == f
+
+
 class TestCoverWidget:
+
     @pytest.fixture(autouse=True)
     def widget(self, qapp):
         self.w = CoverWidget()
@@ -269,11 +324,11 @@ class TestChapterTablePopulate:
 
     def test_timestamp_mm_ss(self):
         self.t.populate([_make_chapter(1, 75.0, "T")])  # 1 min 15 sec
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15"  # type: ignore[union-attr]  # noqa: E501
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15.000"  # type: ignore[union-attr]  # noqa: E501
 
     def test_timestamp_h_mm_ss(self):
         self.t.populate([_make_chapter(1, 3661.0, "T")])  # 1h 1m 1s
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:01:01"  # type: ignore[union-attr]  # noqa: E501
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:01:01.000"  # type: ignore[union-attr]  # noqa: E501
 
     def test_title_column_editable(self):
         self.t.populate([_make_chapter(1, 0.0, "Hello")])
@@ -731,7 +786,7 @@ class TestChapterTableUndo:
             1
         )  # Qt.ItemDataRole.UserRole == 1 after Qt.UserRole alias
         self.t.set_chapter_time(0, 90_000)  # 1 min 30 sec
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:30"  # type: ignore[union-attr]  # noqa: E501
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:30.000"  # type: ignore[union-attr]  # noqa: E501
         self.t._undo_stack.undo()
         assert self.t.item(0, ChapterTable.COL_TIME).text() == old_text  # type: ignore[union-attr]  # noqa: E501
         assert (
@@ -743,3 +798,188 @@ class TestChapterTableUndo:
         self.t.set_chapter_time(-1, 5000)
         self.t.set_chapter_time(self.t.rowCount(), 5000)
         assert not self.t._undo_stack.canUndo()
+
+
+# ── _ms_to_display (Phase 3) ──────────────────────────────────────────────────────
+
+
+from m4bmaker.gui.widgets import _ms_to_display  # noqa: E402
+
+
+class TestMsToDisplay:
+    def test_zero(self):
+        assert _ms_to_display(0) == "0:00.000"
+
+    def test_whole_seconds(self):
+        assert _ms_to_display(5000) == "0:05.000"
+
+    def test_sub_second(self):
+        assert _ms_to_display(5450) == "0:05.450"
+
+    def test_minutes(self):
+        assert _ms_to_display(75_000) == "1:15.000"
+
+    def test_minutes_with_millis(self):
+        assert _ms_to_display(75_123) == "1:15.123"
+
+    def test_boundary_one_hour(self):
+        assert _ms_to_display(3_600_000) == "1:00:00.000"
+
+    def test_hours(self):
+        assert _ms_to_display(3_661_000) == "1:01:01.000"
+
+    def test_hours_with_millis(self):
+        assert _ms_to_display(3_661_500) == "1:01:01.500"
+
+    def test_large_minutes_no_hours(self):
+        assert _ms_to_display(3599_000) == "59:59.000"
+
+    def test_millis_zero_padded(self):
+        # 1 ms should format as .001 not .1
+        assert _ms_to_display(1) == "0:00.001"
+
+    def test_millis_ten_padded(self):
+        # 10 ms should format as .010
+        assert _ms_to_display(10) == "0:00.010"
+
+
+# ── _parse_time_input + _TimeDelegate (Phase 4) ───────────────────────────────
+
+
+from m4bmaker.gui.widgets import _parse_time_input  # noqa: E402
+
+
+class TestParseTimeInput:
+    def test_m_ss(self):
+        assert _parse_time_input("1:30") == 90_000
+
+    def test_m_ss_with_millis(self):
+        assert _parse_time_input("1:30.500") == 90_500
+
+    def test_m_ss_with_short_millis(self):
+        # 1-digit fraction → right-padded: .5 == .500
+        assert _parse_time_input("1:30.5") == 90_500
+
+    def test_m_ss_with_two_digit_millis(self):
+        # 2-digit fraction → right-padded: .45 == .450
+        assert _parse_time_input("1:30.45") == 90_450
+
+    def test_h_mm_ss(self):
+        assert _parse_time_input("1:01:00") == 3_660_000
+
+    def test_h_mm_ss_with_millis(self):
+        assert _parse_time_input("1:01:00.250") == 3_660_250
+
+    def test_zero(self):
+        assert _parse_time_input("0:00") == 0
+
+    def test_zero_with_millis(self):
+        assert _parse_time_input("0:00.000") == 0
+
+    def test_leading_whitespace_stripped(self):
+        assert _parse_time_input("  1:30  ") == 90_000
+
+    def test_invalid_empty(self):
+        assert _parse_time_input("") is None
+
+    def test_invalid_seconds_out_of_range(self):
+        # seconds > 59 must reject
+        assert _parse_time_input("1:60") is None
+
+    def test_invalid_no_colon(self):
+        assert _parse_time_input("130") is None
+
+    def test_invalid_letters(self):
+        assert _parse_time_input("one:30") is None
+
+    def test_invalid_negative(self):
+        assert _parse_time_input("-1:30") is None
+
+    def test_invalid_trailing_garbage(self):
+        assert _parse_time_input("1:30abc") is None
+
+
+class TestTimeDelegate:
+    """Integration: _TimeDelegate wired into ChapterTable.COL_TIME."""
+
+    @pytest.fixture(autouse=True)
+    def table(self, qapp):
+        from m4bmaker.gui.widgets import ChapterTable
+        self.t = ChapterTable()
+        self.t.populate([_make_chapter(1, 75.0, "Title")])  # 1:15.000
+        yield
+        self.t.close()
+
+    def test_time_cell_is_editable(self):
+        """COL_TIME items must have ItemIsEditable flag."""
+        item = self.t.item(0, ChapterTable.COL_TIME)
+        assert item is not None
+        assert bool(item.flags() & Qt.ItemFlag.ItemIsEditable)
+
+    def test_valid_input_updates_display(self, qapp):
+        """Valid typed time updates the cell display and UserRole data."""
+        from m4bmaker.gui.widgets import _TimeDelegate
+        from unittest.mock import MagicMock
+
+        delegate = _TimeDelegate(self.t)
+        editor = MagicMock()
+        editor.text.return_value = "2:15.500"
+        model = MagicMock()
+        index = MagicMock()
+        index.row.return_value = 0
+
+        delegate.setModelData(editor, model, index)
+
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "2:15.500"  # type: ignore[union-attr]
+        assert self.t.item(0, ChapterTable.COL_TIME).data(Qt.ItemDataRole.UserRole) == 135_500  # type: ignore[union-attr]
+
+    def test_invalid_input_leaves_cell_unchanged(self, qapp):
+        """Invalid typed time must not change the cell at all."""
+        from m4bmaker.gui.widgets import _TimeDelegate
+        from unittest.mock import MagicMock
+
+        original_text = self.t.item(0, ChapterTable.COL_TIME).text()  # "1:15.000"
+        delegate = _TimeDelegate(self.t)
+        editor = MagicMock()
+        editor.text.return_value = "not_a_time"
+        model = MagicMock()
+        index = MagicMock()
+        index.row.return_value = 0
+
+        delegate.setModelData(editor, model, index)
+
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == original_text  # type: ignore[union-attr]
+
+    def test_valid_input_is_undoable(self, qapp):
+        """Changes made via the delegate participate in undo."""
+        from m4bmaker.gui.widgets import _TimeDelegate
+        from unittest.mock import MagicMock
+
+        delegate = _TimeDelegate(self.t)
+        editor = MagicMock()
+        editor.text.return_value = "3:00.000"
+        model = MagicMock()
+        index = MagicMock()
+        index.row.return_value = 0
+
+        delegate.setModelData(editor, model, index)
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "3:00.000"  # type: ignore[union-attr]
+
+        self.t._undo_stack.undo()
+        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15.000"  # type: ignore[union-attr]
+
+    def test_zero_ms_is_valid(self, qapp):
+        """Timestamp 0:00 is valid and must not be rejected."""
+        from m4bmaker.gui.widgets import _TimeDelegate
+        from unittest.mock import MagicMock
+
+        delegate = _TimeDelegate(self.t)
+        editor = MagicMock()
+        editor.text.return_value = "0:00"
+        model = MagicMock()
+        index = MagicMock()
+        index.row.return_value = 0
+
+        delegate.setModelData(editor, model, index)
+
+        assert self.t.item(0, ChapterTable.COL_TIME).data(Qt.ItemDataRole.UserRole) == 0  # type: ignore[union-attr]

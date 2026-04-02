@@ -188,6 +188,11 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(lambda: self._folder_zone._browse())
         file_menu.addAction(open_action)
 
+        open_m4b_action = QAction("Open M4B File\u2026", self)
+        open_m4b_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        open_m4b_action.triggered.connect(self._open_m4b_file)
+        file_menu.addAction(open_m4b_action)
+
         file_menu.addSeparator()
 
         quit_action = QAction("Quit m4Bookmaker", self)
@@ -274,6 +279,14 @@ class MainWindow(QMainWindow):
         win = MainWindow()
         win.show()
         self._extra_windows.append(win)
+
+    def _open_m4b_file(self) -> None:
+        """Open a .m4b file via dialog and load it in edit mode.
+
+        Delegates to FolderDropZone._browse_m4b() so the same picker logic
+        (osascript on macOS, Qt DontUseNativeDialog elsewhere) is used.
+        """
+        self._folder_zone._browse_m4b()
 
     def _show_about(self) -> None:
         dlg = QDialog(self)
@@ -665,6 +678,15 @@ class MainWindow(QMainWindow):
         self._insert_time_btn.setEnabled(False)
         self._insert_time_btn.clicked.connect(self._on_insert_time)
         ch_tools_row.addWidget(self._insert_time_btn)
+        self._ch_add_btn = QPushButton("Add Chapter")
+        self._ch_add_btn.setToolTip(
+            "Add a new chapter marker at the current playback position\n"
+            "(edit mode only — scrub the player, then click)"
+        )
+        self._ch_add_btn.setEnabled(False)
+        self._ch_add_btn.setVisible(False)
+        self._ch_add_btn.clicked.connect(self._on_add_chapter)
+        ch_tools_row.addWidget(self._ch_add_btn)
         self._ch_merge_btn = QPushButton("Merge")
         self._ch_merge_btn.setToolTip(
             "Merge selected consecutive rows into one chapter —\n"
@@ -1080,10 +1102,12 @@ class MainWindow(QMainWindow):
         n = self._chapter_table.rowCount()
         if self._book is None or row < 0 or row >= len(self._book.chapters):
             self._insert_time_btn.setEnabled(False)
+            self._ch_add_btn.setEnabled(False)
             self._ch_prev_btn.setEnabled(False)
             self._ch_next_btn.setEnabled(False)
             return
         self._insert_time_btn.setEnabled(True)
+        self._ch_add_btn.setEnabled(self._mode == "edit")
         self._ch_prev_btn.setEnabled(row > 0)
         self._ch_next_btn.setEnabled(row < n - 1)
         ch = self._book.chapters[row]
@@ -1122,6 +1146,59 @@ class MainWindow(QMainWindow):
             # cumulative offset of this file in the final audiobook
             ms += int(self._book.chapters[row].start_time * 1000)
         self._chapter_table.set_chapter_time(row, ms)
+
+    def _on_add_chapter(self) -> None:
+        """Split the selected chapter at the current playback position (edit mode only)."""
+        if self._book is None or self._mode != "edit":
+            return
+        row = self._chapter_table.currentRow()
+        if row < 0 or row >= len(self._book.chapters):
+            return
+
+        # Commit any pending title and time edits before mutating the structure.
+        self._sync_titles_from_table()
+        self._sync_times_from_table()
+
+        pos_ms = self._player.current_position_ms
+        pos_s = pos_ms / 1000.0
+
+        chapter_start = self._book.chapters[row].start_time
+        chapter_dur = (
+            self._chapter_durations[row]
+            if row < len(self._chapter_durations)
+            else 0.0
+        )
+        chapter_end = chapter_start + chapter_dur
+
+        # Split point must sit strictly inside this chapter.
+        if pos_s <= chapter_start or (chapter_dur > 0.0 and pos_s >= chapter_end):
+            return
+
+        dur_before = pos_s - chapter_start
+        dur_after = chapter_dur - dur_before
+
+        if dur_after <= 0.0:
+            return
+
+        # Update the duration of the chapter being split.
+        self._chapter_durations[row] = dur_before
+        self._chapter_durations.insert(row + 1, dur_after)
+
+        # New chapter inherits source file; title uses the post-split 1-based index.
+        new_ch = Chapter(
+            index=0,
+            start_time=0.0,
+            title=f"Chapter {row + 2}",
+            source_file=self._book.chapters[row].source_file,
+        )
+        self._book.chapters.insert(row + 1, new_ch)
+
+        self._reindex_chapters()
+        self._chapter_table.populate(self._book.chapters)
+        self._chapter_table.setCurrentCell(row + 1, ChapterTable.COL_TITLE)
+        self._set_status(
+            f"{len(self._book.files)} file(s) \u00b7 {len(self._book.chapters)} chapter(s)."
+        )
 
     def _on_chapter_prev(self) -> None:
         """Select the previous chapter row and load it in the player."""
@@ -1168,6 +1245,20 @@ class MainWindow(QMainWindow):
             if i < len(self._book.chapters):
                 self._book.chapters[i].title = title
 
+    def _sync_times_from_table(self) -> None:
+        """Apply time-column overrides (Insert Time / direct edits) to _book.chapters.
+
+        Recomputes _chapter_durations afterwards so structural operations
+        (add, remove, reorder) see up-to-date durations.  Called before any
+        mutation that reads start_time or duration data.
+        """
+        if self._book is None:
+            return
+        for i, ms in enumerate(self._chapter_table.times_ms()):
+            if ms is not None and i < len(self._book.chapters):
+                self._book.chapters[i].start_time = ms / 1000.0
+        self._chapter_durations = self._derive_durations(self._book)
+
     def _update_chapter_buttons(self) -> None:
         """Show/enable chapter toolbar buttons based on mode, merge state, and selection."""
         if not hasattr(self, "_ch_up_btn"):
@@ -1183,6 +1274,7 @@ class MainWindow(QMainWindow):
         self._ch_down_btn.setVisible(show_reorder)
         self._ch_remove_btn.setVisible(show_reorder)
         self._ch_merge_btn.setVisible(has_book)
+        self._ch_add_btn.setVisible(in_edit)
         if not has_book:
             self._ch_merge_btn.setEnabled(False)
             return

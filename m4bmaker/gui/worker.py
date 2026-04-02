@@ -131,10 +131,11 @@ class LoadM4bWorker(QThread):
                 narrator=raw_meta.get("narrator", ""),
                 genre=raw_meta.get("genre", ""),
             )
-            from m4bmaker.cover import extract_cover_from_audio
-
-            ffmpeg = find_ffmpeg()
-            cover_path = extract_cover_from_audio(self._path, ffmpeg)
+            # Cover extraction via mutagen only — no subprocess.
+            # Calling ffmpeg (subprocess.run/fork) from a QThread deadlocks on macOS
+            # because Qt multimedia holds CoreAudio locks on the main thread that the
+            # forked child inherits in a permanently-locked state.
+            cover_path = self._extract_cover_mutagen(self._path)
             book = Book(
                 files=[self._path],
                 chapters=chapters,
@@ -147,6 +148,46 @@ class LoadM4bWorker(QThread):
             self.error.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             self.error.emit(str(exc))
+
+    @staticmethod
+    def _extract_cover_mutagen(path: Path) -> "Path | None":
+        """Extract cover art using mutagen only — no subprocess, fork-safe."""
+        import tempfile
+
+        # .m4b/.m4a: iTunes covr atom
+        try:
+            from mutagen.mp4 import MP4
+
+            audio = MP4(str(path))
+            covr = audio.tags.get("covr") if audio.tags else None
+            if covr:
+                cover_data = bytes(covr[0])
+                tmp_dir = Path(tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+                dest = tmp_dir / "cover.jpg"
+                dest.write_bytes(cover_data)
+                if dest.stat().st_size > 100:
+                    return dest
+        except Exception:  # noqa: BLE001
+            pass
+
+        # MP3: ID3 APIC frame
+        try:
+            from mutagen.id3 import ID3
+
+            tags = ID3(str(path))
+            apic_frames = tags.getall("APIC")
+            if apic_frames:
+                frame = next((f for f in apic_frames if f.type == 3), apic_frames[0])
+                ext = ".jpg" if "jpeg" in frame.mime.lower() else ".png"
+                tmp_dir = Path(tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+                dest = tmp_dir / f"cover{ext}"
+                dest.write_bytes(frame.data)
+                if dest.stat().st_size > 100:
+                    return dest
+        except Exception:  # noqa: BLE001
+            pass
+
+        return None
 
 
 class SaveChaptersWorker(QThread):

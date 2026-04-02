@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QPushButton,
     QStyledItemDelegate,
     QTableWidget,
@@ -91,15 +92,16 @@ class FolderDropZone(QFrame):
 
         self._edit = QLineEdit()
         placeholder = (
-            "Drag a folder or .m4b file here, or click Browse…"
+            "Drag a folder or .m4b file here"
+            "  \u00b7  Build\u2026 for new  \u00b7  Edit\u2026 for existing"
             if self._accept_m4b
-            else "Drag a folder here or click Browse…"
+            else "Drag a folder here or click Build\u2026"
         )
         self._edit.setPlaceholderText(placeholder)
         self._edit.setReadOnly(True)
         layout.addWidget(self._edit)
 
-        self._clear_btn = QPushButton("✕")
+        self._clear_btn = QPushButton("\u2715")
         self._clear_btn.setFixedSize(26, 26)
         self._clear_btn.setObjectName("clearBtn")
         self._clear_btn.setToolTip("Clear")
@@ -107,11 +109,20 @@ class FolderDropZone(QFrame):
         self._clear_btn.clicked.connect(self._on_clear_clicked)
         layout.addWidget(self._clear_btn)
 
-        btn = QPushButton("Browse")
+        btn = QPushButton("Build\u2026")
         btn.setFixedWidth(80)
         btn.setFixedHeight(34)
+        btn.setToolTip("Choose a folder of audio files to build a new M4B")
         btn.clicked.connect(self._browse)
         layout.addWidget(btn)
+
+        if self._accept_m4b:
+            m4b_btn = QPushButton("Edit\u2026")
+            m4b_btn.setFixedWidth(80)
+            m4b_btn.setFixedHeight(34)
+            m4b_btn.setToolTip("Choose an existing .m4b file to edit its chapters")
+            m4b_btn.clicked.connect(self._browse_m4b)
+            layout.addWidget(m4b_btn)
 
     # ── public interface ──────────────────────────────────────────────────────
 
@@ -127,9 +138,61 @@ class FolderDropZone(QFrame):
     # ── actions ───────────────────────────────────────────────────────────────
 
     def _browse(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select Audiobook Folder")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Audiobook Folder to Build"
+        )
         if folder:
             self.set_path(Path(folder))
+
+    def _browse_m4b(self) -> None:
+        """Open a native file picker for .m4b files.
+
+        On macOS: uses osascript (AppleScript ``choose file``) to open the
+        real NSOpenPanel with no type filter — avoids the UTI grey-out issue.
+        On other platforms: falls back to QFileDialog with DontUseNativeDialog.
+        """
+        import sys as _sys
+
+        if _sys.platform == "darwin":
+            path = self._browse_m4b_macos()
+        else:
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Edit M4B Chapters",
+                "",
+                "M4B Audiobooks (*.m4b);;All Files (*)",
+                "",
+                QFileDialog.Option.DontUseNativeDialog,
+            )
+
+        if path and path.lower().endswith(".m4b"):
+            self.set_path(Path(path))
+        elif path:
+            QMessageBox.warning(
+                self,
+                "Not an M4B",
+                f"'{Path(path).name}' is not an .m4b file.",
+            )
+
+    @staticmethod
+    def _browse_m4b_macos() -> str:
+        """Invoke AppleScript ``choose file`` — returns POSIX path or ''."""
+        import subprocess
+        script = (
+            'set theFile to choose file with prompt "Select an M4B audiobook"\n'
+            "return POSIX path of theFile"
+        )
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            return result.stdout.strip()
+        except Exception:  # noqa: BLE001
+            # osascript unavailable or user cancelled (exit 1) — return empty
+            return ""
 
     def _on_clear_clicked(self) -> None:
         self._edit.setText("")
@@ -403,6 +466,78 @@ class _TitleDelegate(QStyledItemDelegate):
             self._table._undo_stack.push(_TitlesCommand(self._table, before, after))
 
 
+class _TimeDelegate(QStyledItemDelegate):
+    """Delegate for the Time column.
+
+    Parses ``[H:]M:SS[.mmm]`` input on commit.  Invalid input is silently
+    discarded and the cell reverts to its previous value without touching
+    the undo stack.  Valid input is applied through
+    :meth:`ChapterTable.set_chapter_time` so it participates in undo.
+    """
+
+    def __init__(self, table: "ChapterTable") -> None:
+        super().__init__(table)
+        self._table = table
+
+    def createEditor(self, parent, option, index):  # type: ignore[no-untyped-def]  # noqa: E501
+        editor = QLineEdit(parent)
+        editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return editor
+
+    def setEditorData(self, editor, index) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
+        editor.setText(index.data() or "")
+        editor.selectAll()
+
+    def setModelData(self, editor, model, index) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
+        ms = _parse_time_input(editor.text())
+        if ms is None:
+            return  # invalid input — leave the cell unchanged
+        self._table.set_chapter_time(index.row(), ms)
+
+    def updateEditorGeometry(self, editor, option, index) -> None:  # type: ignore[no-untyped-def]  # noqa: E501
+        editor.setGeometry(option.rect)
+
+
+# ── ChapterTable helpers ─────────────────────────────────────────────────────
+
+
+def _ms_to_display(ms: int) -> str:
+    """Format *ms* milliseconds as ``M:SS.mmm`` or ``H:MM:SS.mmm``."""
+    total_s = ms // 1000
+    millis = ms % 1000
+    h = total_s // 3600
+    m = (total_s % 3600) // 60
+    s = total_s % 60
+    if h:
+        return f"{h}:{m:02d}:{s:02d}.{millis:03d}"
+    return f"{m}:{s:02d}.{millis:03d}"
+
+
+def _parse_time_input(text: str) -> "int | None":
+    """Parse ``[H:]M:SS[.mmm]`` text to milliseconds, or return *None* if invalid.
+
+    Accepts:
+      * ``M:SS``         e.g. ``1:30``
+      * ``M:SS.mmm``     e.g. ``1:30.500``
+      * ``H:MM:SS``      e.g. ``1:01:30``
+      * ``H:MM:SS.mmm``  e.g. ``1:01:30.500``
+
+    Seconds must be in [0, 59].  Milliseconds are 1–3 digits (right-padded).
+    """
+    text = text.strip()
+    m = re.fullmatch(r"(\d+):([0-5]\d):([0-5]\d)(?:\.(\d{1,3}))?", text)
+    if m:
+        h, mins, secs, frac = m.groups()
+        millis = int(frac.ljust(3, "0")) if frac else 0
+        return (int(h) * 3600 + int(mins) * 60 + int(secs)) * 1000 + millis
+    m = re.fullmatch(r"(\d+):([0-5]\d)(?:\.(\d{1,3}))?", text)
+    if m:
+        mins, secs, frac = m.groups()
+        millis = int(frac.ljust(3, "0")) if frac else 0
+        return (int(mins) * 60 + int(secs)) * 1000 + millis
+    return None
+
+
 # ── ChapterTable ──────────────────────────────────────────────────────────────
 
 
@@ -434,7 +569,7 @@ class ChapterTable(QTableWidget):
         hh.setSectionResizeMode(self.COL_TIME, QHeaderView.ResizeMode.Fixed)
         hh.setSectionResizeMode(self.COL_TITLE, QHeaderView.ResizeMode.Stretch)
         self.setColumnWidth(self.COL_NUM, 48)
-        self.setColumnWidth(self.COL_TIME, 76)
+        self.setColumnWidth(self.COL_TIME, 90)
 
         self.verticalHeader().setVisible(False)
         self.setAlternatingRowColors(True)
@@ -445,6 +580,7 @@ class ChapterTable(QTableWidget):
             | QAbstractItemView.EditTrigger.SelectedClicked
         )
         self.setItemDelegateForColumn(self.COL_TITLE, _TitleDelegate(self))
+        self.setItemDelegateForColumn(self.COL_TIME, _TimeDelegate(self))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
@@ -469,14 +605,14 @@ class ChapterTable(QTableWidget):
             n.setForeground(QColor(_INK_MUTED))
             self.setItem(row, self.COL_NUM, n)
 
-            # Column 1 — start time (read-only)
-            t = ch.start_time
-            h = int(t // 3600)
-            m = int((t % 3600) // 60)
-            s = int(t % 60)
-            ts = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+            # Column 1 — start time (editable via _TimeDelegate)
+            ts = _ms_to_display(int(ch.start_time * 1000))
             ti = QTableWidgetItem(ts)
-            ti.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+            ti.setFlags(
+                Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsEditable
+            )
             ti.setForeground(QColor(_INK_MUTED))
             ti.setData(Qt.ItemDataRole.UserRole, None)  # None = unmodified
             self.setItem(row, self.COL_TIME, ti)
@@ -521,11 +657,7 @@ class ChapterTable(QTableWidget):
 
     def _do_set_time(self, row: int, ms: int) -> None:
         """Apply a time change without pushing to the undo stack."""
-        t = ms / 1000.0
-        h = int(t // 3600)
-        m = int((t % 3600) // 60)
-        s = int(t % 60)
-        ts = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        ts = _ms_to_display(ms)
         item = self.item(row, self.COL_TIME)
         if item:
             item.setText(ts)

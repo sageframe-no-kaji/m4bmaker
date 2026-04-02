@@ -1396,3 +1396,222 @@ class TestUpdateChapterButtons:
         w, _ = win
         w._update_chapter_buttons()
         assert w._ch_merge_btn.isHidden()
+
+
+# ── Open M4B File (Phase 1) ───────────────────────────────────────────────────
+
+
+class TestOpenM4bFile:
+    def test_open_m4b_dialog_calls_set_path(self, win, tmp_path):
+        """_open_m4b_file() forwards the chosen path to the folder zone."""
+        w, _ = win
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        received: list = []
+        w._folder_zone.folder_changed.connect(received.append)
+
+        def _fake_browse():
+            w._folder_zone.set_path(m4b)
+
+        with patch.object(w._folder_zone, "_browse_m4b", _fake_browse):
+            w._open_m4b_file()
+        assert received == [m4b]
+
+    def test_open_m4b_dialog_cancelled_is_noop(self, win):
+        """Cancelled dialog must not change the folder zone."""
+        w, _ = win
+        received: list = []
+        w._folder_zone.folder_changed.connect(received.append)
+        with patch.object(w._folder_zone, "_browse_m4b", lambda: None):
+            w._open_m4b_file()
+        assert received == []
+
+    def test_open_m4b_routes_to_edit_mode(self, win, tmp_path):
+        """Loading a .m4b via _open_m4b_file() switches app to edit mode."""
+        w, _ = win
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+
+        def _fake_browse():
+            w._folder_zone.set_path(m4b)
+
+        with (
+            patch.object(w._folder_zone, "_browse_m4b", _fake_browse),
+            patch("m4bmaker.gui.window.LoadM4bWorker") as MockW,
+        ):
+            MockW.return_value = MagicMock()
+            w._open_m4b_file()
+        assert w._mode == "edit"
+        assert w._mode_badge.text() == "Edit"
+
+
+# ── Add Chapter (Phase 2) ─────────────────────────────────────────────────────
+
+
+def _load_edit(w, tmp_path, n=3):
+    """Load an n-chapter book and put the window into edit mode.
+
+    Player methods are stubbed so _on_chapter_selected doesn't start workers.
+    """
+    book = _make_multi_book(tmp_path, n)
+    w._player.load = lambda *a, **kw: None
+    w._player.load_paused = lambda *a, **kw: None
+    w._apply_book_to_ui(book)
+    w._mode = "edit"
+    return book
+
+
+def _set_player_pos(w, ms: int) -> None:
+    """Replace the player with a stub whose current_position_ms returns *ms*."""
+    stub = MagicMock()
+    stub.current_position_ms = ms
+    stub.is_playing = False
+    w._player = stub
+
+
+class TestAddChapter:
+    def test_adds_chapter_at_midpoint(self, win, tmp_path):
+        """Splitting chapter 0 at 5 s creates a second chapter starting at 5 s."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)   # ch1@0 (10s), ch2@10 (10s)
+        _set_player_pos(w, 5000)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        assert w._book.chapters[0].start_time == 0.0
+        assert w._book.chapters[1].start_time == pytest.approx(5.0)
+        assert w._book.chapters[2].start_time == pytest.approx(10.0)
+
+    def test_chapter_count_increments(self, win, tmp_path):
+        w, _ = win
+        _load_edit(w, tmp_path, n=3)
+        _set_player_pos(w, 5000)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        assert len(w._book.chapters) == 4
+
+    def test_new_chapter_title(self, win, tmp_path):
+        """New chapter gets 'Chapter N' where N is its 1-based post-split index."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)
+        _set_player_pos(w, 5000)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        assert w._book.chapters[1].title == "Chapter 2"
+
+    def test_subsequent_start_times_unchanged(self, win, tmp_path):
+        """Adding a chapter inside ch1 must not shift subsequent chapter starts."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=5)   # 5 x 10 s chapters
+        _set_player_pos(w, 5000)        # split ch1 at 5 s
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        # All previously-existing start times must be preserved after the split.
+        assert w._book.chapters[2].start_time == pytest.approx(10.0)
+        assert w._book.chapters[3].start_time == pytest.approx(20.0)
+        assert w._book.chapters[4].start_time == pytest.approx(30.0)
+        assert w._book.chapters[5].start_time == pytest.approx(40.0)
+
+    def test_new_chapter_selected_in_table(self, win, tmp_path):
+        """After add, the newly created row is the current selection."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)
+        _set_player_pos(w, 5000)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        assert w._chapter_table.currentRow() == 1
+
+    def test_noop_at_chapter_start(self, win, tmp_path):
+        """Playhead at exactly the chapter start must not create a new chapter."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)
+        _set_player_pos(w, 0)           # exactly at ch1 start
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        assert len(w._book.chapters) == 2
+
+    def test_noop_past_chapter_end(self, win, tmp_path):
+        """Playhead past the chapter boundary must not create a new chapter."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)
+        _set_player_pos(w, 10001)       # past end of ch1 (0–10 s)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        assert len(w._book.chapters) == 2
+
+    def test_noop_in_build_mode(self, win, tmp_path):
+        """Add Chapter is a no-op in build mode."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=2)   # leaves w._mode = "build"
+        _set_player_pos(w, 5000)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        assert len(w._book.chapters) == 2
+
+    def test_pending_time_override_committed_before_split(self, win, tmp_path):
+        """Time overrides set via set_chapter_time() are synced before the split."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)    # ch1@0 (10s), ch2@10 (10s)
+
+        # Simulate user moving ch2 start to 8 s via Insert Time.
+        w._chapter_table.set_chapter_time(1, 8000)
+        _set_player_pos(w, 4000)        # split ch1 at 4 s (inside the 0–8 s range)
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
+
+        w._on_add_chapter()
+
+        assert w._book.chapters[0].start_time == pytest.approx(0.0)
+        assert w._book.chapters[1].start_time == pytest.approx(4.0)
+        assert w._book.chapters[2].start_time == pytest.approx(8.0)
+
+    def test_add_chapter_btn_visible_in_edit_mode(self, win, tmp_path):
+        """_ch_add_btn is not hidden when a book is loaded in edit mode."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)
+        w._update_chapter_buttons()
+        assert not w._ch_add_btn.isHidden()
+
+    def test_add_chapter_btn_hidden_in_build_mode(self, win, tmp_path):
+        """_ch_add_btn is hidden in build mode."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=2)
+        w._update_chapter_buttons()
+        assert not w._ch_add_btn.isVisible()
+
+    def test_sync_times_from_table_applies_overrides(self, win, tmp_path):
+        """_sync_times_from_table() writes time overrides into _book.chapters."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)
+        w._chapter_table.set_chapter_time(0, 3000)
+
+        w._sync_times_from_table()
+
+        assert w._book.chapters[0].start_time == pytest.approx(3.0)
+
+    def test_sync_times_recomputes_durations(self, win, tmp_path):
+        """After _sync_times_from_table(), _chapter_durations reflects the new starts."""
+        w, _ = win
+        _load_edit(w, tmp_path, n=2)    # ch1@0 (10s), ch2@10 (10s)
+        # Move ch2 to 8 s
+        w._chapter_table.set_chapter_time(1, 8000)
+
+        w._sync_times_from_table()
+
+        # ch1 dur should now be 8 s; ch2 dur = total(20) - 8 = 12 s
+        assert w._chapter_durations[0] == pytest.approx(8.0)
+        assert w._chapter_durations[1] == pytest.approx(12.0)
