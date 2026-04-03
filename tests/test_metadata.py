@@ -127,7 +127,44 @@ class TestExtractMetadata:
         assert meta["author"] == ""
         assert meta["narrator"] == ""
 
-    def test_list_tag_value_takes_first_element(self, tmp_path: Path) -> None:
+    def test_mp4_narrator_read_from_raw_wrt_atom(self, tmp_path: Path) -> None:
+        """EasyMP4 omits 'composer' from its key set — narrator must fall back
+        to reading the raw ©wrt atom directly from MP4Tags."""
+        stub = tmp_path / "book.m4b"
+        stub.write_bytes(b"\x00")
+        # Simulate EasyMP4: 'composer' key absent, so narrator easy-read returns "".
+        easy_audio = _mock_audio({"title": ["My Book"], "artist": ["Author"]})
+
+        raw_mp4 = MagicMock()
+        raw_mp4.tags = {"\xa9wrt": ["Jane Narrator"]}
+
+        with patch("mutagen.File", return_value=easy_audio):
+            with patch("mutagen.mp4.MP4", return_value=raw_mp4):
+                meta = extract_metadata(stub)
+
+        assert meta["narrator"] == "Jane Narrator"
+
+    def test_mp4_wrt_fallback_skipped_when_easy_has_composer(
+        self, tmp_path: Path
+    ) -> None:
+        """When easy=True already returns a narrator (e.g. MP3 with TCOM),
+        the ©wrt fallback must not overwrite it."""
+        stub = tmp_path / "track.mp3"
+        stub.write_bytes(b"\x00")
+        audio = _mock_audio({"composer": ["Easy Narrator"]})
+
+        raw_mp4 = MagicMock()
+        raw_mp4.tags = {"\xa9wrt": ["Different"]}
+
+        with patch("mutagen.File", return_value=audio):
+            with patch("mutagen.mp4.MP4", return_value=raw_mp4) as mock_mp4:
+                meta = extract_metadata(stub)
+
+        # MP4() should not have been called since narrator was already found.
+        mock_mp4.assert_not_called()
+        assert meta["narrator"] == "Easy Narrator"
+
+
         stub = tmp_path / "track.mp3"
         stub.write_bytes(b"\x00")
         audio = _mock_audio({"title": ["First", "Second"]})

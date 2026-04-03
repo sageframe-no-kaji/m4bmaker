@@ -42,6 +42,21 @@ def extract_metadata(first_file: Path) -> dict[str, str]:
             tags, "composer", "TCOM", "narrator", "TPUB", "comment"
         )
         meta["genre"] = _first_tag(tags, "genre", "TCON")
+
+        # mutagen's EasyMP4 does not expose the ©wrt (composer/narrator) atom —
+        # 'composer' is absent from EasyMP4.Get, so the lookup above returns "".
+        # Fall back to reading ©wrt directly from the raw MP4 tags.
+        if not meta["narrator"]:
+            try:
+                from mutagen.mp4 import MP4  # type: ignore[attr-defined]
+
+                raw = MP4(str(first_file))
+                if raw.tags:
+                    wrt = raw.tags.get("\xa9wrt", [])
+                    if wrt:
+                        meta["narrator"] = str(wrt[0]).strip()
+            except Exception:
+                pass
     except Exception:
         # If mutagen cannot read the file, return empty — prompts will fill in.
         pass
