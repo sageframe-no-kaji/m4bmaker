@@ -102,8 +102,7 @@ class TestWriteConcatList:
         line = dest.read_text().strip()
         posix = f.resolve().as_posix()
         escaped = (
-            posix
-            .replace("\\", "\\\\")
+            posix.replace("\\", "\\\\")
             .replace(" ", "\\ ")
             .replace("'", "\\'")
             .replace('"', '\\"')

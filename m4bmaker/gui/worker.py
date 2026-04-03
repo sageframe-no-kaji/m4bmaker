@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
-from m4bmaker.models import Book
+from m4bmaker.models import Book, BookMetadata
 from m4bmaker.pipeline import load_audiobook, run_pipeline
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, subprocess_flags
 
@@ -202,12 +202,14 @@ class SaveChaptersWorker(QThread):
         chapters: list,
         total_duration: float,
         dest: Path,
+        metadata: BookMetadata | None = None,
     ) -> None:
         super().__init__()
         self._source = source
         self._chapters = chapters
         self._total_duration = total_duration
         self._dest = dest
+        self._metadata = metadata
 
     def run(self) -> None:
         try:
@@ -220,6 +222,7 @@ class SaveChaptersWorker(QThread):
                 self._total_duration,
                 self._dest,
                 ffmpeg,
+                metadata=self._metadata,
             )
             self.finished.emit(self._dest)
         except SystemExit as exc:
@@ -286,7 +289,9 @@ class SplitWorker(QThread):
                     "make_zero",
                     str(out_file),
                 ]
-                result = _sp.run(cmd, capture_output=True, encoding="utf-8", **subprocess_flags())
+                result = _sp.run(
+                    cmd, capture_output=True, encoding="utf-8", **subprocess_flags()
+                )
                 if result.returncode != 0:
                     raise RuntimeError(
                         f"ffmpeg failed on chapter {i + 1}: {result.stderr.strip()}"

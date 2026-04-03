@@ -53,9 +53,7 @@ def _which(name: str) -> str | None:
             if os.path.isfile(candidate):
                 return candidate
             # Check Contents/Frameworks/ (macOS .app bundle)
-            frameworks = os.path.normpath(
-                os.path.join(exe_dir, "..", "Frameworks", n)
-            )
+            frameworks = os.path.normpath(os.path.join(exe_dir, "..", "Frameworks", n))
             if os.path.isfile(frameworks):
                 return frameworks
 
@@ -96,6 +94,7 @@ def subprocess_flags() -> dict:
     """Return kwargs that suppress console windows on Windows frozen builds."""
     if sys.platform == "win32" and getattr(sys, "frozen", False):
         import subprocess as _sp
+
         return {"creationflags": _sp.CREATE_NO_WINDOW}
     return {}
 

@@ -178,6 +178,7 @@ class FolderDropZone(QFrame):
     def _browse_m4b_macos() -> str:
         """Invoke AppleScript ``choose file`` — returns POSIX path or ''."""
         import subprocess
+
         script = (
             'set theFile to choose file with prompt "Select an M4B audiobook"\n'
             "return POSIX path of theFile"
@@ -716,7 +717,7 @@ class ChapterTable(QTableWidget):
         menu.addSeparator()
         menu.addAction("Remove Numeric Prefixes", self._remove_numeric)
         menu.addAction("Add Sequential Numeric Prefix", self._add_sequential_prefix)
-        menu.addAction("Number as \"Chapter X\"", self._number_as_chapter)
+        menu.addAction('Number as "Chapter X"', self._number_as_chapter)
         menu.addAction("Add Prefix…", self._add_prefix)
         menu.addAction("Add Suffix…", self._add_suffix)
         menu.addSeparator()

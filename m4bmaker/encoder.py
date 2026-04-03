@@ -81,8 +81,7 @@ def write_concat_list(files: list[Path], dest: Path) -> None:
         posix_path = path.resolve().as_posix()
         # Backslash must be escaped first to avoid double-escaping.
         escaped = (
-            posix_path
-            .replace("\\", "\\\\")
+            posix_path.replace("\\", "\\\\")
             .replace(" ", "\\ ")
             .replace("'", "\\'")
             .replace('"', '\\"')

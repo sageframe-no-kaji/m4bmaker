@@ -222,6 +222,7 @@ class TestMainWindowPrefsPersistence:
         assert get("dark_mode") is False
         win.close()
 
+
 # ---------------------------------------------------------------------------
 # MainWindow integration — check_for_updates toggle (closes issue #6 follow-up)
 # ---------------------------------------------------------------------------
@@ -268,9 +269,7 @@ class TestUpdateCheckerToggle:
         assert win._updates_action.isChecked() is False
         win.close()
 
-    def test_updates_action_checked_state_matches_pref_true(
-        self, qapp: object
-    ) -> None:
+    def test_updates_action_checked_state_matches_pref_true(self, qapp: object) -> None:
         """Menu action initial checked state reflects saved pref (True)."""
         set("check_for_updates", True)
         win = MainWindow()

@@ -320,6 +320,29 @@ class TestSaveChaptersWorker:
         qapp.processEvents()
         assert results == [dest]
 
+    def test_metadata_passed_to_save(self, qapp, tmp_path):
+        """BookMetadata supplied to the worker must be forwarded to save_m4b_chapters."""
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00")
+        dest = tmp_path / "out.m4b"
+        chapters = self._chapters(tmp_path)
+        meta = BookMetadata(
+            title="Test", author="Auth", narrator="Narr", genre="Gen"
+        )
+        captured: list[dict] = []
+
+        def fake_save(src, ch, dur, dst, ffmpeg, *, metadata=None):
+            captured.append({"metadata": metadata})
+
+        with patch("m4bmaker.m4b_editor.save_m4b_chapters", side_effect=fake_save):
+            worker = SaveChaptersWorker(source, chapters, 60.0, dest, metadata=meta)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert captured, "save_m4b_chapters was not called"
+        assert captured[0]["metadata"] == meta
+
     def test_error_on_exception(self, qapp, tmp_path):
         source = tmp_path / "in.m4b"
         source.write_bytes(b"\x00")

@@ -1473,7 +1473,7 @@ class TestAddChapter:
     def test_adds_chapter_at_midpoint(self, win, tmp_path):
         """Splitting chapter 0 at 5 s creates a second chapter starting at 5 s."""
         w, _ = win
-        _load_edit(w, tmp_path, n=2)   # ch1@0 (10s), ch2@10 (10s)
+        _load_edit(w, tmp_path, n=2)  # ch1@0 (10s), ch2@10 (10s)
         _set_player_pos(w, 5000)
         w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
 
@@ -1507,8 +1507,8 @@ class TestAddChapter:
     def test_subsequent_start_times_unchanged(self, win, tmp_path):
         """Adding a chapter inside ch1 must not shift subsequent chapter starts."""
         w, _ = win
-        _load_edit(w, tmp_path, n=5)   # 5 x 10 s chapters
-        _set_player_pos(w, 5000)        # split ch1 at 5 s
+        _load_edit(w, tmp_path, n=5)  # 5 x 10 s chapters
+        _set_player_pos(w, 5000)  # split ch1 at 5 s
         w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
 
         w._on_add_chapter()
@@ -1534,7 +1534,7 @@ class TestAddChapter:
         """Playhead at exactly the chapter start must not create a new chapter."""
         w, _ = win
         _load_edit(w, tmp_path, n=2)
-        _set_player_pos(w, 0)           # exactly at ch1 start
+        _set_player_pos(w, 0)  # exactly at ch1 start
         w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
 
         w._on_add_chapter()
@@ -1545,7 +1545,7 @@ class TestAddChapter:
         """Playhead past the chapter boundary must not create a new chapter."""
         w, _ = win
         _load_edit(w, tmp_path, n=2)
-        _set_player_pos(w, 10001)       # past end of ch1 (0–10 s)
+        _set_player_pos(w, 10001)  # past end of ch1 (0–10 s)
         w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
 
         w._on_add_chapter()
@@ -1555,7 +1555,7 @@ class TestAddChapter:
     def test_noop_in_build_mode(self, win, tmp_path):
         """Add Chapter is a no-op in build mode."""
         w, _ = win
-        _load_multi(w, tmp_path, n=2)   # leaves w._mode = "build"
+        _load_multi(w, tmp_path, n=2)  # leaves w._mode = "build"
         _set_player_pos(w, 5000)
         w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
 
@@ -1566,11 +1566,11 @@ class TestAddChapter:
     def test_pending_time_override_committed_before_split(self, win, tmp_path):
         """Time overrides set via set_chapter_time() are synced before the split."""
         w, _ = win
-        _load_edit(w, tmp_path, n=2)    # ch1@0 (10s), ch2@10 (10s)
+        _load_edit(w, tmp_path, n=2)  # ch1@0 (10s), ch2@10 (10s)
 
         # Simulate user moving ch2 start to 8 s via Insert Time.
         w._chapter_table.set_chapter_time(1, 8000)
-        _set_player_pos(w, 4000)        # split ch1 at 4 s (inside the 0–8 s range)
+        _set_player_pos(w, 4000)  # split ch1 at 4 s (inside the 0–8 s range)
         w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
 
         w._on_add_chapter()
@@ -1606,7 +1606,7 @@ class TestAddChapter:
     def test_sync_times_recomputes_durations(self, win, tmp_path):
         """After _sync_times_from_table(), _chapter_durations reflects the new starts."""
         w, _ = win
-        _load_edit(w, tmp_path, n=2)    # ch1@0 (10s), ch2@10 (10s)
+        _load_edit(w, tmp_path, n=2)  # ch1@0 (10s), ch2@10 (10s)
         # Move ch2 to 8 s
         w._chapter_table.set_chapter_time(1, 8000)
 

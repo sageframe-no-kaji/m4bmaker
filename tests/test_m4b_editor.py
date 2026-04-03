@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from m4bmaker.m4b_editor import load_m4b_chapters, save_m4b_chapters
-from m4bmaker.models import Chapter
+from m4bmaker.models import BookMetadata, Chapter
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -190,3 +190,93 @@ class TestSaveM4bChapters:
             save_m4b_chapters(source, chapters, 60.0, source, "ffmpeg")
 
         assert source.read_bytes() == b"UPDATED-M4B"
+
+    def test_metadata_written_to_ffmetadata(self, tmp_path):
+        """Metadata fields must appear in the FFMETADATA1 file written to disk."""
+        chapters = self._chapters(tmp_path)
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00" * 32)
+        dest = tmp_path / "out.m4b"
+        meta = BookMetadata(
+            title="My Book",
+            author="Jane Doe",
+            narrator="John Smith",
+            genre="Fiction",
+        )
+        captured_meta_content: list[str] = []
+
+        def fake_run(cmd, **_kw):
+            # The second -i argument points to the ffmetadata temp file.
+            # cmd structure: ffmpeg -y -i <source> -i <meta_file> ...
+            meta_idx = cmd.index("-i", cmd.index("-i") + 1) + 1
+            meta_path = Path(cmd[meta_idx])
+            if meta_path.exists():
+                captured_meta_content.append(meta_path.read_text(encoding="utf-8"))
+            out = Path(cmd[-1])
+            out.write_bytes(b"FAKE")
+            return MagicMock(returncode=0)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            save_m4b_chapters(source, chapters, 60.0, dest, "ffmpeg", metadata=meta)
+
+        assert captured_meta_content, "ffmetadata file was never written"
+        content = captured_meta_content[0]
+        assert "title=My Book" in content
+        assert "artist=Jane Doe" in content
+        assert "composer=John Smith" in content
+        assert "genre=Fiction" in content
+
+    def test_metadata_none_writes_empty_global_tags(self, tmp_path):
+        """Passing metadata=None must not crash — writes no global tag lines."""
+        chapters = self._chapters(tmp_path)
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00" * 32)
+        dest = tmp_path / "out.m4b"
+        captured: list[str] = []
+
+        def fake_run(cmd, **_kw):
+            meta_idx = cmd.index("-i", cmd.index("-i") + 1) + 1
+            meta_path = Path(cmd[meta_idx])
+            if meta_path.exists():
+                captured.append(meta_path.read_text(encoding="utf-8"))
+            Path(cmd[-1]).write_bytes(b"FAKE")
+            return MagicMock(returncode=0)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            save_m4b_chapters(source, chapters, 60.0, dest, "ffmpeg", metadata=None)
+
+        assert captured
+        content = captured[0]
+        assert ";FFMETADATA1" in content
+        # Global section is before the first [CHAPTER] marker.
+        global_section = content.split("[CHAPTER]")[0]
+        assert "artist=" not in global_section
+        assert "composer=" not in global_section
+        assert "genre=" not in global_section
+        # title= is NOT expected in global section (no title supplied)
+        assert "title=" not in global_section
+
+    def test_partial_metadata_writes_only_present_fields(self, tmp_path):
+        """Only non-empty metadata fields should appear in the global section."""
+        chapters = self._chapters(tmp_path)
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00" * 32)
+        dest = tmp_path / "out.m4b"
+        meta = BookMetadata(title="Only Title", author="", narrator="", genre="")
+        captured: list[str] = []
+
+        def fake_run(cmd, **_kw):
+            meta_idx = cmd.index("-i", cmd.index("-i") + 1) + 1
+            meta_path = Path(cmd[meta_idx])
+            if meta_path.exists():
+                captured.append(meta_path.read_text(encoding="utf-8"))
+            Path(cmd[-1]).write_bytes(b"FAKE")
+            return MagicMock(returncode=0)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            save_m4b_chapters(source, chapters, 60.0, dest, "ffmpeg", metadata=meta)
+
+        global_section = captured[0].split("[CHAPTER]")[0]
+        assert "title=Only Title" in global_section
+        assert "artist=" not in global_section
+        assert "composer=" not in global_section

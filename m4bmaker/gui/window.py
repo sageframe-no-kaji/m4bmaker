@@ -355,8 +355,8 @@ class MainWindow(QMainWindow):
 
         _privacy_url = "https://m4bookmaker.sageframe.net/help.html#privacy"
         privacy_lbl = QLabel(
-            'Checks GitHub for updates on startup '
-            '(disable: Help → Check for Updates on Startup). '
+            "Checks GitHub for updates on startup "
+            "(disable: Help → Check for Updates on Startup). "
             f'<a href="{_privacy_url}" style="color: #7a7a7a;">Privacy info</a>'
         )
         privacy_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -451,9 +451,7 @@ class MainWindow(QMainWindow):
 
     def _show_update_bar(self, new_version: str) -> None:
         """Slot called by UpdateChecker when a newer release is available."""
-        self._update_label.setText(
-            f"✨  m4Bookmaker {new_version} is available."
-        )
+        self._update_label.setText(f"✨  m4Bookmaker {new_version} is available.")
         self._update_bar.show()
 
     # ── Folder section ────────────────────────────────────────────────────────
@@ -1164,9 +1162,7 @@ class MainWindow(QMainWindow):
 
         chapter_start = self._book.chapters[row].start_time
         chapter_dur = (
-            self._chapter_durations[row]
-            if row < len(self._chapter_durations)
-            else 0.0
+            self._chapter_durations[row] if row < len(self._chapter_durations) else 0.0
         )
         chapter_end = chapter_start + chapter_dur
 
@@ -1482,6 +1478,14 @@ class MainWindow(QMainWindow):
         if source is None:
             return
         chapters = self._gather_chapters_from_table()
+        from m4bmaker.models import BookMetadata
+
+        metadata = BookMetadata(
+            title=self._title_edit.text().strip(),
+            author=self._author_edit.text().strip(),
+            narrator=self._narrator_edit.text().strip(),
+            genre=self._genre_edit.text().strip(),
+        )
         self._progress_bar.setVisible(True)
         self._progress_bar.setRange(0, 0)
         self._set_status("Saving chapter edits…")
@@ -1492,6 +1496,7 @@ class MainWindow(QMainWindow):
             chapters=chapters,
             total_duration=self._m4b_total_duration,
             dest=source,  # in-place edit
+            metadata=metadata,
         )
         self._save_worker.finished.connect(self._on_save_finished)
         self._save_worker.error.connect(self._on_convert_error)

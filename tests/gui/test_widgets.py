@@ -905,6 +905,7 @@ class TestTimeDelegate:
     @pytest.fixture(autouse=True)
     def table(self, qapp):
         from m4bmaker.gui.widgets import ChapterTable
+
         self.t = ChapterTable()
         self.t.populate([_make_chapter(1, 75.0, "Title")])  # 1:15.000
         yield
