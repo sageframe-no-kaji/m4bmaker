@@ -143,6 +143,9 @@ class TestSaveM4bChapters:
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "ffmpeg"
         assert "-map_chapters" in cmd
+        # Source metadata should be preserved, not replaced.
+        meta_idx = cmd.index("-map_metadata") + 1
+        assert cmd[meta_idx] == "0"
 
     def test_output_file_created(self, tmp_path):
         chapters = self._chapters(tmp_path)
@@ -191,8 +194,8 @@ class TestSaveM4bChapters:
 
         assert source.read_bytes() == b"UPDATED-M4B"
 
-    def test_metadata_written_to_ffmetadata(self, tmp_path):
-        """Metadata fields must appear in the FFMETADATA1 file written to disk."""
+    def test_metadata_passed_as_explicit_cmd_flags(self, tmp_path):
+        """Metadata must be passed as explicit -metadata flags in the ffmpeg command."""
         chapters = self._chapters(tmp_path)
         source = tmp_path / "in.m4b"
         source.write_bytes(b"\x00" * 32)
@@ -203,15 +206,10 @@ class TestSaveM4bChapters:
             narrator="John Smith",
             genre="Fiction",
         )
-        captured_meta_content: list[str] = []
+        captured_cmd: list[list[str]] = []
 
         def fake_run(cmd, **_kw):
-            # The second -i argument points to the ffmetadata temp file.
-            # cmd structure: ffmpeg -y -i <source> -i <meta_file> ...
-            meta_idx = cmd.index("-i", cmd.index("-i") + 1) + 1
-            meta_path = Path(cmd[meta_idx])
-            if meta_path.exists():
-                captured_meta_content.append(meta_path.read_text(encoding="utf-8"))
+            captured_cmd.append(list(cmd))
             out = Path(cmd[-1])
             out.write_bytes(b"FAKE")
             return MagicMock(returncode=0)
@@ -219,12 +217,22 @@ class TestSaveM4bChapters:
         with patch("subprocess.run", side_effect=fake_run):
             save_m4b_chapters(source, chapters, 60.0, dest, "ffmpeg", metadata=meta)
 
-        assert captured_meta_content, "ffmetadata file was never written"
-        content = captured_meta_content[0]
-        assert "title=My Book" in content
-        assert "artist=Jane Doe" in content
-        assert "composer=John Smith" in content
-        assert "genre=Fiction" in content
+        assert captured_cmd, "ffmpeg was never called"
+        cmd = captured_cmd[0]
+        # Explicit -metadata flags must carry the updated values.
+        paired = dict(zip(cmd, cmd[1:]))
+        assert paired.get("-metadata") is not None, "-metadata flag not found in cmd"
+        # Collect all -metadata values (there can be multiple).
+        meta_values = [
+            cmd[i + 1] for i, arg in enumerate(cmd[:-1]) if arg == "-metadata"
+        ]
+        assert "title=My Book" in meta_values
+        assert "artist=Jane Doe" in meta_values
+        assert "composer=John Smith" in meta_values
+        assert "genre=Fiction" in meta_values
+        # source metadata must be preserved (-map_metadata 0)
+        assert "-map_metadata" in cmd
+        assert cmd[cmd.index("-map_metadata") + 1] == "0"
 
     def test_metadata_none_writes_empty_global_tags(self, tmp_path):
         """Passing metadata=None must not crash — writes no global tag lines."""

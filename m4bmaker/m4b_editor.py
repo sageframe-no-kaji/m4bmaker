@@ -97,11 +97,25 @@ def save_m4b_chapters(
             "-i",
             str(meta_file),
             "-map_metadata",
-            "1",
+            "0",  # preserve all metadata from source; explicit flags below override
             "-map_chapters",
-            "1",
+            "1",  # chapters come from the ffmetadata file
             "-c",
             "copy",
+        ]
+        # Override specific metadata fields with the values provided by the caller.
+        # Using explicit -metadata flags (not relying on the ffmetadata global section)
+        # ensures changes made in the GUI are always written to the output file.
+        if metadata:
+            for flag, value in [
+                ("title", metadata.title),
+                ("artist", metadata.author),
+                ("composer", metadata.narrator),
+                ("genre", metadata.genre),
+            ]:
+                if value:
+                    cmd += ["-metadata", f"{flag}={value}"]
+        cmd += [
             "-metadata",
             "stik=2",  # iTunes audiobook type — required for iOS Books
             "-brand",
