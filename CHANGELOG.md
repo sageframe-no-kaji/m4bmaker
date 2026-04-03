@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.3] - 2026-04-03
+
+### Fixed
+
+- **Edit mode metadata strip** — Opening an `.m4b` to edit chapters no longer
+  silently strips Title, Author, Narrator, and Genre on save. The ffmpeg command
+  now uses `-map_metadata 0` (preserve all existing tags from the source) plus
+  explicit `-metadata` flags to override only the fields edited in the GUI.
+- **Edit mode metadata not saved** — Changes made to Title, Author, Narrator, or
+  Genre in Edit mode are now written to the output file. Previously the GUI values
+  were never threaded down to `save_m4b_chapters()`.
+- **Narrator not persisting** — mutagen's EasyMP4 does not expose the `composer`
+  key, so narrator always read back as empty after a save. `extract_metadata()`
+  now falls back to reading the `©wrt` atom directly via the raw `MP4` interface
+  when the easy path returns nothing.
+
+---
+
 ## [1.0.2] - 2026-04-02
 
 ### Added

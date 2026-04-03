@@ -168,8 +168,8 @@ app = BUNDLE(
     bundle_identifier="com.sageframe.m4bmaker",
     info_plist={
         "CFBundleDisplayName": "m4bmaker",
-        "CFBundleShortVersionString": "1.0.0",
-        "CFBundleVersion": "1.0.0",
+        "CFBundleShortVersionString": "1.0.3",
+        "CFBundleVersion": "1.0.3",
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,   # supports dark mode
         "LSMinimumSystemVersion": "13.0",
