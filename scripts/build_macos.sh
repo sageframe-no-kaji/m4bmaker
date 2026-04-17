@@ -63,6 +63,12 @@ if ! command -v ffmpeg &>/dev/null; then
 fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────
+# Pin the minimum macOS version to 11.0 (PySide6 >= 6.6 hard floor).
+# Without this, PyInstaller inherits the SDK default of the build machine,
+# which could embed a higher floor (e.g. 14.0 on Sequoia) and break users
+# on older but still-supported macOS versions.
+export MACOSX_DEPLOYMENT_TARGET=11.0
+
 echo "==> Building ${APP_NAME}.app  (version ${VERSION})"
 python -m PyInstaller "$SPEC_FILE" --noconfirm
 
