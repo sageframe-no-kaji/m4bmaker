@@ -163,6 +163,34 @@ class TestBuildChapters:
 
         assert chapters[0].title == "Introduction"
 
+    def test_chapter_title_from_metadata_tag(self, tmp_path: Path) -> None:
+        stub = tmp_path / "01 - track.mp3"
+        stub.write_bytes(b"\x00")
+
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps(
+            {"format": {"duration": "30.0", "tags": {"title": "Symphony No. 9"}}}
+        )
+
+        with patch("m4bmaker.chapters.subprocess.run", return_value=mock_result):
+            chapters = build_chapters([stub], "ffprobe")
+
+        assert chapters[0].title == "Symphony No. 9"
+
+    def test_chapter_title_falls_back_to_filename_when_no_tag(
+        self, tmp_path: Path
+    ) -> None:
+        stub = tmp_path / "03_Introduction.mp3"
+        stub.write_bytes(b"\x00")
+
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"format": {"duration": "30.0"}})
+
+        with patch("m4bmaker.chapters.subprocess.run", return_value=mock_result):
+            chapters = build_chapters([stub], "ffprobe")
+
+        assert chapters[0].title == "Introduction"
+
     def test_long_audiobook_no_integer_overflow(self, tmp_path: Path) -> None:
         """20 h: 20 * 3600 * 1000 ms = 72_000_000 — well within int range."""
         stub = tmp_path / "marathon.mp3"

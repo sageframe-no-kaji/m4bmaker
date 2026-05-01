@@ -23,8 +23,8 @@ def _strip_chapter_prefix(stem: str) -> str:
     return cleaned if cleaned else stem
 
 
-def get_duration(file: Path, ffprobe: str) -> float:
-    """Return the duration of *file* in seconds using ffprobe JSON output."""
+def _probe_file(file: Path, ffprobe: str) -> tuple[float, str | None]:
+    """Run ffprobe on *file* and return (duration_seconds, title_tag_or_None)."""
     cmd = [
         ffprobe,
         "-v",
@@ -55,7 +55,13 @@ def get_duration(file: Path, ffprobe: str) -> float:
     except (KeyError, ValueError, json.JSONDecodeError) as exc:
         sys.exit(f"Error: could not parse ffprobe output for '{file}': {exc}")
 
-    return duration
+    title = data.get("format", {}).get("tags", {}).get("title") or None
+    return duration, title
+
+
+def get_duration(file: Path, ffprobe: str) -> float:
+    """Return the duration of *file* in seconds using ffprobe JSON output."""
+    return _probe_file(file, ffprobe)[0]
 
 
 def build_chapters(
@@ -75,8 +81,8 @@ def build_chapters(
     for i, path in enumerate(files, 1):
         if progress_fn is not None:
             progress_fn(i, total, path.name)
-        duration_sec = get_duration(path, ffprobe)
-        title = _strip_chapter_prefix(path.stem)
+        duration_sec, tag_title = _probe_file(path, ffprobe)
+        title = tag_title if tag_title else _strip_chapter_prefix(path.stem)
         chapters.append(
             Chapter(
                 index=i,
