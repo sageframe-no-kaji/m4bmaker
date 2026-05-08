@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.4] - 2026-05-08
+
+### Fixed
+
+- macOS build now runs on both Intel and Apple Silicon (universal2 binary)
+
+---
+
 ## [1.0.3] - 2026-04-03
 
 ### Fixed

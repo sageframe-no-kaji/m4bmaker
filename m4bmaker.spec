@@ -144,7 +144,7 @@ exe = EXE(
     upx=False,          # UPX can corrupt Qt dylibs on macOS — keep off
     console=False,      # windowed app; no terminal
     argv_emulation=False,
-    target_arch=None,   # None = match current machine; set "universal2" for fat binary
+    target_arch="universal2",  # fat binary: runs on both Intel and Apple Silicon
     codesign_identity=None,
     entitlements_file=None,
     icon="m4bmaker/gui/resources/audiobookbinder.icns",
@@ -168,8 +168,8 @@ app = BUNDLE(
     bundle_identifier="com.sageframe.m4bmaker",
     info_plist={
         "CFBundleDisplayName": "m4bmaker",
-        "CFBundleShortVersionString": "1.0.3",
-        "CFBundleVersion": "1.0.3",
+        "CFBundleShortVersionString": "1.0.4",
+        "CFBundleVersion": "1.0.4",
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,   # supports dark mode
         "LSMinimumSystemVersion": "13.0",
@@ -182,11 +182,27 @@ app = BUNDLE(
                 "LSItemContentTypes": ["public.folder"],
             },
             {
+                # Reference our own exported UTI so macOS doesn't fall back to
+                # com.apple.protected-mpeg-4-audio when identifying .m4b files.
                 "CFBundleTypeName": "M4B Audiobook",
                 "CFBundleTypeRole": "Editor",
-                "LSItemContentTypes": ["public.mpeg-4-audio"],
+                "LSItemContentTypes": ["com.sageframe.m4b-audiobook"],
                 "CFBundleTypeExtensions": ["m4b"],
             },
+        ],
+        # Declare authoritatively what .m4b means. Without this, macOS content-
+        # sniffs the file and guesses com.apple.protected-mpeg-4-audio, causing
+        # Finder to label it "Protected mpeg 4 audiobook" even though it isn't.
+        "UTExportedTypeDeclarations": [
+            {
+                "UTTypeIdentifier": "com.sageframe.m4b-audiobook",
+                "UTTypeDescription": "M4B Audiobook",
+                "UTTypeConformsTo": ["public.mpeg-4-audio", "public.audio"],
+                "UTTypeTagSpecification": {
+                    "public.filename-extension": ["m4b"],
+                    "public.mime-type": "audio/mp4",
+                },
+            }
         ],
     },
 )
