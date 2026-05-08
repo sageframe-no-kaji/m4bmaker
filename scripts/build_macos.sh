@@ -62,6 +62,32 @@ if ! command -v ffmpeg &>/dev/null; then
     echo "         the user to install ffmpeg separately (brew install ffmpeg)."
 fi
 
+# ── Universal2 ffmpeg/ffprobe ─────────────────────────────────────────────────
+# static_ffmpeg ships per-architecture binaries (arm64 OR x86_64). For a
+# universal2 .app we need fat ffmpeg/ffprobe binaries containing both slices,
+# otherwise Intel Macs fail with "Bad CPU type in executable" at first probe.
+echo "==> Ensuring universal2 ffmpeg/ffprobe"
+SF_DIR="$(python -c "from static_ffmpeg import run as r; from pathlib import Path; print(Path(r.get_or_fetch_platform_executables_else_raise()[0]).parent)")"
+NATIVE_FFMPEG="$SF_DIR/ffmpeg"
+NATIVE_FFPROBE="$SF_DIR/ffprobe"
+
+if ! file "$NATIVE_FFMPEG" | grep -q "universal binary"; then
+    echo "    Native ffmpeg is single-arch — building universal2 fat binaries"
+    X86_DIR="$(mktemp -d)"
+    curl -sL "https://github.com/zackees/ffmpeg_bins/raw/main/v8.0/darwin.zip" -o "$X86_DIR/darwin.zip"
+    unzip -q -o "$X86_DIR/darwin.zip" -d "$X86_DIR"
+    cp "$NATIVE_FFMPEG" "$X86_DIR/ffmpeg-native"
+    cp "$NATIVE_FFPROBE" "$X86_DIR/ffprobe-native"
+    lipo -create "$X86_DIR/ffmpeg-native"  "$X86_DIR/darwin/ffmpeg"  -output "$NATIVE_FFMPEG"
+    lipo -create "$X86_DIR/ffprobe-native" "$X86_DIR/darwin/ffprobe" -output "$NATIVE_FFPROBE"
+    chmod +x "$NATIVE_FFMPEG" "$NATIVE_FFPROBE"
+    rm -rf "$X86_DIR"
+fi
+
+file "$NATIVE_FFMPEG" | grep -q "universal binary" || { echo "ERROR: ffmpeg is not universal2"; exit 1; }
+file "$NATIVE_FFPROBE" | grep -q "universal binary" || { echo "ERROR: ffprobe is not universal2"; exit 1; }
+echo "    ffmpeg/ffprobe verified universal2"
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 # Pin the minimum macOS version to 11.0 (PySide6 >= 6.6 hard floor).
 # Without this, PyInstaller inherits the SDK default of the build machine,

@@ -2,7 +2,7 @@
 ; Called by GitHub Actions after PyInstaller produces dist\m4Bookmaker\
 
 #define AppName "m4Bookmaker"
-#define AppVersion "1.0.4"
+#define AppVersion "1.0.5"
 #define AppPublisher "Sageframe"
 #define AppURL "https://m4bookmaker.sageframe.net"
 #define AppExeName "m4Bookmaker.exe"

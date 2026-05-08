@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.5] - 2026-05-08
+
+### Fixed
+
+- macOS Intel support actually works now — bundled ffmpeg/ffprobe are now
+  universal2 fat binaries. 1.0.4 launched on Intel but crashed at first audio
+  probe with "Bad CPU type in executable" because static_ffmpeg shipped
+  arm64-only binaries.
+
+---
+
 ## [1.0.4] - 2026-05-08
 
 ### Fixed
