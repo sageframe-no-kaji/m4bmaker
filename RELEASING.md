@@ -1,57 +1,66 @@
 # Releasing m4bmaker
 
-Three release channels per version: macOS binary, Windows binary, Python package (PyPI).
+## The sequence
 
-**Tag last.** The git tag triggers the in-app update announcement. Push it only after both binaries are built, signed, and verified.
+1. **Build macOS** — run the build script locally, sign, notarize, test the DMG
+2. **Publish to PyPI** — build the Python package and upload it
+3. **Push the tag** — this automatically triggers the Windows build in GitHub Actions
+4. **Download Windows artifact** — from the Actions run, test the installer
+5. **Upload to Payhip** — upload macOS DMG and Windows installer
+6. **Create GitHub Release** — this is what triggers the in-app update notification for existing users
+7. **Close issues** — reference the release version in closing comments
+
+> **The tag does not notify users.** Only the published GitHub Release does.
+> Tag whenever it's convenient — it just kicks off the Windows CI.
 
 ---
 
-## Pre-release checklist
+## Before you start — version checklist
 
-Update all version strings to the new version number:
+All five of these must be updated and committed before building anything:
 
 | File | Field |
 |------|-------|
 | `m4bmaker/__init__.py` | `__version__` |
 | `pyproject.toml` | `version` |
-| `m4bmaker.spec` | `CFBundleShortVersionString`, `CFBundleVersion` |
+| `m4bmaker.spec` | `CFBundleShortVersionString` and `CFBundleVersion` |
 | `installer.iss` | `AppVersion` |
-| `CHANGELOG.md` | add `[x.y.z]` entry |
-
-Commit all five changes together before building anything.
+| `CHANGELOG.md` | new `[x.y.z]` entry |
 
 ---
 
-## macOS binary (local, manual)
+## Step 1 — macOS build
 
-Requires: macOS with Xcode, Developer ID Application certificate, Apple notarization credentials in keychain.
+Requires: macOS, Xcode, Developer ID Application certificate, Apple notarization credentials in keychain.
 
 ```bash
 export CODESIGN_IDENTITY="Developer ID Application: ANDREW TODD MARCUS (3N8F759K8D)"
-export NOTARIZE_KEYCHAIN_PROFILE="<profile name from keychain>"
+export NOTARIZE_KEYCHAIN_PROFILE="<profile name stored in keychain>"
 
 ./scripts/build_macos.sh --dmg
 ```
 
-Verify signature and notarization:
+Verify after the script finishes:
 ```bash
 codesign --verify --deep --strict dist/m4bmaker.app
 spctl --assess --type execute --verbose dist/m4bmaker.app
 ```
 
-**Test the DMG before distributing.** Open on both Apple Silicon and Intel if possible.
+Open the DMG and test the app before moving on.
 
-### Critical signing rules (learned during 1.0.1 — do not change)
+### Rules that must not change (learned the hard way during 1.0.1)
 
-1. **Never use `codesign --deep`** — signs in wrong order, invalidates framework signatures. The script does it correctly: inside-out, dylibs first, then frameworks deepest-first, then bundle.
-2. **Use `ditto` for DMG staging, not `cp -r`** — `cp -r` follows symlinks and destroys `.framework` structure, breaking CodeResources manifests.
-3. **Sign `.framework` directories as bundles** — not just the Mach-O binary inside.
-4. **Notarize the DMG, not the app** — submit `dist/<name>.dmg` to notarytool.
-5. **Staple after notarization** — `xcrun stapler staple dist/<name>.dmg`.
+These are baked into `build_macos.sh` — do not modify the signing approach:
+
+- **Never use `codesign --deep`** — it signs inner binaries in the wrong order and invalidates their signatures. The script signs inside-out: dylibs first, then frameworks deepest-first, then the bundle.
+- **Use `ditto` for DMG staging, not `cp -r`** — `cp -r` follows symlinks and destroys `.framework` bundle structure, which breaks notarization.
+- **Sign `.framework` directories as bundles** — not just the Mach-O binary inside them.
+- **Notarize the DMG, not the app** — submit the `.dmg` file to notarytool.
+- **Staple after notarization** — `xcrun stapler staple dist/<name>.dmg`.
 
 ---
 
-## PyPI package (local, manual)
+## Step 2 — PyPI
 
 ```bash
 python -m build
@@ -59,13 +68,11 @@ twine check dist/m4bmaker-<version>*
 twine upload dist/m4bmaker-<version>*
 ```
 
-PyPI credentials are in keychain / `~/.pypirc`.
+Credentials are in keychain / `~/.pypirc`.
 
 ---
 
-## Windows binary (GitHub Actions, automated)
-
-Triggered by pushing a `v*` tag. Push the tag only after the macOS DMG is verified.
+## Step 3 — Tag (triggers Windows CI automatically)
 
 ```bash
 git push origin main
@@ -73,27 +80,39 @@ git tag v<version>
 git push origin v<version>
 ```
 
-Monitor the run at: https://github.com/sageframe-no-kaji/m4bmaker/actions
+Go to https://github.com/sageframe-no-kaji/m4bmaker/actions and watch the Windows build run. It takes a few minutes. When it finishes, download the artifact: `m4Bookmaker-windows-setup.zip`.
 
-Download artifact `m4Bookmaker-windows-setup.zip` from the completed run. Test the installer before distributing.
+Test the installer on Windows before distributing.
 
-### CI notes (do not change these)
+> You can also trigger the Windows build manually from the Actions tab without a tag
+> (workflow_dispatch). Useful for testing CI before you're ready to tag.
 
-- Uses `actions/checkout@v4` and `actions/setup-python@v5` — do NOT upgrade to `@v6` (doesn't exist)
-- `pip install -e .` is required in addition to requirements so pytest can import the package
-- GUI tests are skipped via `--ignore=tests/gui` — no display in CI
+### Windows CI — do not change these
 
----
-
-## Distribution
-
-1. Upload macOS DMG to Payhip
-2. Upload Windows installer to Payhip
-3. Create GitHub Release `v<version>` — use the `CHANGELOG.md` section as release notes
+- Uses `actions/checkout@v4` and `actions/setup-python@v5` — `@v6` does not exist and will break the build
+- `pip install -e .` is required in addition to requirements — without it pytest cannot import the package
+- GUI tests are skipped via `--ignore=tests/gui` — no display available in CI
 
 ---
 
-## Post-release
+## Step 4 — Upload to Payhip
 
-- Close any tracking issues referencing this version
-- Keep the GitHub Release open for user feedback on platform-specific issues
+Upload the macOS DMG and Windows installer to Payhip manually.
+
+---
+
+## Step 5 — Create GitHub Release
+
+Create the release at https://github.com/sageframe-no-kaji/m4bmaker/releases/new
+
+- Tag: `v<version>` (already pushed)
+- Title: `v<version>`
+- Body: paste the `CHANGELOG.md` section for this version
+
+**This is the step that triggers the in-app update notification for existing users.**
+
+---
+
+## Step 6 — Close issues
+
+Close any tracking issues with a comment referencing the version and the GitHub Release.
