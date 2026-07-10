@@ -58,3 +58,6 @@ concat.txt
 # Website / marketing folder
 m4Bookmaker/
 devlog/
+
+# Ho System process docs (private; versioned in nested repo)
+ho-process/
