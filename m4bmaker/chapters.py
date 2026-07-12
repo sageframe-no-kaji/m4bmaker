@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from m4bmaker.errors import M4BError
 from m4bmaker.models import BookMetadata, Chapter
 from m4bmaker.utils import subprocess_flags
 
@@ -28,7 +28,7 @@ def _probe_file(file: Path, ffprobe: str) -> tuple[float, str | None]:
     cmd = [
         ffprobe,
         "-v",
-        "quiet",
+        "error",  # "-v quiet" would guarantee an empty stderr on failure
         "-print_format",
         "json",
         "-show_format",
@@ -40,20 +40,27 @@ def _probe_file(file: Path, ffprobe: str) -> tuple[float, str | None]:
             capture_output=True,
             encoding="utf-8",
             check=True,
+            timeout=120,
             **subprocess_flags(),
         )
     except subprocess.CalledProcessError as exc:
-        sys.exit(
+        raise M4BError(
             f"Error: ffprobe failed for '{file}'.\n"
             f"The file may be corrupt or in an unsupported format.\n"
             f"ffprobe stderr: {exc.stderr.strip()}"
-        )
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise M4BError(f"Error: ffprobe timed out probing '{file}'.") from exc
+    except (FileNotFoundError, OSError) as exc:
+        raise M4BError(f"Error: ffprobe executable not found at '{ffprobe}'.") from exc
 
     try:
         data = json.loads(result.stdout)
         duration = float(data["format"]["duration"])
     except (KeyError, ValueError, json.JSONDecodeError) as exc:
-        sys.exit(f"Error: could not parse ffprobe output for '{file}': {exc}")
+        raise M4BError(
+            f"Error: could not parse ffprobe output for '{file}': {exc}"
+        ) from exc
 
     title = data.get("format", {}).get("tags", {}).get("title") or None
     return duration, title
@@ -145,6 +152,21 @@ def format_chapter_table(chapters: list[Chapter]) -> str:
     return "\n".join(rows)
 
 
+def _escape_ffmeta(value: str) -> str:
+    """Escape a value for use on the right-hand side of an FFMETADATA1 line.
+
+    Per ffmpeg's ffmetadata spec, the characters ``=``, ``;``, ``#``, ``\\``,
+    and newline are special and must be backslash-escaped. Backslash is
+    escaped first so its escape sequence isn't itself re-escaped.
+    """
+    value = value.replace("\\", "\\\\")
+    value = value.replace("=", "\\=")
+    value = value.replace(";", "\\;")
+    value = value.replace("#", "\\#")
+    value = value.replace("\n", "\\\n")
+    return value
+
+
 def write_ffmetadata(
     chapters: list[Chapter],
     meta: BookMetadata,
@@ -154,19 +176,20 @@ def write_ffmetadata(
     """Write an FFMETADATA1 file with global tags and chapter markers to *dest*.
 
     Chapter END timestamps are derived from the next chapter's *start_time*;
-    the final chapter ends at *total_duration_s*.
+    the final chapter ends at *total_duration_s*. Values are backslash-escaped
+    per the FFMETADATA1 spec (see :func:`_escape_ffmeta`).
     """
     lines: list[str] = [";FFMETADATA1\n"]
 
     # Global metadata tags
     if meta.title:
-        lines.append(f"title={meta.title}\n")
+        lines.append(f"title={_escape_ffmeta(meta.title)}\n")
     if meta.author:
-        lines.append(f"artist={meta.author}\n")
+        lines.append(f"artist={_escape_ffmeta(meta.author)}\n")
     if meta.narrator:
-        lines.append(f"composer={meta.narrator}\n")
+        lines.append(f"composer={_escape_ffmeta(meta.narrator)}\n")
     if meta.genre:
-        lines.append(f"genre={meta.genre}\n")
+        lines.append(f"genre={_escape_ffmeta(meta.genre)}\n")
 
     lines.append("\n")
 
@@ -181,7 +204,7 @@ def write_ffmetadata(
         lines.append("TIMEBASE=1/1000\n")
         lines.append(f"START={start_ms}\n")
         lines.append(f"END={end_ms}\n")
-        lines.append(f"title={chapter.title}\n")
+        lines.append(f"title={_escape_ffmeta(chapter.title)}\n")
         lines.append("\n")
 
     dest.write_text("".join(lines), encoding="utf-8")

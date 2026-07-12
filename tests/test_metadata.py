@@ -144,27 +144,114 @@ class TestExtractMetadata:
 
         assert meta["narrator"] == "Jane Narrator"
 
-    def test_mp4_wrt_fallback_skipped_when_easy_has_composer(
+    def test_mp4_nrt_atom_preferred_over_wrt(self, tmp_path: Path) -> None:
+        """©nrt (Apple's dedicated narrator atom) must win over ©wrt
+        (composer) when both are present."""
+        stub = tmp_path / "book.m4b"
+        stub.write_bytes(b"\x00")
+        easy_audio = _mock_audio({"title": ["My Book"], "artist": ["Author"]})
+
+        raw_mp4 = MagicMock()
+        raw_mp4.tags = {"\xa9nrt": ["Real Narrator"], "\xa9wrt": ["Composer Name"]}
+
+        with patch("mutagen.File", return_value=easy_audio):
+            with patch("mutagen.mp4.MP4", return_value=raw_mp4):
+                meta = extract_metadata(stub)
+
+        assert meta["narrator"] == "Real Narrator"
+
+    def test_mp4_narrator_bug_regression_comment_not_used(self, tmp_path: Path) -> None:
+        """Root-cause regression test: an m4b with a comment atom (store
+        blurb) but no ©nrt/©wrt must NOT surface the comment as narrator —
+        this was the reported bug. EasyMP4 exposes 'comment' but not
+        'composer', so the old chain fell through to comment."""
+        stub = tmp_path / "book.m4b"
+        stub.write_bytes(b"\x00")
+        easy_audio = _mock_audio(
+            {
+                "title": ["My Book"],
+                "artist": ["Author"],
+                "comment": ["A gripping tale of store-blurb text."],
+            }
+        )
+        raw_mp4 = MagicMock()
+        raw_mp4.tags = {}  # no ©nrt, no ©wrt
+
+        with patch("mutagen.File", return_value=easy_audio):
+            with patch("mutagen.mp4.MP4", return_value=raw_mp4):
+                meta = extract_metadata(stub)
+
+        assert meta["narrator"] == ""
+
+    def test_mp4_narrator_read_exception_returns_empty(self, tmp_path: Path) -> None:
+        """If mutagen.mp4.MP4() itself raises (e.g. corrupt atoms), the ©nrt
+        read must degrade to '' rather than propagate."""
+        stub = tmp_path / "book.m4b"
+        stub.write_bytes(b"\x00")
+        easy_audio = _mock_audio({"title": ["My Book"], "artist": ["Author"]})
+
+        with patch("mutagen.File", return_value=easy_audio):
+            with patch("mutagen.mp4.MP4", side_effect=Exception("corrupt atom")):
+                meta = extract_metadata(stub)
+
+        assert meta["narrator"] == ""
+
+    def test_mp4_wrt_fallback_skipped_when_nrt_already_found(
         self, tmp_path: Path
     ) -> None:
-        """When easy=True already returns a narrator (e.g. MP3 with TCOM),
-        the ©wrt fallback must not overwrite it."""
+        """When ©nrt already supplied the narrator, mutagen.mp4.MP4 is called
+        exactly once (for the ©nrt/©wrt read) and the easy-tag chain must
+        not overwrite it."""
+        stub = tmp_path / "book.m4b"
+        stub.write_bytes(b"\x00")
+        easy_audio = _mock_audio({"title": ["My Book"], "artist": ["Author"]})
+
+        raw_mp4 = MagicMock()
+        raw_mp4.tags = {"\xa9nrt": ["Real Narrator"]}
+
+        with patch("mutagen.File", return_value=easy_audio):
+            with patch("mutagen.mp4.MP4", return_value=raw_mp4) as mock_mp4:
+                meta = extract_metadata(stub)
+
+        mock_mp4.assert_called_once()
+        assert meta["narrator"] == "Real Narrator"
+
+    def test_mp3_narrator_still_uses_composer_tag(self, tmp_path: Path) -> None:
+        """MP3 (and other non-MP4 formats) are unaffected — composer/TCOM
+        remain in the easy-tag chain."""
         stub = tmp_path / "track.mp3"
         stub.write_bytes(b"\x00")
         audio = _mock_audio({"composer": ["Easy Narrator"]})
 
-        raw_mp4 = MagicMock()
-        raw_mp4.tags = {"\xa9wrt": ["Different"]}
-
         with patch("mutagen.File", return_value=audio):
-            with patch("mutagen.mp4.MP4", return_value=raw_mp4) as mock_mp4:
-                meta = extract_metadata(stub)
+            meta = extract_metadata(stub)
 
-        # MP4() should not have been called since narrator was already found.
-        mock_mp4.assert_not_called()
         assert meta["narrator"] == "Easy Narrator"
 
+    def test_publisher_tag_excluded_from_narrator_chain(self, tmp_path: Path) -> None:
+        """TPUB (publisher) must never be surfaced as narrator — it holds
+        unrelated data and was part of the original bug's broken chain."""
+        stub = tmp_path / "track.mp3"
+        stub.write_bytes(b"\x00")
+        audio = _mock_audio({"TPUB": ["Some Publishing House"]})
 
+        with patch("mutagen.File", return_value=audio):
+            meta = extract_metadata(stub)
+
+        assert meta["narrator"] == ""
+
+    def test_comment_tag_excluded_from_narrator_chain(self, tmp_path: Path) -> None:
+        """'comment' must never be surfaced as narrator for any format."""
+        stub = tmp_path / "track.mp3"
+        stub.write_bytes(b"\x00")
+        audio = _mock_audio({"comment": ["Some comment text"]})
+
+        with patch("mutagen.File", return_value=audio):
+            meta = extract_metadata(stub)
+
+        assert meta["narrator"] == ""
+
+    def test_multi_value_list_uses_first(self, tmp_path: Path) -> None:
         stub = tmp_path / "track.mp3"
         stub.write_bytes(b"\x00")
         audio = _mock_audio({"title": ["First", "Second"]})
@@ -261,6 +348,21 @@ class TestPromptMissingInteractive:
         meta = {"title": "", "author": "A", "narrator": "N", "genre": ""}
         with patch("builtins.input", return_value=""):
             with pytest.raises(SystemExit):
+                prompt_missing(meta, _args())
+
+    def test_eof_during_prompt_exits_cleanly(self) -> None:
+        """EOFError from input() (stdin closed) must produce a clean
+        SystemExit, not an unhandled traceback."""
+        meta = {"title": "", "author": "A", "narrator": "N", "genre": ""}
+        with patch("builtins.input", side_effect=EOFError):
+            with pytest.raises(SystemExit, match="--no-prompt"):
+                prompt_missing(meta, _args())
+
+    def test_keyboard_interrupt_during_prompt_exits_cleanly(self) -> None:
+        """KeyboardInterrupt from input() must produce a clean SystemExit."""
+        meta = {"title": "", "author": "A", "narrator": "N", "genre": ""}
+        with patch("builtins.input", side_effect=KeyboardInterrupt):
+            with pytest.raises(SystemExit, match="Cancelled"):
                 prompt_missing(meta, _args())
 
 

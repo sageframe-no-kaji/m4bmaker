@@ -95,11 +95,10 @@ class TestNeedsRepair:
         p.write_bytes(b"\x00")
         markers = [
             "Header missing",
-            "Invalid data",
+            "Error while decoding",
+            "Invalid data found",
             "corrupt",
-            "moov atom",
-            "error",
-            "could not find codec",
+            "Invalid frame",
         ]
         for marker in markers:
             with patch(
@@ -107,6 +106,19 @@ class TestNeedsRepair:
                 return_value=_probe_result([{"codec_type": "audio"}], stderr=marker),
             ):
                 assert needs_repair(p, "ffprobe") is True, f"should detect: {marker}"
+
+    def test_repair_not_triggered_by_unrelated_error_substring(self, tmp_path):
+        """A bare 'error' substring must no longer trigger repair — too broad."""
+        p = tmp_path / "a.mp3"
+        p.write_bytes(b"\x00")
+        with patch(
+            "subprocess.run",
+            return_value=_probe_result(
+                [{"codec_type": "audio"}],
+                stderr="some unrelated error message",
+            ),
+        ):
+            assert needs_repair(p, "ffprobe") is False
 
     def test_no_repair_for_data_stream(self, tmp_path):
         """Data and subtitle streams should not trigger repair."""
@@ -133,6 +145,21 @@ class TestNeedsRepair:
             # malformed JSON → no video-stream trigger; no stderr; should be False
             assert needs_repair(p, "ffprobe") is False
 
+    def test_ffprobe_timeout_assumes_no_repair_needed(self, tmp_path):
+        p = tmp_path / "a.mp3"
+        p.write_bytes(b"\x00")
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired("ffprobe", 120),
+        ):
+            assert needs_repair(p, "ffprobe") is False
+
+    def test_ffprobe_oserror_assumes_no_repair_needed(self, tmp_path):
+        p = tmp_path / "a.mp3"
+        p.write_bytes(b"\x00")
+        with patch("subprocess.run", side_effect=OSError("not found")):
+            assert needs_repair(p, "ffprobe") is False
+
     def test_repair_needed_for_empty_streams_with_stderr_error(self, tmp_path):
         p = tmp_path / "a.mp3"
         p.write_bytes(b"\x00")
@@ -153,7 +180,7 @@ class TestRepairFile:
         dest_dir.mkdir()
         with patch("subprocess.run", return_value=_run_ok()) as mock_run:
             result = repair_file(src, dest_dir, "ffmpeg")
-        assert result == dest_dir / "input.mp3"
+        assert result == dest_dir / "000_input.mp3"
         mock_run.assert_called_once()
 
     def test_ffmpeg_command_includes_required_flags(self, tmp_path):
@@ -173,16 +200,33 @@ class TestRepairFile:
         assert "-c:a" in cmd
         assert "copy" in cmd
 
-    def test_unique_name_if_target_already_exists(self, tmp_path):
+    def test_index_prefix_disambiguates_same_named_files(self, tmp_path):
+        """Two same-named source files (different dirs) must produce distinct
+        cleaned names — the index prefix, not existence-checking, guarantees
+        uniqueness."""
+        src_a = tmp_path / "a_dir" / "input.mp3"
+        src_a.parent.mkdir()
+        src_a.write_bytes(b"\x00")
+        src_b = tmp_path / "b_dir" / "input.mp3"
+        src_b.parent.mkdir()
+        src_b.write_bytes(b"\x00")
+        dest_dir = tmp_path / "out"
+        dest_dir.mkdir()
+        with patch("subprocess.run", return_value=_run_ok()):
+            result_a = repair_file(src_a, dest_dir, "ffmpeg", index=0)
+            result_b = repair_file(src_b, dest_dir, "ffmpeg", index=1)
+        assert result_a.name == "000_input.mp3"
+        assert result_b.name == "001_input.mp3"
+        assert result_a != result_b
+
+    def test_default_index_is_zero(self, tmp_path):
         src = tmp_path / "input.mp3"
         src.write_bytes(b"\x00")
         dest_dir = tmp_path / "out"
         dest_dir.mkdir()
-        # Pre-create a file with the same name
-        (dest_dir / "input.mp3").write_bytes(b"\x00")
         with patch("subprocess.run", return_value=_run_ok()):
             result = repair_file(src, dest_dir, "ffmpeg")
-        assert result.name == "input_repaired.mp3"
+        assert result.name == "000_input.mp3"
 
     def test_raises_on_ffmpeg_failure(self, tmp_path):
         src = tmp_path / "input.mp3"
@@ -230,7 +274,7 @@ class TestRunRepair:
 
         assert result.repaired == 1
         assert result.total == 2
-        mock_repair.assert_called_once_with(a, tmp_path / "repaired", "ffmpeg")
+        mock_repair.assert_called_once_with(a, tmp_path / "repaired", "ffmpeg", index=0)
         assert (a, cleaned_a) in result.repaired_paths
 
     def test_progress_callback_called_with_message(self, tmp_path):
@@ -274,12 +318,53 @@ class TestRunRepair:
         assert result.error_paths[0][0] == a
         assert "boom" in result.error_paths[0][1]
 
+    def test_repaired_count_zero_when_only_remux_fails(self, tmp_path):
+        """A file that needed repair but whose remux failed must NOT be
+        counted as repaired — only successful remuxes count."""
+        a = tmp_path / "a.mp3"
+        a.write_bytes(b"\x00")
+        err = subprocess.CalledProcessError(1, "ffmpeg", stderr="boom")
+        with (
+            patch("m4bmaker.repair.needs_repair", return_value=True),
+            patch("m4bmaker.repair.repair_file", side_effect=err),
+        ):
+            result = run_repair([a], tmp_path, "ffmpeg", "ffprobe")
+
+        assert result.repaired == 0
+        assert result.needed_repair is False
+
+    def test_mixed_success_and_failure_counted_separately(self, tmp_path):
+        """N repaired (successes) and M failed must both be accurate and
+        distinct — not conflated."""
+        a = tmp_path / "a.mp3"
+        b = tmp_path / "b.mp3"
+        a.write_bytes(b"\x00")
+        b.write_bytes(b"\x00")
+        cleaned_a = tmp_path / "repaired" / "000_a.mp3"
+        err = subprocess.CalledProcessError(1, "ffmpeg", stderr="boom")
+
+        def fake_repair(source, dest_dir, ffmpeg, index=0):
+            if source == a:
+                return cleaned_a
+            raise err
+
+        with (
+            patch("m4bmaker.repair.needs_repair", return_value=True),
+            patch("m4bmaker.repair.repair_file", side_effect=fake_repair),
+        ):
+            result = run_repair([a, b], tmp_path, "ffmpeg", "ffprobe")
+
+        assert result.repaired == 1
+        assert len(result.error_paths) == 1
+        assert result.error_paths[0][0] == b
+        assert result.needed_repair is True
+
     def test_creates_repair_subdir_in_tmp(self, tmp_path):
         a = tmp_path / "a.mp3"
         a.write_bytes(b"\x00")
         captured: list[Path] = []
 
-        def fake_repair(source, dest_dir, ffmpeg):
+        def fake_repair(source, dest_dir, ffmpeg, index=0):
             captured.append(dest_dir)
             return dest_dir / source.name
 
@@ -379,3 +464,14 @@ class TestFormatRepairReport:
         result = RepairResult(total=2, repaired=2)
         report = format_repair_report(result)
         assert "could not be repaired" not in report
+
+    def test_error_note_names_repaired_and_failed_counts(self):
+        a = Path("a.mp3")
+        result = RepairResult(
+            total=3,
+            repaired=2,
+            error_paths=[(a, "something went wrong")],
+        )
+        report = format_repair_report(result)
+        assert "2 repaired" in report
+        assert "1 file(s) could not be repaired and were used as-is" in report

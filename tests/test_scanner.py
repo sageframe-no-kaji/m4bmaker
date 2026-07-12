@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from m4bmaker.errors import M4BError
 from m4bmaker.scanner import AUDIO_EXTENSIONS, scan_audio_files
 
 # ---------------------------------------------------------------------------
@@ -60,6 +61,19 @@ class TestExtensionFiltering:
         result = scan_audio_files(tmp_path)
         assert len(result) == 2
 
+    def test_hidden_files_skipped(self, tmp_path: Path) -> None:
+        """AppleDouble resource forks (._foo.mp3) must not be scanned."""
+        touch(tmp_path, "01.mp3")
+        touch(tmp_path, "._01.mp3")
+        result = scan_audio_files(tmp_path)
+        assert len(result) == 1
+        assert result[0].name == "01.mp3"
+
+    def test_directory_of_only_hidden_files_exits(self, tmp_path: Path) -> None:
+        touch(tmp_path, "._ghost.mp3")
+        with pytest.raises(M4BError):
+            scan_audio_files(tmp_path)
+
 
 # ---------------------------------------------------------------------------
 # Natural sort order
@@ -103,23 +117,23 @@ class TestNaturalSort:
 
 class TestErrorConditions:
     def test_empty_directory_exits(self, tmp_path: Path) -> None:
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(M4BError) as exc_info:
             scan_audio_files(tmp_path)
         assert "no supported audio files" in str(exc_info.value).lower()
 
     def test_directory_with_only_images_exits(self, tmp_path: Path) -> None:
         touch(tmp_path, "cover.jpg")
-        with pytest.raises(SystemExit):
+        with pytest.raises(M4BError):
             scan_audio_files(tmp_path)
 
     def test_nonexistent_directory_exits(self, tmp_path: Path) -> None:
         missing = tmp_path / "does_not_exist"
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(M4BError) as exc_info:
             scan_audio_files(missing)
         assert "not found" in str(exc_info.value).lower()
 
     def test_exit_message_lists_supported_formats(self, tmp_path: Path) -> None:
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(M4BError) as exc_info:
             scan_audio_files(tmp_path)
         msg = str(exc_info.value).lower()
         assert ".mp3" in msg or "supported" in msg

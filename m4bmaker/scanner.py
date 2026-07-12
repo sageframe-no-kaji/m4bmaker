@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from natsort import natsorted
+
+from m4bmaker.errors import M4BError
 
 AUDIO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp3", ".m4a", ".m4b", ".aac", ".flac", ".wav", ".ogg"}
@@ -15,21 +16,30 @@ AUDIO_EXTENSIONS: frozenset[str] = frozenset(
 def scan_audio_files(directory: Path) -> list[Path]:
     """Return all supported audio files in *directory*, in natural sort order.
 
-    Raises SystemExit if the directory does not exist or contains no audio files.
+    Hidden files (names starting with ``.``) are skipped — this covers macOS
+    AppleDouble resource-fork files (``._foo.mp3``) that appear on FAT/SMB
+    volumes and otherwise pass the extension filter, then hard-fail probing
+    as "corrupt".
+
+    Raises :class:`~m4bmaker.errors.M4BError` if the directory does not exist
+    or contains no audio files.
     """
     if not directory.is_dir():
-        sys.exit(f"Error: directory not found: {directory}")
+        raise M4BError(f"Error: directory not found: {directory}")
 
     files: list[Path] = [
         p
         for p in directory.iterdir()
-        if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
+        if p.is_file()
+        and not p.name.startswith(".")
+        and p.suffix.lower() in AUDIO_EXTENSIONS
     ]
 
     if not files:
-        sys.exit(
+        raise M4BError(
             f"Error: no supported audio files found in {directory}\n"
             f"Supported formats: {', '.join(sorted(AUDIO_EXTENSIONS))}"
         )
 
-    return natsorted(files, key=lambda p: p.name)
+    result: list[Path] = natsorted(files, key=lambda p: p.name)
+    return result

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from m4bmaker.chapters import (
+    _escape_ffmeta,
     _strip_chapter_prefix,
     _format_time,
     build_chapters,
@@ -17,6 +18,7 @@ from m4bmaker.chapters import (
     get_duration,
     write_ffmetadata,
 )
+from m4bmaker.errors import M4BError
 from m4bmaker.models import BookMetadata, Chapter
 
 # ---------------------------------------------------------------------------
@@ -65,7 +67,7 @@ class TestGetDuration:
 
         assert abs(dur - 123.456) < 1e-9
 
-    def test_nonzero_exit_raises_system_exit(self, tmp_path: Path) -> None:
+    def test_nonzero_exit_raises_m4berror(self, tmp_path: Path) -> None:
         stub = tmp_path / "track.mp3"
         stub.write_bytes(b"\x00")
 
@@ -73,10 +75,10 @@ class TestGetDuration:
             "m4bmaker.chapters.subprocess.run",
             side_effect=subprocess.CalledProcessError(1, "ffprobe", stderr="err"),
         ):
-            with pytest.raises(SystemExit, match="ffprobe failed"):
+            with pytest.raises(M4BError, match="ffprobe failed"):
                 get_duration(stub, "ffprobe")
 
-    def test_bad_json_raises_system_exit(self, tmp_path: Path) -> None:
+    def test_bad_json_raises_m4berror(self, tmp_path: Path) -> None:
         stub = tmp_path / "track.mp3"
         stub.write_bytes(b"\x00")
 
@@ -84,10 +86,10 @@ class TestGetDuration:
         mock_result.stdout = "NOT JSON{"
 
         with patch("m4bmaker.chapters.subprocess.run", return_value=mock_result):
-            with pytest.raises(SystemExit, match="could not parse"):
+            with pytest.raises(M4BError, match="could not parse"):
                 get_duration(stub, "ffprobe")
 
-    def test_missing_duration_key_raises_system_exit(self, tmp_path: Path) -> None:
+    def test_missing_duration_key_raises_m4berror(self, tmp_path: Path) -> None:
         stub = tmp_path / "track.mp3"
         stub.write_bytes(b"\x00")
 
@@ -95,8 +97,30 @@ class TestGetDuration:
         mock_result.stdout = json.dumps({"format": {}})  # missing "duration"
 
         with patch("m4bmaker.chapters.subprocess.run", return_value=mock_result):
-            with pytest.raises(SystemExit, match="could not parse"):
+            with pytest.raises(M4BError, match="could not parse"):
                 get_duration(stub, "ffprobe")
+
+    def test_timeout_raises_m4berror(self, tmp_path: Path) -> None:
+        stub = tmp_path / "track.mp3"
+        stub.write_bytes(b"\x00")
+
+        with patch(
+            "m4bmaker.chapters.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("ffprobe", 120),
+        ):
+            with pytest.raises(M4BError, match="timed out"):
+                get_duration(stub, "ffprobe")
+
+    def test_ffprobe_not_found_raises_m4berror(self, tmp_path: Path) -> None:
+        stub = tmp_path / "track.mp3"
+        stub.write_bytes(b"\x00")
+
+        with patch(
+            "m4bmaker.chapters.subprocess.run",
+            side_effect=FileNotFoundError,
+        ):
+            with pytest.raises(M4BError, match="not found"):
+                get_duration(stub, "/nonexistent/ffprobe")
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +149,21 @@ class TestBuildChapters:
         assert chapters[0].start_time == 0.0
         assert chapters[0].title == "Prologue"
         assert chapters[0].source_file == stub
+
+    def test_progress_fn_called_per_file(self, tmp_path: Path) -> None:
+        stub = tmp_path / "01 - Prologue.mp3"
+        stub.write_bytes(b"\x00")
+        calls: list[tuple[int, int, str]] = []
+
+        with patch(
+            "m4bmaker.chapters.subprocess.run",
+            return_value=self._patch_duration(60.0),
+        ):
+            build_chapters(
+                [stub], "ffprobe", progress_fn=lambda i, t, n: calls.append((i, t, n))
+            )
+
+        assert calls == [(1, 1, stub.name)]
 
     def test_multiple_files_cumulative_timestamps(self, tmp_path: Path) -> None:
         files = [tmp_path / f"0{i}.mp3" for i in range(1, 4)]
@@ -302,6 +341,86 @@ class TestWriteFFMetadata:
         write_ffmetadata(chapters, meta, dest, total_duration_s=1.0)
         raw = dest.read_bytes()
         raw.decode("utf-8")  # must not raise
+
+    def test_equals_in_title_escaped(self, tmp_path: Path) -> None:
+        dest = tmp_path / "meta.txt"
+        chapters = [Chapter(index=1, start_time=0.0, title="A=B Chapter")]
+        write_ffmetadata(chapters, BookMetadata(), dest, total_duration_s=5.0)
+        content = dest.read_text()
+        assert "title=A\\=B Chapter" in content
+
+    def test_semicolon_in_title_escaped(self, tmp_path: Path) -> None:
+        dest = tmp_path / "meta.txt"
+        chapters = [Chapter(index=1, start_time=0.0, title="Wait; then go")]
+        write_ffmetadata(chapters, BookMetadata(), dest, total_duration_s=5.0)
+        content = dest.read_text()
+        assert "title=Wait\\; then go" in content
+
+    def test_hash_in_title_escaped(self, tmp_path: Path) -> None:
+        dest = tmp_path / "meta.txt"
+        chapters = [Chapter(index=1, start_time=0.0, title="Chapter #1")]
+        write_ffmetadata(chapters, BookMetadata(), dest, total_duration_s=5.0)
+        content = dest.read_text()
+        assert "title=Chapter \\#1" in content
+
+    def test_backslash_in_title_escaped_first(self, tmp_path: Path) -> None:
+        dest = tmp_path / "meta.txt"
+        chapters = [Chapter(index=1, start_time=0.0, title="C:\\path")]
+        write_ffmetadata(chapters, BookMetadata(), dest, total_duration_s=5.0)
+        content = dest.read_text()
+        assert "title=C:\\\\path" in content
+
+    def test_newline_in_title_escaped(self, tmp_path: Path) -> None:
+        dest = tmp_path / "meta.txt"
+        chapters = [Chapter(index=1, start_time=0.0, title="Line1\nLine2")]
+        write_ffmetadata(chapters, BookMetadata(), dest, total_duration_s=5.0)
+        content = dest.read_text()
+        assert "title=Line1\\\nLine2" in content
+
+    def test_special_chars_escaped_in_global_tags(self, tmp_path: Path) -> None:
+        dest = tmp_path / "meta.txt"
+        meta = BookMetadata(
+            title="A=Title", author="B;Author", narrator="C#Narrator", genre="D\\Genre"
+        )
+        write_ffmetadata(self._make_chapters(), meta, dest, total_duration_s=30.0)
+        content = dest.read_text()
+        assert "title=A\\=Title" in content
+        assert "artist=B\\;Author" in content
+        assert "composer=C\\#Narrator" in content
+        assert "genre=D\\\\Genre" in content
+
+
+# ---------------------------------------------------------------------------
+# _escape_ffmeta
+# ---------------------------------------------------------------------------
+
+
+class TestEscapeFFMeta:
+    def test_equals_escaped(self) -> None:
+        assert _escape_ffmeta("a=b") == "a\\=b"
+
+    def test_semicolon_escaped(self) -> None:
+        assert _escape_ffmeta("a;b") == "a\\;b"
+
+    def test_hash_escaped(self) -> None:
+        assert _escape_ffmeta("a#b") == "a\\#b"
+
+    def test_backslash_escaped(self) -> None:
+        assert _escape_ffmeta("a\\b") == "a\\\\b"
+
+    def test_newline_escaped(self) -> None:
+        assert _escape_ffmeta("a\nb") == "a\\\nb"
+
+    def test_backslash_escaped_before_other_chars(self) -> None:
+        # Backslash must be escaped first so its escape isn't re-escaped by
+        # the subsequent '=' pass etc.
+        assert _escape_ffmeta("a\\=b") == "a\\\\\\=b"
+
+    def test_plain_string_unchanged(self) -> None:
+        assert _escape_ffmeta("Plain Title") == "Plain Title"
+
+    def test_empty_string(self) -> None:
+        assert _escape_ffmeta("") == ""
 
 
 # ---------------------------------------------------------------------------

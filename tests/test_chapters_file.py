@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from m4bmaker.chapters_file import _parse_timestamp, load_chapters_file
+from m4bmaker.errors import M4BError
 from m4bmaker.models import Chapter
 
 # ---------------------------------------------------------------------------
@@ -137,52 +139,97 @@ class TestLoadChaptersFileErrors:
         return p
 
     def test_missing_file_exits(self, tmp_path: Path) -> None:
-        with pytest.raises(SystemExit):
+        with pytest.raises(M4BError):
             load_chapters_file(tmp_path / "nonexistent.txt")
 
     def test_empty_file_exits(self, tmp_path: Path) -> None:
         f = self._write(tmp_path, "")
-        with pytest.raises(SystemExit, match="no chapters"):
+        with pytest.raises(M4BError, match="no chapters"):
             load_chapters_file(f)
 
     def test_comments_only_exits(self, tmp_path: Path) -> None:
         f = self._write(tmp_path, "# just a comment\n# another\n")
-        with pytest.raises(SystemExit, match="no chapters"):
+        with pytest.raises(M4BError, match="no chapters"):
             load_chapters_file(f)
 
     def test_malformed_line_no_timestamp_exits(self, tmp_path: Path) -> None:
         f = self._write(tmp_path, "not a valid line\n")
-        with pytest.raises(SystemExit, match="malformed"):
+        with pytest.raises(M4BError, match="malformed"):
             load_chapters_file(f)
 
     def test_malformed_line_missing_title_exits(self, tmp_path: Path) -> None:
         # Timestamp with no title after it
         f = self._write(tmp_path, "00:00\n")
-        with pytest.raises(SystemExit, match="malformed"):
+        with pytest.raises(M4BError, match="malformed"):
             load_chapters_file(f)
 
     def test_invalid_seconds_exits(self, tmp_path: Path) -> None:
         f = self._write(tmp_path, "00:60 Bad Chapter\n")
-        with pytest.raises(SystemExit, match="invalid timestamp"):
+        with pytest.raises(M4BError, match="invalid timestamp"):
             load_chapters_file(f)
 
     def test_invalid_minutes_exits(self, tmp_path: Path) -> None:
         f = self._write(tmp_path, "1:60:00 Bad Chapter\n")
-        with pytest.raises(SystemExit, match="invalid timestamp"):
+        with pytest.raises(M4BError, match="invalid timestamp"):
             load_chapters_file(f)
 
     def test_error_message_includes_line_number(self, tmp_path: Path) -> None:
         f = self._write(tmp_path, "00:00 Good\nbad line here\n")
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(M4BError) as exc_info:
             load_chapters_file(f)
-        # SystemExit code is the error string
         assert "2" in str(exc_info.value)
 
     def test_partial_valid_then_bad_exits(self, tmp_path: Path) -> None:
         """Lines after a valid chapter are still validated."""
         f = self._write(tmp_path, "00:00 Good Chapter\nalso bad\n")
-        with pytest.raises(SystemExit, match="malformed"):
+        with pytest.raises(M4BError, match="malformed"):
             load_chapters_file(f)
+
+
+# ---------------------------------------------------------------------------
+# load_chapters_file — monotonic timestamp validation
+# ---------------------------------------------------------------------------
+
+
+class TestLoadChaptersFileMonotonic:
+    def _write(self, tmp_path: Path, content: str) -> Path:
+        p = tmp_path / "chapters.txt"
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_strictly_increasing_timestamps_accepted(self, tmp_path: Path) -> None:
+        f = self._write(tmp_path, "00:00 A\n05:00 B\n10:00 C\n")
+        chapters = load_chapters_file(f)
+        assert len(chapters) == 3
+
+    def test_equal_consecutive_timestamps_rejected(self, tmp_path: Path) -> None:
+        f = self._write(tmp_path, "00:00 A\n00:00 B\n")
+        with pytest.raises(M4BError, match="strictly increasing"):
+            load_chapters_file(f)
+
+    def test_decreasing_timestamp_rejected(self, tmp_path: Path) -> None:
+        f = self._write(tmp_path, "05:00 A\n02:00 B\n")
+        with pytest.raises(M4BError, match="strictly increasing"):
+            load_chapters_file(f)
+
+    def test_violation_names_offending_line_number(self, tmp_path: Path) -> None:
+        f = self._write(tmp_path, "00:00 A\n05:00 B\n05:00 C\n")
+        with pytest.raises(M4BError) as exc_info:
+            load_chapters_file(f)
+        assert "3" in str(exc_info.value)
+
+    def test_negative_first_chapter_start_rejected(self, tmp_path: Path) -> None:
+        """_parse_timestamp cannot itself produce a negative value from the
+        MM:SS/H:MM:SS grammar, but the guard is defensive: if a negative
+        start_time ever reaches this point (e.g. a future format extension),
+        it must be rejected rather than silently accepted."""
+        f = self._write(tmp_path, "00:00 A\n05:00 B\n")
+        with patch(
+            "m4bmaker.chapters_file._parse_timestamp",
+            side_effect=[-1.0, 300.0],
+        ):
+            with pytest.raises(M4BError, match="negative start"):
+                load_chapters_file(f)
 
 
 # ---------------------------------------------------------------------------

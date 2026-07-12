@@ -14,6 +14,7 @@ from m4bmaker.cover import (
     find_cover,
     is_url,
 )
+from m4bmaker.errors import M4BError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -106,6 +107,12 @@ class TestNoImages:
         result = find_cover(tmp_path)
         assert result is None
 
+    def test_returns_none_for_missing_directory(self, tmp_path: Path) -> None:
+        """A nonexistent directory must not raise a traceback."""
+        missing = tmp_path / "does_not_exist"
+        result = find_cover(missing)
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # Single image
@@ -192,6 +199,32 @@ class TestMultipleImages:
 # ---------------------------------------------------------------------------
 
 
+class TestExtractCoverTempRoot:
+    """extract_cover_from_audio should allocate under the shared temp root."""
+
+    def test_mp4_cover_extracted_under_temp_root(self, tmp_path: Path) -> None:
+        from m4bmaker.cover import extract_cover_from_audio
+
+        fake_root = tmp_path / "m4bmaker_root"
+        fake_root.mkdir()
+
+        audio_file = tmp_path / "book.m4b"
+        audio_file.write_bytes(b"\x00")
+
+        mock_mp4 = MagicMock()
+        mock_mp4.tags = {"covr": [b"fake-jpeg-bytes" * 10]}  # > 100 bytes
+
+        with (
+            patch("m4bmaker.cover.get_temp_root", return_value=fake_root),
+            patch("subprocess.run", side_effect=Exception("no ffmpeg in test")),
+            patch("mutagen.mp4.MP4", return_value=mock_mp4),
+        ):
+            result = extract_cover_from_audio(audio_file, "ffmpeg")
+
+        assert result is not None
+        assert fake_root in result.parents
+
+
 class TestIsUrl:
     def test_http_url(self) -> None:
         assert is_url("http://example.com/cover.jpg") is True
@@ -266,10 +299,10 @@ class TestDownloadCover:
             path = download_cover("https://example.com/img", tmp_path)
         assert path.suffix == ".png"
 
-    def test_raises_value_error_for_non_image(self, tmp_path: Path) -> None:
+    def test_raises_m4berror_for_non_image(self, tmp_path: Path) -> None:
         resp = _mock_url_response("text/html", b"<html/>")
         with patch("urllib.request.urlopen", return_value=resp):
-            with pytest.raises(ValueError, match="did not return an image"):
+            with pytest.raises(M4BError, match="did not return an image"):
                 download_cover("https://example.com/page.html", tmp_path)
 
     def test_falls_back_to_url_extension_for_unknown_mime(self, tmp_path: Path) -> None:
@@ -283,3 +316,41 @@ class TestDownloadCover:
         with patch("urllib.request.urlopen", return_value=resp):
             path = download_cover("https://example.com/cover", tmp_path)
         assert path.suffix == ".jpg"  # hard-coded fallback
+
+    def test_http_url_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(M4BError, match="https"):
+            download_cover("http://example.com/cover.jpg", tmp_path)
+
+    def test_http_url_rejected_before_any_network_call(self, tmp_path: Path) -> None:
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            with pytest.raises(M4BError):
+                download_cover("http://example.com/cover.jpg", tmp_path)
+        mock_urlopen.assert_not_called()
+
+    def test_oversize_response_rejected(self, tmp_path: Path) -> None:
+        from m4bmaker.cover import _MAX_DOWNLOAD_BYTES
+
+        oversize_body = b"x" * (_MAX_DOWNLOAD_BYTES + 1)
+        resp = _mock_url_response("image/jpeg", oversize_body)
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(M4BError, match="20 MB"):
+                download_cover("https://example.com/huge.jpg", tmp_path)
+
+    def test_oversize_response_not_written_to_disk(self, tmp_path: Path) -> None:
+        from m4bmaker.cover import _MAX_DOWNLOAD_BYTES
+
+        oversize_body = b"x" * (_MAX_DOWNLOAD_BYTES + 1)
+        resp = _mock_url_response("image/jpeg", oversize_body)
+        with patch("urllib.request.urlopen", return_value=resp):
+            with pytest.raises(M4BError):
+                download_cover("https://example.com/huge.jpg", tmp_path)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_at_cap_response_accepted(self, tmp_path: Path) -> None:
+        from m4bmaker.cover import _MAX_DOWNLOAD_BYTES
+
+        exact_body = b"x" * _MAX_DOWNLOAD_BYTES
+        resp = _mock_url_response("image/jpeg", exact_body)
+        with patch("urllib.request.urlopen", return_value=resp):
+            path = download_cover("https://example.com/exact.jpg", tmp_path)
+        assert path.read_bytes() == exact_body

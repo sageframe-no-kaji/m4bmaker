@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from m4bmaker.__main__ import _output_path, _confirm_output, main
+from m4bmaker.errors import M4BError
 
 # ---------------------------------------------------------------------------
 # _output_path helpers
@@ -99,6 +100,17 @@ def _make_popen_mock() -> MagicMock:
     return proc
 
 
+def _fake_encode_popen(cmd: list[str], **_: object) -> MagicMock:
+    """Popen side_effect that writes the .partial output file on success.
+
+    encode() stages output at a sibling ".partial" path and os.replace()s
+    it onto the real output only on success — the mock must create that
+    file (the last cmd arg) or os.replace() raises FileNotFoundError.
+    """
+    Path(cmd[-1]).write_bytes(b"FAKE-M4B")
+    return _make_popen_mock()
+
+
 def _fake_preflight_run(cmd: list[str], **kwargs: object) -> MagicMock:
     """Simulated ffprobe response for preflight analysis."""
     r = MagicMock()
@@ -150,6 +162,10 @@ def _run_pipeline(
 
     def _fake_ffmpeg_popen(cmd: list[str], **kwargs: object) -> MagicMock:
         ffmpeg_cmds.append(cmd)
+        # encode() stages output at a sibling ".partial" path and
+        # os.replace()s it onto the real output on success — the mock must
+        # create that file (the last cmd arg) or os.replace() raises.
+        Path(cmd[-1]).write_bytes(b"FAKE-M4B")
         return _make_popen_mock()
 
     with (
@@ -199,7 +215,9 @@ class TestFullPipeline:
 
     def test_output_path_contains_title_and_author(self, tmp_path: Path) -> None:
         cmd, _ = _run_pipeline(tmp_path)
-        last_arg = cmd[-1]
+        # The ffmpeg command's final arg is the ".partial" staging path
+        # (atomic-encode); strip it to get the real output path.
+        last_arg = cmd[-1].removesuffix(".partial")
         assert "Test Book" in last_arg
         assert "Test Author" in last_arg
         assert last_arg.endswith(".m4b")
@@ -246,7 +264,7 @@ class TestFullPipeline:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters._probe_file", return_value=(5.0, None)),
             patch("m4bmaker.pipeline.get_duration", return_value=5.0),
-            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.repair.needs_repair", return_value=False),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
@@ -291,7 +309,7 @@ class TestFullPipeline:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters._probe_file", return_value=(5.0, None)),
             patch("m4bmaker.pipeline.get_duration", return_value=5.0),
-            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.repair.needs_repair", return_value=False),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
@@ -312,7 +330,8 @@ class TestFullPipeline:
     def test_default_output_uses_author_title_subfolders(self, tmp_path: Path) -> None:
         """Default (no --flat) produces Author/Title/Author - Title.m4b."""
         cmd, _ = _run_pipeline(tmp_path, title="My Book", author="Jane Doe")
-        output = cmd[-1]
+        # The ffmpeg command's final arg is the ".partial" staging path.
+        output = cmd[-1].removesuffix(".partial")
         assert "Jane Doe" in output
         assert "My Book" in output
         # Should contain subdir separators, not just a flat filename
@@ -324,7 +343,7 @@ class TestFullPipeline:
         cmd, _ = _run_pipeline(
             tmp_path, title="My Book", author="Jane Doe", extra_argv=["--flat"]
         )
-        output = cmd[-1]
+        output = cmd[-1].removesuffix(".partial")
         assert output.startswith(str(tmp_path))
         rel = output[len(str(tmp_path)) :]
         # Only one separator: /filename.m4b (or \filename.m4b on Windows)
@@ -343,14 +362,14 @@ class TestFullPipeline:
             author="Author",
             extra_argv=["--output-dir", str(out_dir)],
         )
-        output = cmd[-1]
+        output = cmd[-1].removesuffix(".partial")
         assert output.startswith(str(out_dir))
 
     def test_explicit_output_flag_bypasses_auto_path(self, tmp_path: Path) -> None:
         """--output overrides all auto-path logic."""
         explicit = tmp_path / "explicit.m4b"
         cmd, _ = _run_pipeline(tmp_path, extra_argv=["--output", str(explicit)])
-        assert cmd[-1] == str(explicit)
+        assert cmd[-1].removesuffix(".partial") == str(explicit)
 
 
 # ---------------------------------------------------------------------------
@@ -461,13 +480,13 @@ class TestFetchCoverUrl:
             result = _fetch_cover_url("https://example.com/c.jpg", tmp_path, False)
         assert result == expected
 
-    def test_non_interactive_exits_on_failure(self, tmp_path: Path) -> None:
+    def test_non_interactive_raises_m4berror_on_failure(self, tmp_path: Path) -> None:
         from m4bmaker.__main__ import _fetch_cover_url
 
         with patch(
             "m4bmaker.__main__.download_cover", side_effect=ValueError("not image")
         ):
-            with pytest.raises(SystemExit):
+            with pytest.raises(M4BError):
                 _fetch_cover_url("https://example.com/c.html", tmp_path, False)
 
     def test_interactive_accepts_local_path_on_retry(self, tmp_path: Path) -> None:
@@ -881,7 +900,7 @@ class TestInteractiveChapterEdit:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters._probe_file", return_value=(10.0, None)),
             patch("m4bmaker.pipeline.get_duration", return_value=10.0),
-            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.repair.needs_repair", return_value=False),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
@@ -942,7 +961,7 @@ class TestChaptersFileIntegration:
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.chapters._probe_file", return_value=(10.0, None)),
             patch("m4bmaker.pipeline.get_duration", return_value=10.0),
-            patch("m4bmaker.encoder.subprocess.Popen", return_value=_make_popen_mock()),
+            patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
             patch("m4bmaker.repair.needs_repair", return_value=False),
             patch("m4bmaker.__main__.parse_args", return_value=parsed),
@@ -958,3 +977,96 @@ class TestChaptersFileIntegration:
 
         out = capsys.readouterr().out
         assert "Loaded 2 chapter(s) from chapters.txt" in out
+
+
+# ---------------------------------------------------------------------------
+# main() — top-level exception handling (architectural decision)
+# ---------------------------------------------------------------------------
+
+
+class TestMainTopLevelExceptionHandling:
+    def test_m4berror_becomes_clean_sysexit(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An M4BError raised anywhere in the pipeline becomes a clean
+        SystemExit(str(exc)) — no traceback."""
+        with patch("m4bmaker.__main__.parse_args", side_effect=None) as mock_parse:
+            mock_parse.return_value = MagicMock(directory=tmp_path)
+            with patch("m4bmaker.__main__._run", side_effect=M4BError("boom")):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+        assert str(exc_info.value) == "boom"
+
+    def test_encode_cancelled_exits_130_with_clean_message(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from m4bmaker.errors import EncodeCancelled
+
+        with patch("m4bmaker.__main__.parse_args", return_value=MagicMock()):
+            with patch(
+                "m4bmaker.__main__._run",
+                side_effect=EncodeCancelled("Encoding cancelled."),
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+        assert exc_info.value.code == 130
+        out = capsys.readouterr().out
+        assert "Cancelled." in out
+
+    def test_keyboard_interrupt_exits_130_with_clean_message(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch("m4bmaker.__main__.parse_args", return_value=MagicMock()):
+            with patch("m4bmaker.__main__._run", side_effect=KeyboardInterrupt):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+        assert exc_info.value.code == 130
+        out = capsys.readouterr().out
+        assert "Cancelled." in out
+
+
+# ---------------------------------------------------------------------------
+# main() — repair pass surfaces a report when files actually need repair
+# ---------------------------------------------------------------------------
+
+
+class TestMainRepairFlow:
+    def test_repaired_files_report_printed_and_used(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When repair triggers inside main(), the repair report is printed
+        and the repaired copies replace book.files before encoding."""
+        from m4bmaker.cli import parse_args as real_parse_args
+        from m4bmaker.repair import RepairResult
+
+        stub = _make_stub_mp3(tmp_path / "01.mp3")
+        cleaned = tmp_path / "repaired" / "000_01.mp3"
+
+        argv = [
+            str(tmp_path),
+            "--title",
+            "T",
+            "--author",
+            "A",
+            "--narrator",
+            "N",
+            "--no-prompt",
+        ]
+        parsed = real_parse_args(argv)
+
+        injected = RepairResult(total=1, repaired=1, repaired_paths=[(stub, cleaned)])
+
+        with (
+            patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("m4bmaker.chapters._probe_file", return_value=(10.0, None)),
+            patch("m4bmaker.pipeline.get_duration", return_value=10.0),
+            patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
+            patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
+            patch("m4bmaker.__main__.run_repair", return_value=injected),
+            patch("m4bmaker.__main__.parse_args", return_value=parsed),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "Repairing input audio files" in out
+        assert "1 file(s) contained corrupted frames" in out
