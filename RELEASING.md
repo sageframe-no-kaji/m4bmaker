@@ -116,3 +116,37 @@ Create the release at https://github.com/sageframe-no-kaji/m4bmaker/releases/new
 ## Step 6 — Close issues
 
 Close any tracking issues with a comment referencing the version and the GitHub Release.
+
+---
+
+## Updating pinned build dependencies
+
+Release builds (macOS local build and Windows CI) install from
+`requirements-build.lock` — a fully pinned, hash-verified dependency closure —
+rather than the floor-pinned `requirements.txt` / `requirements-dev.txt`, so
+that the exact same package bytes are installed on every build machine.
+
+When `requirements.txt` or `requirements-dev.txt` change (new dependency,
+version floor bump), regenerate the lock and commit it in the same change:
+
+```bash
+uv pip compile requirements-dev.txt --universal --generate-hashes -o requirements-build.lock
+```
+
+Re-test the macOS build and Windows CI after regenerating — a lock update can
+pull in a genuinely different resolved version, not just a hash refresh.
+
+---
+
+## Hardened runtime entitlements — periodic re-check
+
+`scripts/entitlements.plist` enables `com.apple.security.cs.disable-library-validation`
+and `com.apple.security.cs.allow-unsigned-executable-memory`. Both weaken the
+hardened runtime and exist only because PyInstaller's bootloader and
+PySide6/Qt currently need them (see comments in the plist for the specifics).
+
+Re-test whether these can be removed whenever PyInstaller or PySide6 bump a
+major version — a newer bootloader or Qt build may no longer need one or
+both. Test by building without the entitlement, then running
+`codesign --verify --deep --strict` and actually launching the signed,
+notarized app before assuming it's safe to drop.

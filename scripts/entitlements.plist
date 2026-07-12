@@ -3,8 +3,27 @@
 <plist version="1.0">
 <dict>
     <!-- Hardened runtime entitlements for m4bmaker -->
+
+    <!--
+    Required because CPython's interpreter and Qt/PySide6 (via QML's JIT-ish
+    codegen and dynamically generated trampolines) allocate and execute pages
+    of memory that are not backed by a signed-on-disk binary. Apple's hardened
+    runtime blocks W^X-violating unsigned executable memory by default; without
+    this entitlement the frozen app crashes (or fails to start) under the
+    hardened runtime the moment the interpreter/Qt touches such memory.
+    -->
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
+
+    <!--
+    Required because the PyInstaller bootloader and PySide6/Qt load a large
+    number of dylibs and Python extension modules (.so files) at runtime via
+    dlopen, many of which are signed by their original authors (or ad-hoc
+    signed) rather than by this app's Developer ID. Apple's hardened runtime
+    enforces library validation (only libraries signed with the same Team ID,
+    or by Apple, may be loaded) by default; without this entitlement the app
+    fails to load its own bundled Python/Qt libraries.
+    -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>

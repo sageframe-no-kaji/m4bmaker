@@ -28,13 +28,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-          pip install PySide6 static_ffmpeg
+          # Install from the fully pinned, hash-verified lockfile (reproducible
+          # release builds) instead of the floor-pinned requirements files.
+          # See requirements-build.lock header for the regen command.
+          pip install --require-hashes -r requirements-build.lock
           # pip install -e . is required even though requirements are already
           # installed: without it, pytest cannot import the m4bmaker package
-          # itself (only its dependencies are on sys.path).
-          pip install -e .
+          # itself (only its dependencies are on sys.path). --no-deps is
+          # required to coexist with --require-hashes above (pip refuses to
+          # resolve additional, unhashed dependencies once --require-hashes
+          # has been used in the environment for this install set).
+          pip install --no-deps -e .
 
       - name: Run tests
         run: |
