@@ -41,7 +41,7 @@
       ],
       "tech_stack": "Python (mutagen, natsort, platformdirs)",
       "created": "2026-02-05",
-      "last_updated": "2026-07-10",
+      "last_updated": "2026-07-09",
       "conceived": "2026-03-01",
       "short_description": "Converts folders of MP3 (or other audio) files into clean, properly-chaptered M4B audiobooks for personal use. Ships as a signed macOS app and Windows installer; also distributed as a PyPI package. Full pipeline: automatic chapter detection from filenames, interactive visual chapter editor with built-in audio player, batch queue processing, automatic audio repair for common encoding problems. One of the first tools built under the Ho System; the GUI-to-CLI symmetry was a deliberate architectural choice to keep it scriptable without sacrificing approachability.",
       "substantive_description": [
@@ -66,7 +66,7 @@
         "as_of": "2026-07-09"
       },
       "_keisaku": {
-        "generated_at": "2026-07-11T13:34:17",
+        "generated_at": "2026-07-12T10:36:25",
         "generator_version": "1",
         "sources": {
           "readme": "README.md",
