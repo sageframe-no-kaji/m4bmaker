@@ -72,7 +72,10 @@ fi
 # universal2 .app we need fat ffmpeg/ffprobe binaries containing both slices,
 # otherwise Intel Macs fail with "Bad CPU type in executable" at first probe.
 echo "==> Ensuring universal2 ffmpeg/ffprobe"
-SF_DIR="$(python -c "from static_ffmpeg import run as r; from pathlib import Path; print(Path(r.get_or_fetch_platform_executables_else_raise()[0]).parent)")"
+# static_ffmpeg prints download progress to STDOUT on a cold cache, which
+# would corrupt this command substitution — keep only the last line (the
+# actual path printed by our print()).
+SF_DIR="$(python -c "from static_ffmpeg import run as r; from pathlib import Path; print(Path(r.get_or_fetch_platform_executables_else_raise()[0]).parent)" | tail -n 1)"
 NATIVE_FFMPEG="$SF_DIR/ffmpeg"
 NATIVE_FFPROBE="$SF_DIR/ffprobe"
 
