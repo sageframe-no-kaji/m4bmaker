@@ -23,7 +23,7 @@ from PySide6.QtCore import QThread, Signal
 from m4bmaker.errors import EncodeCancelled, M4BError
 from m4bmaker.models import Book, BookMetadata, Chapter
 from m4bmaker.pipeline import load_audiobook, run_pipeline
-from m4bmaker.utils import find_ffmpeg, find_ffprobe, subprocess_flags
+from m4bmaker.utils import find_ffmpeg, find_ffprobe, get_temp_root, subprocess_flags
 
 
 class LoadWorker(QThread):
@@ -200,7 +200,9 @@ class LoadM4bWorker(QThread):
             covr = audio.tags.get("covr") if audio.tags else None
             if covr:
                 cover_data = bytes(covr[0])
-                tmp_dir = Path(tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+                tmp_dir = Path(
+                    tempfile.mkdtemp(prefix="m4bmaker_cover_", dir=get_temp_root())
+                )
                 dest = tmp_dir / "cover.jpg"
                 dest.write_bytes(cover_data)
                 if dest.stat().st_size > 100:
@@ -218,7 +220,9 @@ class LoadM4bWorker(QThread):
             if apic_frames:
                 frame = next((f for f in apic_frames if f.type == 3), apic_frames[0])
                 ext = ".jpg" if "jpeg" in frame.mime.lower() else ".png"
-                tmp_dir = Path(tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+                tmp_dir = Path(
+                    tempfile.mkdtemp(prefix="m4bmaker_cover_", dir=get_temp_root())
+                )
                 dest = tmp_dir / f"cover{ext}"
                 dest.write_bytes(frame.data)
                 if dest.stat().st_size > 100:

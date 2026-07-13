@@ -323,6 +323,29 @@ class TestChapterEditing:
         w._collect_book_edits()
         assert w._book.chapters[0].title == "Intro"  # type: ignore[union-attr]
 
+    def test_edited_time_applied_in_collect(self, win, tmp_path):
+        """M8: _collect_book_edits must apply time overrides, not just titles —
+        otherwise a user who edits a chapter time and Converts silently
+        loses that edit."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.set_chapter_time(1, 12_345)
+        book = w._collect_book_edits()
+        assert book.chapters[1].start_time == pytest.approx(12.345)
+
+    def test_unedited_time_left_as_original_in_collect(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        book = w._collect_book_edits()
+        assert book.chapters[1].start_time == pytest.approx(10.0)
+
+    def test_edited_time_not_applied_to_source_book(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.set_chapter_time(1, 12_345)
+        w._collect_book_edits()
+        assert w._book.chapters[1].start_time == pytest.approx(10.0)
+
 
 # ── output path computation ───────────────────────────────────────────────────
 
@@ -367,6 +390,69 @@ class TestOutputPath:
         w._on_load_finished(_make_book(tmp_path))
         w._title_edit.setText("New Title")
         assert "New Title" in w._out_nested.text()
+
+
+class TestOutputPathSanitization:
+    """M9: tag-prefilled author/title text must not leak path separators,
+    "..", or Windows-reserved characters into the computed output path."""
+
+    def test_author_with_slash_stays_one_path_component(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._author_edit.setText("AC/DC: Live")
+        w._out_nested.setChecked(True)
+        out = w._computed_output_path()
+        assert out is not None
+        # "AC/DC" must not have been split into two directory levels.
+        parts = out.relative_to(out.parents[2]).parts
+        assert len(parts) == 3  # author-component / title-component / file
+        assert "/" not in parts[0]
+
+    def test_title_with_dotdot_does_not_escape_output_dir(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._title_edit.setText("../../etc")
+        w._out_nested.setChecked(True)
+        out = w._computed_output_path()
+        assert out is not None
+        assert ".." not in out.parts
+
+    def test_windows_reserved_characters_stripped(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._title_edit.setText('Bad:Title*Name?"<>|')
+        w._out_flat.setChecked(True)
+        out = w._computed_output_path()
+        assert out is not None
+        for ch in ':*?"<>|':
+            assert ch not in out.name
+
+    def test_flat_path_author_with_slash_is_single_filename(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_flat.setChecked(True)
+        w._author_edit.setText("Jane Doe")
+        clean = w._computed_output_path()
+        assert clean is not None
+        w._author_edit.setText("Jane/Doe")
+        out = w._computed_output_path()
+        assert out is not None
+        # A raw "/" in the author would have split this into a subdirectory —
+        # sanitization keeps the whole thing one filename under the same parent
+        # rather than introducing an extra path level.
+        assert out.parent == clean.parent
+        assert out.name.endswith(".m4b")
+        assert "/" not in out.name
+
+    def test_plain_author_title_unaffected(self, win, tmp_path):
+        """Ordinary values pass through sanitize_filename_component unchanged."""
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_nested.setChecked(True)
+        out = w._computed_output_path()
+        assert out is not None
+        assert out.name == "My Book.m4b"
+        assert "Jane Doe" in str(out)
 
     def test_browse_custom_output_sets_path(self, win, tmp_path):
         """Lines 376-382: browse dialog sets custom output path."""
@@ -739,13 +825,67 @@ class TestEditMode:
 
         MockW.assert_called_once()
 
+    def test_do_save_chapters_releases_player_before_starting_worker(
+        self, win, tmp_path
+    ):
+        """M6: the player must release its source before the worker starts
+        rewriting the file, or the save can hit a sharing violation."""
+        w, _ = win
+        book = _make_book(tmp_path)
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        w._book = book
+        w._mode = "edit"
+        w._m4b_total_duration = 120.0
+        w._folder_zone._edit.setText(str(m4b))
+
+        with (
+            patch.object(w._player, "release") as mock_release,
+            patch("m4bmaker.gui.window.SaveChaptersWorker") as MockW,
+        ):
+            mock_worker = MagicMock()
+            mock_worker.isRunning.return_value = False
+            MockW.return_value = mock_worker
+            w._on_convert()
+
+        mock_release.assert_called_once()
+
     def test_on_save_finished_updates_status(self, win, tmp_path):
         w, _ = win
         dest = tmp_path / "book.m4b"
         dest.write_bytes(b"\x00")
-        with patch("m4bmaker.gui.window.QMessageBox"):
+        with (
+            patch("m4bmaker.gui.window.QMessageBox"),
+            patch.object(w._player, "load_paused"),
+        ):
             w._on_save_finished(dest)
         assert "book.m4b" in w._status_label.text()
+
+    def test_on_save_finished_hides_progress_bar(self, win, tmp_path):
+        """L4: the bar must not sit at 100% forever after a save completes."""
+        w, _ = win
+        dest = tmp_path / "book.m4b"
+        dest.write_bytes(b"\x00")
+        w._progress_bar.setVisible(True)
+        with (
+            patch("m4bmaker.gui.window.QMessageBox"),
+            patch.object(w._player, "load_paused"),
+        ):
+            w._on_save_finished(dest)
+        assert not w._progress_bar.isVisible()
+
+    def test_on_save_finished_reloads_player_source(self, win, tmp_path):
+        """M6: after a successful save the player reloads the rewritten file."""
+        w, _ = win
+        dest = tmp_path / "book.m4b"
+        dest.write_bytes(b"\x00")
+        with (
+            patch("m4bmaker.gui.window.QMessageBox"),
+            patch.object(w._player, "load_paused") as mock_load_paused,
+        ):
+            w._on_save_finished(dest)
+        mock_load_paused.assert_called_once()
+        assert mock_load_paused.call_args[0][0] == dest
 
 
 # ── Player in Chapters tab ────────────────────────────────────────────────────
@@ -1074,14 +1214,21 @@ class TestChapterMoveUp:
         assert w._book.files[0] == original_file_1
         assert w._book.files[1] == original_file_0
 
-    def test_move_up_skips_files_in_edit_mode(self, win, tmp_path):
+    def test_move_up_is_full_noop_in_edit_mode(self, win, tmp_path):
+        """Reordering time slices within a single .m4b is meaningless — the
+        handler is a no-op in edit mode (defense in depth; the toolbar
+        already hides these buttons there)."""
         w, _ = win
         _load_multi(w, tmp_path)
         w._mode = "edit"
         original_files = list(w._book.files)
+        original_titles = [ch.title for ch in w._book.chapters]
+        original_starts = [ch.start_time for ch in w._book.chapters]
         w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
         w._on_chapter_move_up()
         assert w._book.files == original_files
+        assert [ch.title for ch in w._book.chapters] == original_titles
+        assert [ch.start_time for ch in w._book.chapters] == original_starts
 
     def test_move_up_at_row_0_is_noop(self, win, tmp_path):
         w, _ = win
@@ -1119,14 +1266,19 @@ class TestChapterMoveDown:
         assert w._book.files[0] == original_file_1
         assert w._book.files[1] == original_file_0
 
-    def test_move_down_skips_files_in_edit_mode(self, win, tmp_path):
+    def test_move_down_is_full_noop_in_edit_mode(self, win, tmp_path):
+        """See test_move_up_is_full_noop_in_edit_mode — same rationale."""
         w, _ = win
         _load_multi(w, tmp_path)
         w._mode = "edit"
         original_files = list(w._book.files)
+        original_titles = [ch.title for ch in w._book.chapters]
+        original_starts = [ch.start_time for ch in w._book.chapters]
         w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
         w._on_chapter_move_down()
         assert w._book.files == original_files
+        assert [ch.title for ch in w._book.chapters] == original_titles
+        assert [ch.start_time for ch in w._book.chapters] == original_starts
 
     def test_move_down_at_last_row_is_noop(self, win, tmp_path):
         w, _ = win
@@ -1172,6 +1324,85 @@ class TestChapterRemove:
         w._chapter_table.setCurrentCell(-1, 0)
         w._on_chapter_remove()
         assert len(w._book.chapters) == 5  # unchanged
+
+
+# ── chapter remove (edit-mode timeline invariant) ─────────────────────────────
+
+
+class TestChapterRemoveEditModeTimeline:
+    """A chapter is a time slice of one file in edit mode — removing a marker
+    must not shift the timeline.  The removed span merges into the PREVIOUS
+    chapter (or, for the first chapter, into the new first chapter, whose
+    start moves to 0)."""
+
+    def test_remove_middle_chapter_leaves_other_starts_untouched(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)  # starts: 0, 10, 20, 30, 40 — 10s each
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)  # remove ch3 (20s)
+        w._on_chapter_remove()
+        starts = [ch.start_time for ch in w._book.chapters]
+        # ch1(0), ch2(10) untouched; ch4(30)->ch5(40) untouched — no shift.
+        assert starts == pytest.approx([0.0, 10.0, 30.0, 40.0])
+
+    def test_remove_middle_chapter_merges_span_into_previous(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)  # remove ch3
+        w._on_chapter_remove()
+        # ch2's duration absorbs ch3's 10s span: 10s -> 20s (until ch4 at 30).
+        assert w._chapter_durations[1] == pytest.approx(20.0)
+
+    def test_remove_first_chapter_moves_new_first_start_to_zero(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)  # remove ch1
+        w._on_chapter_remove()
+        assert w._book.chapters[0].start_time == pytest.approx(0.0)
+        # ch2's span absorbs ch1's: originally 10s (10->20), now 0->20 = 20s.
+        assert w._chapter_durations[0] == pytest.approx(20.0)
+        # ch3 (was at 20) is untouched.
+        assert w._book.chapters[1].start_time == pytest.approx(20.0)
+
+    def test_remove_preserves_total_span_sum(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)  # total span 50s
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        w._on_chapter_remove()
+        assert sum(w._chapter_durations) == pytest.approx(50.0)
+
+    def test_remove_last_chapter_leaves_earlier_starts_untouched(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(4, ChapterTable.COL_TITLE)  # remove last
+        w._on_chapter_remove()
+        starts = [ch.start_time for ch in w._book.chapters]
+        assert starts == pytest.approx([0.0, 10.0, 20.0, 30.0])
+        # Last remaining chapter absorbs the removed span (extends to book end).
+        assert w._chapter_durations[-1] == pytest.approx(20.0)
+
+    def test_remove_does_not_touch_files_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        original_files = list(w._book.files)
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        w._on_chapter_remove()
+        assert w._book.files == original_files
+
+    def test_build_mode_remove_still_shifts_timeline(self, win, tmp_path):
+        """Contrast case: build mode keeps the cumulative-rebuild behaviour."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)  # build mode
+        w._on_chapter_remove()
+        starts = [ch.start_time for ch in w._book.chapters]
+        # Cumulative rebuild: every later chapter shifts earlier by 10s.
+        assert starts == pytest.approx([0.0, 10.0, 20.0, 30.0])
 
 
 # ── chapter merge ─────────────────────────────────────────────────────────────
@@ -1387,13 +1618,16 @@ class TestUpdateChapterButtons:
         assert not w._ch_remove_btn.isHidden()
         assert not w._ch_merge_btn.isHidden()
 
-    def test_buttons_visible_in_edit_mode(self, win, tmp_path):
+    def test_reorder_hidden_in_edit_mode(self, win, tmp_path):
+        """Move-up/move-down reorder time slices — meaningless in a single
+        .m4b — so edit mode hides them.  Remove stays available (it merges
+        the span instead of reordering)."""
         w, _ = win
         _load_multi(w, tmp_path)
         w._mode = "edit"
         w._update_chapter_buttons()
-        assert not w._ch_up_btn.isHidden()
-        assert not w._ch_down_btn.isHidden()
+        assert w._ch_up_btn.isHidden()
+        assert w._ch_down_btn.isHidden()
         assert not w._ch_remove_btn.isHidden()
         assert not w._ch_merge_btn.isHidden()
 

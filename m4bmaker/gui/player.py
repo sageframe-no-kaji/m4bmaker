@@ -61,6 +61,14 @@ class AudioPlayerWidget(QWidget):
 
         self._seeking = False  # guard re-entrant slider/position updates
 
+        # M7: a single reusable deferred-seek timer, cancelled and restarted
+        # on every load/seek so a quick second click cannot fire a stale
+        # target position from an earlier request (or the previous file).
+        self._seek_timer = QTimer(self)
+        self._seek_timer.setSingleShot(True)
+        self._seek_timer.timeout.connect(self._apply_pending_seek)
+        self._pending_seek_ms: int | None = None
+
         # ── buttons ──────────────────────────────────────────────────────────
         self._play_btn = QPushButton(_ICON_PLAY)
         self._play_btn.setObjectName("playerPlayBtn")
@@ -129,11 +137,7 @@ class AudioPlayerWidget(QWidget):
 
         self._player.setSource(new_url)
         self._player.play()
-        if start_ms > 0:
-            QTimer.singleShot(
-                self._SEEK_DELAY_MS,
-                lambda: self._player.setPosition(start_ms),
-            )
+        self._defer_seek(start_ms)
 
     def load_paused(self, path: Path, start_ms: int = 0) -> None:
         """Load *path* and seek to *start_ms* without starting playback.
@@ -143,27 +147,62 @@ class AudioPlayerWidget(QWidget):
         """
         new_url = QUrl.fromLocalFile(str(path))
         if self._player.source() == new_url:
+            self._cancel_pending_seek()
             self._player.setPosition(start_ms)
             return
 
         self._player.setSource(new_url)
-        if start_ms > 0:
-            QTimer.singleShot(
-                self._SEEK_DELAY_MS,
-                lambda: self._player.setPosition(start_ms),
-            )
+        self._defer_seek(start_ms)
 
     def seek_chapter(self, start_ms: int) -> None:
         """Seek to *start_ms* in the currently loaded file and resume play."""
         if self._player.source().isEmpty():
             return
+        self._cancel_pending_seek()
         self._player.setPosition(start_ms)
         if self._player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
             self._player.play()
 
     def stop(self) -> None:
         """Stop playback and reset the slider."""
+        self._cancel_pending_seek()
         self._player.stop()
+
+    def release(self) -> None:
+        """Stop playback and clear the loaded source.
+
+        Call before an external process rewrites the currently-open file
+        (M6) — QMediaPlayer can hold a file handle/lock on the source even
+        while stopped, which fails an in-place save on Windows.
+        """
+        self._cancel_pending_seek()
+        self._player.stop()
+        self._player.setSource(QUrl())
+
+    # ── deferred seek (M7) ────────────────────────────────────────────────────
+
+    def _defer_seek(self, start_ms: int) -> None:
+        """Schedule a seek to *start_ms* after the backend has buffered.
+
+        Cancels any seek already pending so a rapid second load/seek cannot
+        later apply a stale target — e.g. a quick second click landing on
+        the *previous* chapter's position, or on the wrong file entirely.
+        """
+        self._cancel_pending_seek()
+        if start_ms <= 0:
+            return
+        self._pending_seek_ms = start_ms
+        self._seek_timer.start(self._SEEK_DELAY_MS)
+
+    def _cancel_pending_seek(self) -> None:
+        self._seek_timer.stop()
+        self._pending_seek_ms = None
+
+    def _apply_pending_seek(self) -> None:
+        """Bound-method timer callback — reads the target from state, not a closure."""
+        if self._pending_seek_ms is not None:
+            self._player.setPosition(self._pending_seek_ms)
+            self._pending_seek_ms = None
 
     @property
     def is_playing(self) -> bool:

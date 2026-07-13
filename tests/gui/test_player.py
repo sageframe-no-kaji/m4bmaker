@@ -156,3 +156,140 @@ class TestAudioPlayerWidgetSeekChapter:
         with patch.object(w._player, "setPosition") as mock_sp:
             w.seek_chapter(5000)
         mock_sp.assert_not_called()
+
+
+class TestAudioPlayerWidgetDeferredSeek:
+    """M7: a single reusable QTimer, cancelled/restarted on every load/seek so
+    a quick second click cannot apply a stale target."""
+
+    def test_load_schedules_single_pending_seek(self, qapp, tmp_path):
+        p = tmp_path / "t.mp3"
+        p.write_bytes(b"\x00")
+        w = AudioPlayerWidget()
+        with patch.object(w._player, "setSource"), patch.object(w._player, "play"):
+            w.load(p, start_ms=5000)
+        assert w._pending_seek_ms == 5000
+        assert w._seek_timer.isActive()
+
+    def test_second_load_cancels_first_pending_seek(self, qapp, tmp_path):
+        """A quick second load must not later apply the first load's target."""
+        from PySide6.QtCore import QUrl
+
+        p1 = tmp_path / "a.mp3"
+        p2 = tmp_path / "b.mp3"
+        p1.write_bytes(b"\x00")
+        p2.write_bytes(b"\x00")
+        w = AudioPlayerWidget()
+        # First load — different source than p2, so no seek_chapter shortcut.
+        with (
+            patch.object(w._player, "source", return_value=QUrl()),
+            patch.object(w._player, "setSource"),
+            patch.object(w._player, "play"),
+        ):
+            w.load(p1, start_ms=1000)
+        assert w._pending_seek_ms == 1000
+
+        # Second load before the first timer fires — must replace the target,
+        # not queue a second timer.
+        with (
+            patch.object(w._player, "source", return_value=QUrl()),
+            patch.object(w._player, "setSource"),
+            patch.object(w._player, "play"),
+        ):
+            w.load(p2, start_ms=9000)
+        assert w._pending_seek_ms == 9000
+
+        with patch.object(w._player, "setPosition") as mock_sp:
+            w._apply_pending_seek()
+        mock_sp.assert_called_once_with(9000)
+        assert w._pending_seek_ms is None
+
+    def test_seek_chapter_cancels_pending_deferred_seek(self, qapp, tmp_path):
+        """Selecting a new chapter mid-buffer must cancel any queued seek."""
+        from PySide6.QtCore import QUrl
+
+        p = tmp_path / "t.mp3"
+        p.write_bytes(b"\x00")
+        w = AudioPlayerWidget()
+        w._pending_seek_ms = 42_000
+        w._seek_timer.start(250)
+        url = QUrl.fromLocalFile(str(p))
+        with (
+            patch.object(w._player, "source", return_value=url),
+            patch.object(w._player, "setPosition"),
+            patch.object(w._player, "play"),
+        ):
+            w.seek_chapter(3000)
+        assert w._pending_seek_ms is None
+        assert not w._seek_timer.isActive()
+
+    def test_stop_cancels_pending_deferred_seek(self, qapp):
+        w = AudioPlayerWidget()
+        w._pending_seek_ms = 42_000
+        w._seek_timer.start(250)
+        with patch.object(w._player, "stop"):
+            w.stop()
+        assert w._pending_seek_ms is None
+        assert not w._seek_timer.isActive()
+
+    def test_apply_pending_seek_noop_when_nothing_pending(self, qapp):
+        w = AudioPlayerWidget()
+        with patch.object(w._player, "setPosition") as mock_sp:
+            w._apply_pending_seek()
+        mock_sp.assert_not_called()
+
+    def test_load_paused_same_source_cancels_pending_seek(self, qapp, tmp_path):
+        from PySide6.QtCore import QUrl
+
+        p = tmp_path / "t.mp3"
+        p.write_bytes(b"\x00")
+        w = AudioPlayerWidget()
+        w._pending_seek_ms = 42_000
+        w._seek_timer.start(250)
+        url = QUrl.fromLocalFile(str(p))
+        with (
+            patch.object(w._player, "source", return_value=url),
+            patch.object(w._player, "setPosition") as mock_sp,
+        ):
+            w.load_paused(p, start_ms=2000)
+        mock_sp.assert_called_once_with(2000)
+        assert w._pending_seek_ms is None
+        assert not w._seek_timer.isActive()
+
+
+class TestAudioPlayerWidgetRelease:
+    """M6: release() lets an external process rewrite the open file safely."""
+
+    def test_release_stops_and_clears_source(self, qapp):
+        w = AudioPlayerWidget()
+        with (
+            patch.object(w._player, "stop") as mock_stop,
+            patch.object(w._player, "setSource") as mock_set_source,
+        ):
+            w.release()
+        mock_stop.assert_called_once()
+        mock_set_source.assert_called_once()
+        from PySide6.QtCore import QUrl
+
+        assert mock_set_source.call_args[0][0] == QUrl()
+
+    def test_release_cancels_pending_deferred_seek(self, qapp):
+        w = AudioPlayerWidget()
+        w._pending_seek_ms = 5000
+        w._seek_timer.start(250)
+        with patch.object(w._player, "stop"), patch.object(w._player, "setSource"):
+            w.release()
+        assert w._pending_seek_ms is None
+        assert not w._seek_timer.isActive()
+
+    def test_has_source_false_after_release(self, qapp, tmp_path):
+        p = tmp_path / "t.mp3"
+        p.write_bytes(b"\x00")
+        w = AudioPlayerWidget()
+        with patch.object(w._player, "setSource"), patch.object(w._player, "play"):
+            w.load(p, start_ms=0)
+        # has_source reads the real (un-mocked) player source, which offscreen
+        # QMediaPlayer never actually populated — release() must still clear
+        # it explicitly regardless of backend state.
+        w.release()
+        assert w.has_source is False

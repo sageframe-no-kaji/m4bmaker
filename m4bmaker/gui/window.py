@@ -82,6 +82,7 @@ from m4bmaker.gui.queue_manager import QueueManager
 from m4bmaker.gui.queue_window import QueueWindow
 from m4bmaker.gui.updater import UpdateChecker, _RELEASES_URL
 from m4bmaker.preflight import format_preflight_summary
+from m4bmaker.utils import sanitize_filename_component
 
 try:
     from PySide6.QtSvg import QSvgRenderer as _QSvgRenderer
@@ -976,8 +977,19 @@ class MainWindow(QMainWindow):
 
     def _computed_output_path(self) -> Optional[Path]:
         folder = self._folder_zone.path()
-        author = self._author_edit.text().strip() or "Unknown Author"
-        title = self._title_edit.text().strip() or "Unknown Title"
+        # M9: tag-prefilled title/author text can contain path separators,
+        # "..", or Windows-reserved characters — sanitize before they become
+        # filename/directory components.
+        author = (
+            sanitize_filename_component(self._author_edit.text().strip())
+            if self._author_edit.text().strip()
+            else "Unknown Author"
+        )
+        title = (
+            sanitize_filename_component(self._title_edit.text().strip())
+            if self._title_edit.text().strip()
+            else "Unknown Title"
+        )
         base = folder.parent if folder else Path.home()
 
         choice = self._out_group.checkedId()
@@ -1006,7 +1018,13 @@ class MainWindow(QMainWindow):
         )
 
     def _collect_book_edits(self) -> Book:
-        """Deep-copy the book and apply current UI field values."""
+        """Deep-copy the book and apply current UI field values.
+
+        Applies both title and start-time overrides from the chapter table
+        (mirrors ``_gather_chapters_from_table``) so a user who edits a
+        chapter's time and then Converts or Adds to Queue does not silently
+        lose that edit (M8).
+        """
         assert self._book is not None
         book = deepcopy(self._book)
         book.metadata.title = self._title_edit.text().strip()
@@ -1014,8 +1032,14 @@ class MainWindow(QMainWindow):
         book.metadata.narrator = self._narrator_edit.text().strip()
         book.metadata.genre = self._genre_edit.text().strip()
         book.cover = self._cover_widget.cover_path()
-        for ch, new_title in zip(book.chapters, self._chapter_table.titles()):
+        times_ms = self._chapter_table.times_ms()
+        for i, (ch, new_title) in enumerate(
+            zip(book.chapters, self._chapter_table.titles())
+        ):
             ch.title = new_title
+            ms = times_ms[i] if i < len(times_ms) else None
+            if ms is not None:
+                ch.start_time = ms / 1000.0
         return book
 
     # ── Slots ─────────────────────────────────────────────────────────────────
@@ -1451,19 +1475,23 @@ class MainWindow(QMainWindow):
         self._chapter_durations = self._derive_durations(self._book)
 
     def _update_chapter_buttons(self) -> None:
-        """Show/enable chapter toolbar buttons based on mode, merge state, and selection."""
+        """Show/enable chapter toolbar buttons based on mode, merge, selection."""
         if not hasattr(self, "_ch_up_btn"):
             return
         has_book = self._book is not None
         in_edit = has_book and self._mode == "edit"
         in_build = has_book and self._mode == "build"
         # After a merge in build mode files/chapters diverge — hide file-reorder ops.
-        # In edit mode the count always differs (1 file, many chapters) so never hide.
         build_merged = in_build and self._chapters_merged
-        show_reorder = has_book and not build_merged
+        # Move-up/move-down reorder time slices, which is physically meaningless
+        # within a single .m4b — edit mode never shows reorder controls.
+        show_reorder = in_build and not build_merged
+        # Remove stays available in both modes; it merges the span in edit mode
+        # rather than reordering anything (see _remove_chapters_edit_mode).
+        show_remove = has_book and not build_merged
         self._ch_up_btn.setVisible(show_reorder)
         self._ch_down_btn.setVisible(show_reorder)
-        self._ch_remove_btn.setVisible(show_reorder)
+        self._ch_remove_btn.setVisible(show_remove)
         self._ch_merge_btn.setVisible(has_book)
         self._ch_add_btn.setVisible(in_edit)
         if not has_book:
@@ -1492,6 +1520,8 @@ class MainWindow(QMainWindow):
             n = self._chapter_table.rowCount()
             self._ch_up_btn.setEnabled(row > 0)
             self._ch_down_btn.setEnabled(0 <= row < n - 1)
+        if show_remove:
+            n = self._chapter_table.rowCount()
             self._ch_remove_btn.setEnabled(sel_count > 0 and sel_count < n)
         # Enable Merge when 2+ consecutive rows are selected
         is_consecutive = len(selected) >= 2 and selected == list(
@@ -1500,6 +1530,11 @@ class MainWindow(QMainWindow):
         self._ch_merge_btn.setEnabled(is_consecutive)
 
     def _on_chapter_move_up(self) -> None:
+        # Reordering time slices within a single .m4b is physically
+        # meaningless (edit mode) — the toolbar hides these buttons, but
+        # guard the handler too since it may be reached via other paths.
+        if self._mode != "build":
+            return
         row = self._chapter_table.currentRow()
         if row <= 0 or self._book is None:
             return
@@ -1509,11 +1544,10 @@ class MainWindow(QMainWindow):
             self._chapter_durations[i - 1],
             self._chapter_durations[i],
         )
-        if self._mode == "build":
-            self._book.files[i], self._book.files[i - 1] = (
-                self._book.files[i - 1],
-                self._book.files[i],
-            )
+        self._book.files[i], self._book.files[i - 1] = (
+            self._book.files[i - 1],
+            self._book.files[i],
+        )
         self._book.chapters[i], self._book.chapters[i - 1] = (
             self._book.chapters[i - 1],
             self._book.chapters[i],
@@ -1523,6 +1557,8 @@ class MainWindow(QMainWindow):
         self._chapter_table.setCurrentCell(i - 1, ChapterTable.COL_TITLE)
 
     def _on_chapter_move_down(self) -> None:
+        if self._mode != "build":
+            return
         if self._book is None:
             return
         row = self._chapter_table.currentRow()
@@ -1535,11 +1571,10 @@ class MainWindow(QMainWindow):
             self._chapter_durations[i + 1],
             self._chapter_durations[i],
         )
-        if self._mode == "build":
-            self._book.files[i], self._book.files[i + 1] = (
-                self._book.files[i + 1],
-                self._book.files[i],
-            )
+        self._book.files[i], self._book.files[i + 1] = (
+            self._book.files[i + 1],
+            self._book.files[i],
+        )
         self._book.chapters[i], self._book.chapters[i + 1] = (
             self._book.chapters[i + 1],
             self._book.chapters[i],
@@ -1560,12 +1595,10 @@ class MainWindow(QMainWindow):
         if len(selected) >= self._chapter_table.rowCount():
             return
         self._sync_titles_from_table()
-        for row in reversed(selected):
-            del self._chapter_durations[row]
-            if self._mode == "build":
-                del self._book.files[row]
-            del self._book.chapters[row]
-        self._reindex_chapters()
+        if self._mode == "edit":
+            self._remove_chapters_edit_mode(selected)
+        else:
+            self._remove_chapters_build_mode(selected)
         self._chapter_table.populate(self._book.chapters)
         new_row = min(selected[0], self._chapter_table.rowCount() - 1)
         if new_row >= 0:
@@ -1573,6 +1606,43 @@ class MainWindow(QMainWindow):
         self._set_status(
             f"{len(self._book.files)} file(s) · {len(self._book.chapters)} chapter(s)."
         )
+
+    def _remove_chapters_build_mode(self, selected: list[int]) -> None:
+        """Remove chapters (= files) and cumulatively rebuild the timeline."""
+        assert self._book is not None
+        for row in reversed(selected):
+            del self._chapter_durations[row]
+            del self._book.files[row]
+            del self._book.chapters[row]
+        self._reindex_chapters()
+
+    def _remove_chapters_edit_mode(self, selected: list[int]) -> None:
+        """Remove chapter markers without shifting the underlying timeline.
+
+        A chapter is a time slice of one file, so deleting a marker must not
+        change any other chapter's start time.  The removed span merges into
+        the PREVIOUS chapter (row 0's span merges forward into the chapter
+        that becomes the new row 0, whose start time moves to 0.0).  Files
+        are never touched in edit mode.
+        """
+        assert self._book is not None
+        for row in reversed(selected):
+            removed_dur = self._chapter_durations[row]
+            del self._chapter_durations[row]
+            del self._book.chapters[row]
+            if row > 0:
+                # Absorb the removed span into the previous (still-present)
+                # chapter; that chapter's own start_time is unchanged.
+                self._chapter_durations[row - 1] += removed_dur
+            elif self._chapter_durations:
+                # First chapter removed: the new first chapter's start moves
+                # to 0 and its duration grows by the removed span.
+                self._chapter_durations[0] += removed_dur
+                self._book.chapters[0].start_time = 0.0
+        # Renumber indices only — start_times of surviving chapters (besides
+        # a new row 0) are left exactly as they were.
+        for i, ch in enumerate(self._book.chapters):
+            ch.index = i + 1
 
     def _on_chapter_merge(self) -> None:
         """Merge selected consecutive rows into a single chapter.
@@ -1706,6 +1776,11 @@ class MainWindow(QMainWindow):
         self._set_status("Saving chapter edits…")
         self._convert_btn.setEnabled(False)
 
+        # M6: the player may still hold the .m4b being rewritten — release
+        # it (stop + clear source) before the worker starts, or the save can
+        # fail with a sharing violation on Windows.
+        self._player.release()
+
         self._save_worker = SaveChaptersWorker(
             source=source,
             chapters=chapters,
@@ -1727,15 +1802,21 @@ class MainWindow(QMainWindow):
             zip(chapters, self._chapter_table.titles())
         ):
             ch.title = new_title
-            if i < len(times_ms) and times_ms[i] is not None:
-                ch.start_time = times_ms[i] / 1000.0
+            ms = times_ms[i] if i < len(times_ms) else None
+            if ms is not None:
+                ch.start_time = ms / 1000.0
         return chapters
 
     def _on_save_finished(self, dest: object) -> None:
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(100)
+        # L4: don't leave the bar sitting at 100% forever — match the error path.
+        self._progress_bar.setVisible(False)
         self._set_status(f"Saved — {Path(str(dest)).name}")
         self._update_controls()
+        # M6: the save released the player's source; reload it now that the
+        # rewrite is complete so playback/seek continues to work.
+        self._player.load_paused(Path(str(dest)), 0)
         if not self.isVisible():
             return
         msg = QMessageBox(self)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # noqa: E402
 
@@ -341,6 +341,40 @@ class TestLoadM4bWorker:
 
         qapp.processEvents()
         assert errors == ["fail"]
+
+    def test_extract_cover_mutagen_mp4_uses_managed_temp_root(self, tmp_path):
+        """M5: cover temp dirs must be allocated under get_temp_root(), not a
+        bare tempfile.mkdtemp(), so they're cleaned up at process exit."""
+        from m4bmaker.utils import get_temp_root
+
+        p = tmp_path / "book.m4b"
+        p.write_bytes(b"\x00")
+
+        # bytearray is a real bytes-like object — bytes(covr[0]) needs an
+        # actual buffer protocol implementer, which MagicMock does not
+        # provide even with a __bytes__ attribute assigned.
+        cover_bytes = bytearray(b"\xff\xd8\xff" + b"\x00" * 200)
+        mock_audio = MagicMock()
+        mock_audio.tags.get.return_value = [cover_bytes]
+
+        with patch("mutagen.mp4.MP4", return_value=mock_audio):
+            result = LoadM4bWorker._extract_cover_mutagen(p)
+
+        assert result is not None
+        assert result.exists()
+        assert get_temp_root() in result.parents
+
+    def test_extract_cover_mutagen_returns_none_when_no_art(self, tmp_path):
+        p = tmp_path / "book.m4b"
+        p.write_bytes(b"\x00")
+        mock_audio = MagicMock()
+        mock_audio.tags = None
+        with (
+            patch("mutagen.mp4.MP4", return_value=mock_audio),
+            patch("mutagen.id3.ID3", side_effect=Exception("no id3")),
+        ):
+            result = LoadM4bWorker._extract_cover_mutagen(p)
+        assert result is None
 
 
 # ── SaveChaptersWorker ────────────────────────────────────────────────────────
