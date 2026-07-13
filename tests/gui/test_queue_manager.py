@@ -250,3 +250,123 @@ def test_stop_prevents_next_job(qapp):
     assert qm._running is False
     # j2 stays queued
     assert j2.status == JobStatus.QUEUED
+
+
+# ── stop→start race guard (HIGH) ──────────────────────────────────────────────
+
+
+class _SlowWorker:
+    """Stand-in for a JobWorker whose thread is still alive after stop().
+
+    ``isRunning`` stays True until :meth:`finish` is called, mimicking an
+    ffmpeg child that keeps dying after the cancel event fires.
+    """
+
+    def __init__(self, job: Job) -> None:
+        self._job = job
+        self._alive = True
+        self.cancel_requested = False
+
+    def isRunning(self) -> bool:
+        return self._alive
+
+    def request_cancel(self) -> None:
+        self.cancel_requested = True
+
+    def cancel(self) -> None:
+        self.request_cancel()
+
+    def start(self) -> None:  # no real thread
+        pass
+
+    def finish(self) -> None:
+        self._alive = False
+
+
+def test_start_refuses_while_previous_worker_still_running(qapp):
+    """start() must not spawn a second worker while the old one is dying."""
+    qm = QueueManager()
+    j1 = _job("A")
+    j2 = _job("B")
+    qm.add(j1)
+    qm.add(j2)
+
+    slow = _SlowWorker(j1)
+    qm._worker = slow  # type: ignore[assignment]
+    qm._running = True  # queue believes it is still consuming j1
+
+    # stop() sets the cancel event but leaves _running true until the thread ends.
+    qm.stop()
+    assert slow.cancel_requested is True
+    assert qm._running is True  # NOT cleared while the worker is still alive
+
+    # A Start click arriving now must be refused — no second worker.
+    qm.start()
+    assert qm._worker is slow  # unchanged; no overwrite of the live QThread
+
+
+def test_stop_keeps_running_true_until_worker_exits(qapp):
+    """_running only clears once the (real) cancellation signal lands."""
+    qm = QueueManager()
+    j1 = _job("A")
+    qm.add(j1)
+
+    slow = _SlowWorker(j1)
+    qm._worker = slow  # type: ignore[assignment]
+    qm._running = True
+    j1.status = JobStatus.RUNNING
+
+    qm.stop()
+    assert qm._running is True
+
+    # Simulate the worker's cancelled signal arriving (delivered directly, so
+    # sender() is None → treated as current, not stale).
+    qm._on_cancelled(j1.id)
+    assert qm._running is False
+    assert j1.status == JobStatus.CANCELLED
+
+
+# ── generation / staleness guard ──────────────────────────────────────────────
+
+
+class _NamedWorker:
+    """Minimal object usable as a fake ``self.sender()`` return value."""
+
+
+def test_late_signal_from_superseded_worker_is_ignored(qapp):
+    """A finished/failed signal from a non-current worker must be dropped."""
+    qm = QueueManager()
+    j1 = _job("A")
+    qm.add(j1)
+    j1.status = JobStatus.RUNNING
+
+    current = _NamedWorker()
+    stale = _NamedWorker()
+    qm._worker = current  # type: ignore[assignment]
+
+    # Emulate Qt's sender() returning the *stale* worker for this slot call.
+    qm.sender = lambda: stale  # type: ignore[method-assign]
+    qm._on_finished(j1.id)
+    # The stale completion must be ignored — job stays RUNNING.
+    assert j1.status == JobStatus.RUNNING
+
+    # A signal from the current worker is honoured.
+    qm.sender = lambda: current  # type: ignore[method-assign]
+    qm._on_finished(j1.id)
+    assert j1.status == JobStatus.COMPLETED
+
+
+def test_stale_failed_signal_ignored(qapp):
+    """A failed signal from a superseded worker must not corrupt state."""
+    qm = QueueManager()
+    j1 = _job("A")
+    qm.add(j1)
+    j1.status = JobStatus.RUNNING
+
+    current = _NamedWorker()
+    stale = _NamedWorker()
+    qm._worker = current  # type: ignore[assignment]
+    qm.sender = lambda: stale  # type: ignore[method-assign]
+    qm._on_failed(j1.id, "late boom")
+    assert j1.status == JobStatus.RUNNING
+    assert j1.error_message == ""

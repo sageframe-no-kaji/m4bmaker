@@ -150,3 +150,44 @@ def test_status_updates_on_job_updated_signal(qm):
     status_item = win._table.item(0, _COL_STATUS)
     assert status_item is not None
     assert "Running" in status_item.text()
+
+
+# ── failed-job error display (F9) ─────────────────────────────────────────────
+
+
+def test_failed_job_sets_error_tooltip(qm):
+    win = QueueWindow(qm)
+    j = _job("broken")
+    qm.add(j)
+    j.status = JobStatus.FAILED
+    j.error_message = "ffmpeg exited with code 1: bad codec"
+    qm.job_updated.emit(j.id)
+    status_item = win._table.item(0, _COL_STATUS)
+    assert status_item is not None
+    assert status_item.toolTip() == "ffmpeg exited with code 1: bad codec"
+
+
+def test_double_click_failed_row_shows_message(qm):
+    from unittest.mock import patch
+
+    win = QueueWindow(qm)
+    j = _job("broken")
+    qm.add(j)
+    j.status = JobStatus.FAILED
+    j.error_message = "the full error text"
+    qm.job_updated.emit(j.id)
+    with patch("m4bmaker.gui.queue_window.QMessageBox.critical") as mock_crit:
+        win._on_cell_double_clicked(0, 0)
+    mock_crit.assert_called_once()
+    assert "the full error text" in mock_crit.call_args[0]
+
+
+def test_double_click_non_failed_row_is_noop(qm):
+    from unittest.mock import patch
+
+    win = QueueWindow(qm)
+    j = _job("fine")
+    qm.add(j)  # QUEUED, no error
+    with patch("m4bmaker.gui.queue_window.QMessageBox.critical") as mock_crit:
+        win._on_cell_double_clicked(0, 0)
+    mock_crit.assert_not_called()

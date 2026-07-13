@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QTableWidget,
@@ -89,6 +90,7 @@ class QueueWindow(QMainWindow):
         self._table.setAlternatingRowColors(True)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
+        self._table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         layout.addWidget(self._table)
 
         # Buttons
@@ -140,6 +142,7 @@ class QueueWindow(QMainWindow):
 
         status_item = QTableWidgetItem(_STATUS_LABELS.get(job.status, ""))
         status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._set_error_tooltip(status_item, job)
         self._table.setItem(row, _COL_STATUS, status_item)
 
         bar = QProgressBar()
@@ -158,6 +161,7 @@ class QueueWindow(QMainWindow):
         status_item = self._table.item(row, _COL_STATUS)
         if status_item:
             status_item.setText(_STATUS_LABELS.get(job.status, ""))
+            self._set_error_tooltip(status_item, job)
 
         bar = self._table.cellWidget(row, _COL_PROGRESS)
         if isinstance(bar, QProgressBar):
@@ -165,6 +169,25 @@ class QueueWindow(QMainWindow):
             bar.setTextVisible(job.status == JobStatus.RUNNING)
             if job.status == JobStatus.RUNNING and job.status_message:
                 bar.setFormat(f"{int(job.progress * 100)}%")
+
+    @staticmethod
+    def _set_error_tooltip(item: QTableWidgetItem, job: Job) -> None:
+        """Show the failure text as a row tooltip for FAILED jobs (F9)."""
+        if job.status == JobStatus.FAILED and job.error_message:
+            item.setToolTip(job.error_message)
+        else:
+            item.setToolTip("")
+
+    def _on_cell_double_clicked(self, row: int, _col: int) -> None:
+        """Double-clicking a failed row shows its full error message (F9)."""
+        item = self._table.item(row, _COL_TITLE)
+        if item is None:
+            return
+        job_id = item.data(Qt.ItemDataRole.UserRole)
+        job = self._qm.get_job(job_id)
+        if job is None or job.status != JobStatus.FAILED or not job.error_message:
+            return
+        QMessageBox.critical(self, f"Failed: {job.title}", job.error_message)
 
     def _refresh_buttons(self) -> None:
         running = self._qm.is_running
