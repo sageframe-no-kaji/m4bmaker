@@ -15,6 +15,7 @@ from m4bmaker.encoder import (
     encode,
     write_concat_list,
 )
+from m4bmaker.errors import EncodeCancelled, M4BError
 
 # ---------------------------------------------------------------------------
 # write_concat_list
@@ -137,6 +138,7 @@ class TestWriteConcatList:
 
         def _fake_popen(cmd: list[str], **_: object) -> MagicMock:
             captured.append(list(cmd))
+            Path(cmd[-1]).write_bytes(b"FAKE-M4B")
             return _popen_mock()
 
         with patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_popen):
@@ -144,9 +146,10 @@ class TestWriteConcatList:
 
         cmd = captured[0]
         # The path containing the apostrophe must appear verbatim as its own
-        # list element — no shell quoting, no mangling.
+        # list element — no shell quoting, no mangling. The final arg is the
+        # ".partial" sibling of output (atomic-encode staging path).
         assert str(concat) in cmd
-        assert str(output) in cmd
+        assert cmd[-1] == str(output) + ".partial"
 
     def test_space_in_path_backslash_escaped(self, tmp_path: Path) -> None:
         f = tmp_path / "my track 01.mp3"
@@ -162,6 +165,38 @@ class TestWriteConcatList:
         dest = tmp_path / "concat.txt"
         write_concat_list([f], dest)
         dest.read_bytes().decode("utf-8")  # must not raise
+
+    def test_newline_in_path_rejected(self, tmp_path: Path) -> None:
+        """A resolved path containing a newline must raise M4BError rather
+        than be written unescaped — the concat-demuxer escaping for
+        newline/CR/tab is unverified (see module docstring warning)."""
+        weird_dir = tmp_path / "weird\ndir"
+        # Can't actually mkdir a name with a newline on most filesystems in
+        # a portable way for this test, so construct the Path directly and
+        # rely on write_concat_list's check operating on the resolved
+        # string form rather than requiring the file to exist on disk.
+        f = weird_dir / "track.mp3"
+        dest = tmp_path / "concat.txt"
+        with pytest.raises(M4BError, match="newline"):
+            write_concat_list([f], dest)
+
+    def test_carriage_return_in_path_rejected(self, tmp_path: Path) -> None:
+        f = tmp_path / "weird\rdir" / "track.mp3"
+        dest = tmp_path / "concat.txt"
+        with pytest.raises(M4BError):
+            write_concat_list([f], dest)
+
+    def test_tab_in_path_rejected(self, tmp_path: Path) -> None:
+        f = tmp_path / "weird\tdir" / "track.mp3"
+        dest = tmp_path / "concat.txt"
+        with pytest.raises(M4BError):
+            write_concat_list([f], dest)
+
+    def test_rejected_path_error_names_the_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "weird\ndir" / "track.mp3"
+        dest = tmp_path / "concat.txt"
+        with pytest.raises(M4BError, match="rename"):
+            write_concat_list([f], dest)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +224,24 @@ def _popen_mock(returncode: int = 0, stderr: str = "") -> MagicMock:
     return proc
 
 
+def _popen_factory(returncode: int = 0, stderr: str = ""):
+    """Return a Popen side_effect that writes the ``.partial`` output file.
+
+    encode() writes to a sibling ``<output>.partial`` path and atomically
+    replaces *output* with it on success via os.replace — a real ffmpeg
+    process creates that file, so the mock must too, or os.replace raises
+    FileNotFoundError. The partial path is always the mocked command's last
+    argument.
+    """
+
+    def _fake_popen(cmd: list[str], **_: object) -> MagicMock:
+        if returncode == 0:
+            Path(cmd[-1]).write_bytes(b"FAKE-M4B")
+        return _popen_mock(returncode=returncode, stderr=stderr)
+
+    return _fake_popen
+
+
 # ---------------------------------------------------------------------------
 # encode — command construction
 # ---------------------------------------------------------------------------
@@ -208,6 +261,7 @@ class TestEncodeCommandConstruction:
 
         def _fake_popen(cmd: list[str], **_: object) -> MagicMock:
             captured.append(list(cmd))
+            Path(cmd[-1]).write_bytes(b"FAKE-M4B")
             return _popen_mock()
 
         with patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_popen):
@@ -270,6 +324,19 @@ class TestEncodeCommandConstruction:
         assert "-movflags" in cmd
         assert "+faststart" in cmd
 
+    def test_explicit_mp4_muxer_flag_present(self, tmp_path: Path) -> None:
+        """Regression test: the ".partial" staging suffix (e.g. "out.m4b.partial")
+        defeats ffmpeg's extension-based muxer auto-detection — confirmed live
+        with a real ffmpeg binary, which failed with "Unable to choose an
+        output format" before "-f mp4" was added. Must never regress.
+
+        The command also has an earlier "-f concat" (input demuxer), so this
+        checks the LAST "-f" flag, which sets the output muxer.
+        """
+        cmd = self._run_encode(tmp_path)
+        last_f_idx = len(cmd) - 1 - cmd[::-1].index("-f")
+        assert cmd[last_f_idx + 1] == "mp4"
+
     def test_output_path_last_arg(self, tmp_path: Path) -> None:
         _, _, _, output = _make_paths(tmp_path)
         concat, meta = tmp_path / "concat.txt", tmp_path / "meta.txt"
@@ -277,12 +344,16 @@ class TestEncodeCommandConstruction:
 
         def _fake_popen(cmd: list[str], **_: object) -> MagicMock:
             captured.append(list(cmd))
+            Path(cmd[-1]).write_bytes(b"FAKE-M4B")
             return _popen_mock()
 
         with patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_popen):
             encode(concat, meta, None, output, "96k", 1, "ffmpeg")
 
-        assert captured[0][-1] == str(output)
+        # Final arg is the ".partial" staging path, not output itself —
+        # encode() renames it onto output only after returncode 0.
+        assert captured[0][-1] == str(output) + ".partial"
+        assert output.exists()
 
     def test_progress_and_nostdin_flags_in_command(self, tmp_path: Path) -> None:
         cmd = self._run_encode(tmp_path)
@@ -298,35 +369,145 @@ class TestEncodeCommandConstruction:
 
 
 class TestEncodeErrorHandling:
-    def test_nonzero_returncode_exits(self, tmp_path: Path) -> None:
+    def test_nonzero_returncode_raises_m4berror(self, tmp_path: Path) -> None:
         concat, meta, _, output = _make_paths(tmp_path)
 
         with patch(
             "m4bmaker.encoder.subprocess.Popen",
             return_value=_popen_mock(returncode=1, stderr="ffmpeg: error details"),
         ):
-            with pytest.raises(SystemExit, match="ffmpeg exited"):
+            with pytest.raises(M4BError, match="ffmpeg exited"):
                 encode(concat, meta, None, output, "96k", 1, "ffmpeg")
 
-    def test_stderr_included_in_exit_message(self, tmp_path: Path) -> None:
+    def test_stderr_included_in_error_message(self, tmp_path: Path) -> None:
         concat, meta, _, output = _make_paths(tmp_path)
 
         with patch(
             "m4bmaker.encoder.subprocess.Popen",
             return_value=_popen_mock(returncode=1, stderr="unique_error_string_xyz"),
         ):
-            with pytest.raises(SystemExit, match="unique_error_string_xyz"):
+            with pytest.raises(M4BError, match="unique_error_string_xyz"):
                 encode(concat, meta, None, output, "96k", 1, "ffmpeg")
 
-    def test_ffmpeg_not_found_exits(self, tmp_path: Path) -> None:
+    def test_ffmpeg_not_found_raises_m4berror(self, tmp_path: Path) -> None:
         concat, meta, _, output = _make_paths(tmp_path)
 
         with patch(
             "m4bmaker.encoder.subprocess.Popen",
             side_effect=FileNotFoundError,
         ):
-            with pytest.raises(SystemExit, match="not found"):
+            with pytest.raises(M4BError, match="not found"):
                 encode(concat, meta, None, output, "96k", 1, "/nonexistent/ffmpeg")
+
+    def test_failed_encode_does_not_leave_partial_file(self, tmp_path: Path) -> None:
+        """A failed encode must clean up the .partial staging file."""
+        concat, meta, _, output = _make_paths(tmp_path)
+
+        with patch(
+            "m4bmaker.encoder.subprocess.Popen",
+            return_value=_popen_mock(returncode=1, stderr="boom"),
+        ):
+            with pytest.raises(M4BError):
+                encode(concat, meta, None, output, "96k", 1, "ffmpeg")
+
+        assert not output.with_name(output.name + ".partial").exists()
+
+    def test_failed_reencode_preserves_existing_good_output(
+        self, tmp_path: Path
+    ) -> None:
+        """A pre-existing good file at output must survive a failed re-encode."""
+        concat, meta, _, output = _make_paths(tmp_path)
+        output.write_bytes(b"PREVIOUS-GOOD-M4B")
+
+        with patch(
+            "m4bmaker.encoder.subprocess.Popen",
+            return_value=_popen_mock(returncode=1, stderr="boom"),
+        ):
+            with pytest.raises(M4BError):
+                encode(concat, meta, None, output, "96k", 1, "ffmpeg")
+
+        assert output.read_bytes() == b"PREVIOUS-GOOD-M4B"
+
+    def test_cancel_event_raises_encode_cancelled(self, tmp_path: Path) -> None:
+        concat, meta, _, output = _make_paths(tmp_path)
+        cancel_event = threading.Event()
+        cancel_event.set()  # already cancelled before encode() polls
+
+        proc = _popen_mock(returncode=-9)
+        proc.poll.return_value = None  # still "running" until killed
+
+        with patch("m4bmaker.encoder.subprocess.Popen", return_value=proc):
+            with pytest.raises(EncodeCancelled, match="cancelled"):
+                encode(
+                    concat,
+                    meta,
+                    None,
+                    output,
+                    "96k",
+                    1,
+                    "ffmpeg",
+                    cancel_event=cancel_event,
+                )
+
+        proc.kill.assert_called_once()
+        assert not output.with_name(output.name + ".partial").exists()
+
+    def test_cancel_event_does_not_touch_existing_output(self, tmp_path: Path) -> None:
+        concat, meta, _, output = _make_paths(tmp_path)
+        output.write_bytes(b"PREVIOUS-GOOD-M4B")
+        cancel_event = threading.Event()
+        cancel_event.set()
+
+        proc = _popen_mock(returncode=-9)
+        proc.poll.return_value = None
+
+        with patch("m4bmaker.encoder.subprocess.Popen", return_value=proc):
+            with pytest.raises(EncodeCancelled):
+                encode(
+                    concat,
+                    meta,
+                    None,
+                    output,
+                    "96k",
+                    1,
+                    "ffmpeg",
+                    cancel_event=cancel_event,
+                )
+
+        assert output.read_bytes() == b"PREVIOUS-GOOD-M4B"
+
+    def test_keyboard_interrupt_kills_child_and_cleans_partial(
+        self, tmp_path: Path
+    ) -> None:
+        """A KeyboardInterrupt propagating out of the poll loop must kill the
+        ffmpeg child, remove the partial file, and re-raise — never silently
+        swallowed, never leaving an orphaned process or partial file."""
+        concat, meta, _, output = _make_paths(tmp_path)
+
+        proc = _popen_mock(returncode=0)
+        proc.poll.side_effect = KeyboardInterrupt
+
+        with patch("m4bmaker.encoder.subprocess.Popen", return_value=proc):
+            with pytest.raises(KeyboardInterrupt):
+                encode(concat, meta, None, output, "96k", 1, "ffmpeg")
+
+        proc.kill.assert_called_once()
+        assert not output.with_name(output.name + ".partial").exists()
+
+    def test_keyboard_interrupt_preserves_existing_good_output(
+        self, tmp_path: Path
+    ) -> None:
+        concat, meta, _, output = _make_paths(tmp_path)
+        output.write_bytes(b"PREVIOUS-GOOD-M4B")
+
+        proc = _popen_mock(returncode=0)
+        proc.poll.side_effect = KeyboardInterrupt
+
+        with patch("m4bmaker.encoder.subprocess.Popen", return_value=proc):
+            with pytest.raises(KeyboardInterrupt):
+                encode(concat, meta, None, output, "96k", 1, "ffmpeg")
+
+        assert output.read_bytes() == b"PREVIOUS-GOOD-M4B"
 
 
 # ---------------------------------------------------------------------------
@@ -402,10 +583,9 @@ class TestProgressBar:
     ) -> None:
         """When isatty=True, returncode=0, and total_ms>0, the 100% bar is written."""
         concat, meta, _, output = _make_paths(tmp_path)
-        proc = _popen_mock(returncode=0)
 
         with (
-            patch("m4bmaker.encoder.subprocess.Popen", return_value=proc),
+            patch("m4bmaker.encoder.subprocess.Popen", side_effect=_popen_factory()),
             patch("sys.stdout.isatty", return_value=True),
         ):
             encode(concat, meta, None, output, "96k", 1, "ffmpeg", total_ms=10000)
@@ -417,10 +597,9 @@ class TestProgressBar:
     ) -> None:
         """When isatty=True but total_ms=0, the clear-line branch runs."""
         concat, meta, _, output = _make_paths(tmp_path)
-        proc = _popen_mock(returncode=0)
 
         with (
-            patch("m4bmaker.encoder.subprocess.Popen", return_value=proc),
+            patch("m4bmaker.encoder.subprocess.Popen", side_effect=_popen_factory()),
             patch("sys.stdout.isatty", return_value=True),
         ):
             encode(concat, meta, None, output, "96k", 1, "ffmpeg", total_ms=0)

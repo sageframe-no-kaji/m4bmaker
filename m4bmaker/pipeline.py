@@ -14,8 +14,11 @@ from pathlib import Path
 from m4bmaker.chapters import build_chapters, get_duration, write_ffmetadata
 from m4bmaker.cover import extract_cover_from_audio, find_cover
 from m4bmaker.encoder import encode, write_concat_list
+from m4bmaker.errors import M4BError
 from m4bmaker.metadata import extract_metadata
-from m4bmaker.models import Book, BookMetadata, PipelineResult
+from m4bmaker.models import Book, BookMetadata, Chapter, PipelineResult
+from m4bmaker.preflight import probe_file, run_preflight
+from m4bmaker.repair import RepairResult
 from m4bmaker.scanner import scan_audio_files
 from m4bmaker.utils import find_ffmpeg
 
@@ -77,6 +80,65 @@ def load_audiobook(
     )
 
 
+def _check_codec_uniformity(files: list[Path], ffprobe: str) -> None:
+    """Raise :class:`M4BError` if *files* mix audio codecs.
+
+    The concat demuxer requires uniform codec parameters across all inputs;
+    a stray file in a different codec (e.g. one .flac among .mp3s) silently
+    produces corrupt output rather than failing loudly.
+    """
+    analysis = run_preflight(files, ffprobe)
+    if not analysis.has_codec_mismatch:
+        return
+
+    by_codec: dict[str, list[str]] = {}
+    for path in files:
+        info = probe_file(path, ffprobe)
+        codec = info.codec_name or "unknown"
+        by_codec.setdefault(codec, []).append(path.name)
+
+    lines = [
+        "Error: input files use more than one audio codec — the concat "
+        "demuxer requires all files to share one format.",
+    ]
+    for codec, names in sorted(by_codec.items()):
+        lines.append(f"  {codec}: {', '.join(names)}")
+    lines.append("Convert all files to a single format before encoding.")
+    raise M4BError("\n".join(lines))
+
+
+def _retime_chapters_after_repair(
+    chapters: list[Chapter], active_files: list[Path], ffprobe: str
+) -> list[Chapter]:
+    """Rebuild chapter start_times cumulatively from *active_files* durations.
+
+    Repair (``-fflags +discardcorrupt``) can shorten a file by dropping
+    corrupt frames, so chapter start times computed from pre-repair
+    durations drift for every chapter after a repaired file. This re-probes
+    each active (post-repair) file and rebuilds start_times from scratch,
+    preserving each chapter's index/title but replacing source_file with the
+    corresponding active file.
+
+    Only meaningful when chapters derive 1:1 from files (``source_file`` is
+    not ``None``); the caller is responsible for checking that precondition.
+    """
+    retimed: list[Chapter] = []
+    cursor_s = 0.0
+    for i, chapter in enumerate(chapters):
+        source = active_files[i] if i < len(active_files) else chapter.source_file
+        retimed.append(
+            Chapter(
+                index=chapter.index,
+                start_time=cursor_s,
+                title=chapter.title,
+                source_file=source,
+            )
+        )
+        if source is not None:
+            cursor_s += get_duration(source, ffprobe)
+    return retimed
+
+
 def run_pipeline(
     book: Book,
     output_path: Path,
@@ -89,6 +151,7 @@ def run_pipeline(
     ffprobe: str = "ffprobe",
     _tmp_dir: Path | None = None,
     cancel_event: "threading.Event | None" = None,
+    repair_result: RepairResult | None = None,
 ) -> PipelineResult:
     """Encode *book* to *output_path* and return a :class:`PipelineResult`.
 
@@ -114,6 +177,12 @@ def run_pipeline(
     _tmp_dir:
         Inject a temporary directory (used in tests to inspect intermediate
         files without relying on :mod:`tempfile`).
+    repair_result:
+        A :class:`~m4bmaker.repair.RepairResult` already computed by the
+        caller (e.g. the CLI's own preflight repair pass). When provided,
+        the internal repair pass is skipped and this result is used instead
+        — avoids running repair twice. Defaults to ``None``, which runs
+        repair internally (unchanged behaviour for the GUI).
     """
     from m4bmaker.repair import apply_repair, run_repair
 
@@ -133,48 +202,48 @@ def run_pipeline(
         def _repair_cb(msg: str) -> None:
             _cb(msg, 0.0)
 
-        repair_result = run_repair(
-            files=book.files,
-            tmp_dir=tmp_path,
-            ffmpeg=ffmpeg,
-            ffprobe=ffprobe,
-            progress_callback=_repair_cb,
-        )
-        active_files = apply_repair(book.files, repair_result)
-        if repair_result.needed_repair:
+        if repair_result is not None:
+            active_repair_result = repair_result
+        else:
+            active_repair_result = run_repair(
+                files=book.files,
+                tmp_dir=tmp_path,
+                ffmpeg=ffmpeg,
+                ffprobe=ffprobe,
+                progress_callback=_repair_cb,
+            )
+        active_files = apply_repair(book.files, active_repair_result)
+        if active_repair_result.needed_repair:
             _cb(
-                f"Repaired {repair_result.repaired} file(s). Continuing…",
+                f"Repaired {active_repair_result.repaired} file(s). Continuing…",
                 0.0,
             )
 
+        # ── Codec uniformity check ──────────────────────────────────────
+        if active_files:
+            _check_codec_uniformity(active_files, ffprobe)
+
+        # ── Chapter retiming ────────────────────────────────────────────
+        working_chapters = book.chapters
+        chapters_from_files = bool(book.chapters) and all(
+            ch.source_file is not None for ch in book.chapters
+        )
+        if active_repair_result.needed_repair and chapters_from_files:
+            working_chapters = _retime_chapters_after_repair(
+                book.chapters, active_files, ffprobe
+            )
+
         # ── Compute total duration ────────────────────────────────────────
-        # Compute total duration from chapter start_times + last file's duration.
-        working_book = book
-        if repair_result.needed_repair:
-            from copy import deepcopy
-
-            working_book = deepcopy(book)
-            # Remap source_file references to cleaned copies
-            mapping = {orig: cleaned for orig, cleaned in repair_result.repaired_paths}
-            for ch in working_book.chapters:
-                if ch.source_file is not None:
-                    ch.source_file = mapping.get(ch.source_file, ch.source_file)
-
-        if working_book.chapters:
-            last_ch = working_book.chapters[-1]
-            from m4bmaker.chapters import get_duration
-
+        if working_chapters:
+            last_ch = working_chapters[-1]
             if last_ch.source_file is not None:
                 last_duration = get_duration(last_ch.source_file, ffprobe)
+                total_duration_s = last_ch.start_time + last_duration
             else:
-                # Fallback: assume equal-length files (chapters-file case).
-                last_duration = (
-                    working_book.chapters[1].start_time
-                    - working_book.chapters[0].start_time
-                    if len(working_book.chapters) > 1
-                    else 0.0
-                )
-            total_duration_s = last_ch.start_time + last_duration
+                # Chapters loaded from a --chapters-file have no source_file;
+                # the book's total_duration (from load_audiobook) is the
+                # authoritative total in that case.
+                total_duration_s = book.total_duration
         else:
             total_duration_s = 0.0
 
@@ -184,9 +253,7 @@ def run_pipeline(
         _cb("Generating chapter markers…", 0.0)
         meta_file = tmp_path / "ffmetadata.txt"
         concat_file = tmp_path / "concat.txt"
-        write_ffmetadata(
-            working_book.chapters, working_book.metadata, meta_file, total_duration_s
-        )
+        write_ffmetadata(working_chapters, book.metadata, meta_file, total_duration_s)
         write_concat_list(active_files, concat_file)
 
         # ── Encode ───────────────────────────────────────────────────────
@@ -213,7 +280,7 @@ def run_pipeline(
         _cb("Done.", 1.0)
         return PipelineResult(
             output_file=output_path,
-            chapter_count=len(working_book.chapters),
+            chapter_count=len(working_chapters),
             duration_seconds=total_duration_s,
         )
 

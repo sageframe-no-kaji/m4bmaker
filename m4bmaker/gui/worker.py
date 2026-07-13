@@ -2,24 +2,39 @@
 
 Both workers are QThread subclasses that emit typed signals so the GUI
 thread never blocks.
+
+Signal naming
+-------------
+Every worker's *custom completion* signal is named ``result_ready`` (or a
+descriptive per-class name) rather than ``finished``.  ``QThread`` already
+defines a native no-argument ``finished`` signal that fires when the thread's
+``run()`` returns; shadowing it with a custom ``finished = Signal(object)``
+breaks lifecycle cleanup (``deleteLater`` on native ``finished``).  The custom
+signals below never collide with the native one.
 """
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
-from m4bmaker.models import Book, BookMetadata
+from m4bmaker.errors import EncodeCancelled, M4BError
+from m4bmaker.models import Book, BookMetadata, Chapter
 from m4bmaker.pipeline import load_audiobook, run_pipeline
-from m4bmaker.utils import find_ffmpeg, find_ffprobe, subprocess_flags
+from m4bmaker.utils import find_ffmpeg, find_ffprobe, get_temp_root, subprocess_flags
 
 
 class LoadWorker(QThread):
     """Scan a folder and build a :class:`Book` (may be slow for many files)."""
 
-    finished = Signal(object)  # Book
+    result_ready = Signal(object)  # Book
     error = Signal(str)
+
+    #: Scan generation stamped by the window at creation; slots read it back
+    #: via ``sender()`` to drop results from a superseded scan (H5).
+    generation: int = -1
 
     def __init__(self, folder: Path) -> None:
         super().__init__()
@@ -29,8 +44,8 @@ class LoadWorker(QThread):
         try:
             ffprobe = find_ffprobe()
             book = load_audiobook(self._folder, ffprobe)
-            self.finished.emit(book)
-        except SystemExit as exc:
+            self.result_ready.emit(book)
+        except M4BError as exc:
             self.error.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             self.error.emit(str(exc))
@@ -40,7 +55,8 @@ class ConvertWorker(QThread):
     """Run :func:`run_pipeline` off the UI thread."""
 
     progress = Signal(str, float)  # message, 0.0–1.0
-    finished = Signal(object)  # PipelineResult
+    result_ready = Signal(object)  # PipelineResult
+    cancelled = Signal()  # user cancellation (not an error)
     error = Signal(str)
 
     def __init__(
@@ -57,6 +73,11 @@ class ConvertWorker(QThread):
         self._bitrate = bitrate
         self._stereo = stereo
         self._sample_rate = sample_rate
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        """Signal the running ffmpeg subprocess to stop."""
+        self._cancel_event.set()
 
     def run(self) -> None:
         try:
@@ -72,12 +93,24 @@ class ConvertWorker(QThread):
                 progress_callback=self._on_progress,
                 ffmpeg=ffmpeg,
                 ffprobe=ffprobe,
+                cancel_event=self._cancel_event,
             )
-            self.finished.emit(result)
-        except SystemExit as exc:
-            self.error.emit(str(exc))
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.result_ready.emit(result)
+        except EncodeCancelled:
+            self.cancelled.emit()
+        except M4BError as exc:
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.error.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
-            self.error.emit(str(exc))
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.error.emit(str(exc))
 
     def _on_progress(self, message: str, fraction: float) -> None:
         self.progress.emit(message, fraction)
@@ -86,10 +119,10 @@ class ConvertWorker(QThread):
 class PreflightWorker(QThread):
     """Run audio preflight analysis off the UI thread."""
 
-    finished = Signal(object)  # AudioAnalysis
+    result_ready = Signal(object)  # AudioAnalysis
     error = Signal(str)
 
-    def __init__(self, files: list) -> None:
+    def __init__(self, files: list[Path]) -> None:
         super().__init__()
         self._files = files
 
@@ -99,8 +132,8 @@ class PreflightWorker(QThread):
             from m4bmaker.preflight import run_preflight
 
             analysis = run_preflight(self._files, ffprobe)
-            self.finished.emit(analysis)
-        except SystemExit as exc:
+            self.result_ready.emit(analysis)
+        except M4BError as exc:
             self.error.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             self.error.emit(str(exc))
@@ -109,8 +142,12 @@ class PreflightWorker(QThread):
 class LoadM4bWorker(QThread):
     """Load chapters and metadata from an existing .m4b file."""
 
-    finished = Signal(object)  # tuple (Book, float total_duration_s)
+    result_ready = Signal(object)  # tuple (Book, float total_duration_s)
     error = Signal(str)
+
+    #: Scan generation stamped by the window at creation; slots read it back
+    #: via ``sender()`` to drop results from a superseded scan (H5).
+    generation: int = -1
 
     def __init__(self, path: Path) -> None:
         super().__init__()
@@ -143,8 +180,8 @@ class LoadM4bWorker(QThread):
                 cover=cover_path,
                 total_duration=total_duration,
             )
-            self.finished.emit((book, total_duration))
-        except SystemExit as exc:
+            self.result_ready.emit((book, total_duration))
+        except M4BError as exc:
             self.error.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             self.error.emit(str(exc))
@@ -158,11 +195,14 @@ class LoadM4bWorker(QThread):
         try:
             from mutagen.mp4 import MP4
 
-            audio = MP4(str(path))
+            # mutagen ships no type stubs, so its calls are untyped.
+            audio = MP4(str(path))  # type: ignore[no-untyped-call]
             covr = audio.tags.get("covr") if audio.tags else None
             if covr:
                 cover_data = bytes(covr[0])
-                tmp_dir = Path(tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+                tmp_dir = Path(
+                    tempfile.mkdtemp(prefix="m4bmaker_cover_", dir=get_temp_root())
+                )
                 dest = tmp_dir / "cover.jpg"
                 dest.write_bytes(cover_data)
                 if dest.stat().st_size > 100:
@@ -174,12 +214,15 @@ class LoadM4bWorker(QThread):
         try:
             from mutagen.id3 import ID3
 
-            tags = ID3(str(path))
-            apic_frames = tags.getall("APIC")
+            # mutagen ships no type stubs, so its calls are untyped.
+            tags = ID3(str(path))  # type: ignore[no-untyped-call]
+            apic_frames = tags.getall("APIC")  # type: ignore[no-untyped-call]
             if apic_frames:
                 frame = next((f for f in apic_frames if f.type == 3), apic_frames[0])
                 ext = ".jpg" if "jpeg" in frame.mime.lower() else ".png"
-                tmp_dir = Path(tempfile.mkdtemp(prefix="m4bmaker_cover_"))
+                tmp_dir = Path(
+                    tempfile.mkdtemp(prefix="m4bmaker_cover_", dir=get_temp_root())
+                )
                 dest = tmp_dir / f"cover{ext}"
                 dest.write_bytes(frame.data)
                 if dest.stat().st_size > 100:
@@ -193,13 +236,13 @@ class LoadM4bWorker(QThread):
 class SaveChaptersWorker(QThread):
     """Rewrite chapter metadata in an .m4b file without re-encoding."""
 
-    finished = Signal(object)  # Path (dest)
+    result_ready = Signal(object)  # Path (dest)
     error = Signal(str)
 
     def __init__(
         self,
         source: Path,
-        chapters: list,
+        chapters: list[Chapter],
         total_duration: float,
         dest: Path,
         metadata: BookMetadata | None = None,
@@ -224,8 +267,8 @@ class SaveChaptersWorker(QThread):
                 ffmpeg,
                 metadata=self._metadata,
             )
-            self.finished.emit(self._dest)
-        except SystemExit as exc:
+            self.result_ready.emit(self._dest)
+        except M4BError as exc:
             self.error.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             self.error.emit(str(exc))
@@ -235,17 +278,27 @@ class SplitWorker(QThread):
     """Export each chapter of an .m4b file as a separate audio file (stream-copy)."""
 
     progress = Signal(str, float)  # message, 0.0–1.0
-    finished = Signal(object)  # output_dir: Path
+    result_ready = Signal(object)  # output_dir: Path
+    cancelled = Signal()  # user cancellation (not an error)
     error = Signal(str)
 
     def __init__(
-        self, source: Path, chapters: list, total_duration: float, output_dir: Path
+        self,
+        source: Path,
+        chapters: list[Chapter],
+        total_duration: float,
+        output_dir: Path,
     ) -> None:
         super().__init__()
         self._source = source
         self._chapters = chapters
         self._total_duration = total_duration
         self._output_dir = output_dir
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        """Ask the split loop to stop between chapters."""
+        self._cancel_event.set()
 
     def run(self) -> None:
         try:
@@ -257,6 +310,9 @@ class SplitWorker(QThread):
             ext = self._source.suffix or ".m4a"
 
             for i, ch in enumerate(self._chapters):
+                if self._cancel_event.is_set():
+                    self.cancelled.emit()
+                    return
                 start = ch.start_time
                 end = (
                     self._chapters[i + 1].start_time
@@ -297,7 +353,10 @@ class SplitWorker(QThread):
                         f"ffmpeg failed on chapter {i + 1}: {result.stderr.strip()}"
                     )
 
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+                return
             self.progress.emit("Split complete.", 1.0)
-            self.finished.emit(self._output_dir)
+            self.result_ready.emit(self._output_dir)
         except Exception as exc:  # noqa: BLE001
             self.error.emit(str(exc))

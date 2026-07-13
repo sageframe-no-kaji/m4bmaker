@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # noqa: E402
 
+from m4bmaker.errors import EncodeCancelled, M4BError  # noqa: E402
 from m4bmaker.gui.worker import (  # noqa: E402
     ConvertWorker,
     LoadWorker,
@@ -41,11 +42,11 @@ class TestLoadWorker:
         book = _make_book(tmp_path)
 
         with (
-            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffprobe"),
+            patch("m4bmaker.gui.worker.find_ffprobe", return_value="/usr/bin/ffprobe"),
             patch("m4bmaker.gui.worker.load_audiobook", return_value=book),
         ):
             worker = LoadWorker(tmp_path)
-            worker.finished.connect(results.append)
+            worker.result_ready.connect(results.append)
             worker.start()
             worker.wait(3000)
 
@@ -67,12 +68,13 @@ class TestLoadWorker:
         qapp.processEvents()
         assert errors == ["bad"]
 
-    def test_error_emits_on_sysexit(self, qapp, tmp_path):
+    def test_error_emits_on_m4berror(self, qapp, tmp_path):
+        """Library now raises M4BError instead of sys.exit; it maps to error."""
         errors: list[str] = []
 
         with patch(
             "m4bmaker.gui.worker.load_audiobook",
-            side_effect=SystemExit("no ffprobe"),
+            side_effect=M4BError("no ffprobe"),
         ):
             worker = LoadWorker(tmp_path)
             worker.error.connect(errors.append)
@@ -86,7 +88,7 @@ class TestLoadWorker:
         finished: list = []
         with patch("m4bmaker.gui.worker.load_audiobook", side_effect=RuntimeError("x")):
             worker = LoadWorker(tmp_path)
-            worker.finished.connect(finished.append)
+            worker.result_ready.connect(finished.append)
             worker.start()
             worker.wait(3000)
         qapp.processEvents()
@@ -104,11 +106,11 @@ class TestConvertWorker:
         results: list[PipelineResult] = []
 
         with (
-            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("m4bmaker.gui.worker.find_ffmpeg", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.gui.worker.run_pipeline", return_value=result),
         ):
             worker = ConvertWorker(book=book, output_path=out)
-            worker.finished.connect(results.append)
+            worker.result_ready.connect(results.append)
             worker.start()
             worker.wait(3000)
 
@@ -131,13 +133,14 @@ class TestConvertWorker:
         qapp.processEvents()
         assert errors == ["enc err"]
 
-    def test_error_emits_on_sysexit(self, qapp, tmp_path):
+    def test_error_emits_on_m4berror(self, qapp, tmp_path):
+        """run_pipeline now raises M4BError instead of sys.exit."""
         book = _make_book(tmp_path)
         errors: list[str] = []
 
         with patch(
             "m4bmaker.gui.worker.run_pipeline",
-            side_effect=SystemExit("no ffmpeg"),
+            side_effect=M4BError("no ffmpeg"),
         ):
             worker = ConvertWorker(book=book, output_path=tmp_path / "out.m4b")
             worker.error.connect(errors.append)
@@ -146,6 +149,54 @@ class TestConvertWorker:
 
         qapp.processEvents()
         assert "no ffmpeg" in errors[0]
+
+    def test_encode_cancelled_emits_cancelled_not_error(self, qapp, tmp_path):
+        """EncodeCancelled maps to the cancelled signal, never to error."""
+        book = _make_book(tmp_path)
+        cancelled: list = []
+        errors: list[str] = []
+        results: list = []
+
+        with patch(
+            "m4bmaker.gui.worker.run_pipeline",
+            side_effect=EncodeCancelled("stopped"),
+        ):
+            worker = ConvertWorker(book=book, output_path=tmp_path / "out.m4b")
+            worker.cancelled.connect(lambda: cancelled.append(True))
+            worker.error.connect(errors.append)
+            worker.result_ready.connect(results.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert cancelled == [True]
+        assert errors == []
+        assert results == []
+
+    def test_request_cancel_sets_event_and_cancelled_wins(self, qapp, tmp_path):
+        """When cancel is requested, a returning pipeline emits cancelled."""
+        book = _make_book(tmp_path)
+        out = tmp_path / "out.m4b"
+        cancelled: list = []
+        results: list = []
+
+        def _fake_run_pipeline(**kwargs):
+            # Simulate the user cancelling while the encode is mid-flight.
+            worker.request_cancel()
+            return PipelineResult(
+                output_file=out, chapter_count=1, duration_seconds=1.0
+            )
+
+        with patch("m4bmaker.gui.worker.run_pipeline", side_effect=_fake_run_pipeline):
+            worker = ConvertWorker(book=book, output_path=out)
+            worker.cancelled.connect(lambda: cancelled.append(True))
+            worker.result_ready.connect(results.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert cancelled == [True]
+        assert results == []
 
     def test_progress_callback_emits_signal(self, qapp, tmp_path):
         book = _make_book(tmp_path)
@@ -195,7 +246,7 @@ class TestConvertWorker:
         finished: list = []
         with patch("m4bmaker.gui.worker.run_pipeline", side_effect=RuntimeError("x")):
             worker = ConvertWorker(book=book, output_path=tmp_path / "out.m4b")
-            worker.finished.connect(finished.append)
+            worker.result_ready.connect(finished.append)
             worker.start()
             worker.wait(3000)
         qapp.processEvents()
@@ -217,11 +268,11 @@ class TestPreflightWorker:
         f.write_bytes(b"\x00")
 
         with (
-            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffprobe"),
+            patch("m4bmaker.gui.worker.find_ffprobe", return_value="/usr/bin/ffprobe"),
             patch("m4bmaker.preflight.run_preflight", return_value=analysis),
         ):
             worker = PreflightWorker([f])
-            worker.finished.connect(results.append)
+            worker.result_ready.connect(results.append)
             worker.start()
             worker.wait(3000)
 
@@ -255,7 +306,7 @@ class TestLoadM4bWorker:
         results = []
 
         with (
-            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffprobe"),
+            patch("m4bmaker.gui.worker.find_ffprobe", return_value="/usr/bin/ffprobe"),
             patch(
                 "m4bmaker.m4b_editor.load_m4b_chapters", return_value=([chapter], 120.0)
             ),
@@ -265,7 +316,7 @@ class TestLoadM4bWorker:
             ),
         ):
             worker = LoadM4bWorker(p)
-            worker.finished.connect(results.append)
+            worker.result_ready.connect(results.append)
             worker.start()
             worker.wait(3000)
 
@@ -291,6 +342,40 @@ class TestLoadM4bWorker:
         qapp.processEvents()
         assert errors == ["fail"]
 
+    def test_extract_cover_mutagen_mp4_uses_managed_temp_root(self, tmp_path):
+        """M5: cover temp dirs must be allocated under get_temp_root(), not a
+        bare tempfile.mkdtemp(), so they're cleaned up at process exit."""
+        from m4bmaker.utils import get_temp_root
+
+        p = tmp_path / "book.m4b"
+        p.write_bytes(b"\x00")
+
+        # bytearray is a real bytes-like object — bytes(covr[0]) needs an
+        # actual buffer protocol implementer, which MagicMock does not
+        # provide even with a __bytes__ attribute assigned.
+        cover_bytes = bytearray(b"\xff\xd8\xff" + b"\x00" * 200)
+        mock_audio = MagicMock()
+        mock_audio.tags.get.return_value = [cover_bytes]
+
+        with patch("mutagen.mp4.MP4", return_value=mock_audio):
+            result = LoadM4bWorker._extract_cover_mutagen(p)
+
+        assert result is not None
+        assert result.exists()
+        assert get_temp_root() in result.parents
+
+    def test_extract_cover_mutagen_returns_none_when_no_art(self, tmp_path):
+        p = tmp_path / "book.m4b"
+        p.write_bytes(b"\x00")
+        mock_audio = MagicMock()
+        mock_audio.tags = None
+        with (
+            patch("mutagen.mp4.MP4", return_value=mock_audio),
+            patch("mutagen.id3.ID3", side_effect=Exception("no id3")),
+        ):
+            result = LoadM4bWorker._extract_cover_mutagen(p)
+        assert result is None
+
 
 # ── SaveChaptersWorker ────────────────────────────────────────────────────────
 
@@ -309,11 +394,11 @@ class TestSaveChaptersWorker:
         results = []
 
         with (
-            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffmpeg"),
+            patch("m4bmaker.gui.worker.find_ffmpeg", return_value="/usr/bin/ffmpeg"),
             patch("m4bmaker.m4b_editor.save_m4b_chapters"),
         ):
             worker = SaveChaptersWorker(source, chapters, 60.0, dest)
-            worker.finished.connect(results.append)
+            worker.result_ready.connect(results.append)
             worker.start()
             worker.wait(3000)
 
@@ -326,9 +411,7 @@ class TestSaveChaptersWorker:
         source.write_bytes(b"\x00")
         dest = tmp_path / "out.m4b"
         chapters = self._chapters(tmp_path)
-        meta = BookMetadata(
-            title="Test", author="Auth", narrator="Narr", genre="Gen"
-        )
+        meta = BookMetadata(title="Test", author="Auth", narrator="Narr", genre="Gen")
         captured: list[dict] = []
 
         def fake_save(src, ch, dur, dst, ffmpeg, *, metadata=None):
@@ -386,7 +469,7 @@ class TestSplitWorker:
         mock_result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with patch("subprocess.run", return_value=mock_result):
             worker = SplitWorker(source, self._chapters(tmp_path), 60.0, out_dir)
-            worker.finished.connect(results.append)
+            worker.result_ready.connect(results.append)
             worker.start()
             worker.wait(3000)
 
@@ -429,3 +512,26 @@ class TestSplitWorker:
             worker.wait(3000)
 
         assert out_dir.is_dir()
+
+    def test_cancel_before_start_emits_cancelled_not_finished(self, qapp, tmp_path):
+        """A cancel requested before the loop runs stops cleanly with cancelled."""
+        source = tmp_path / "book.m4b"
+        source.write_bytes(b"\x00")
+        out_dir = tmp_path / "chapters"
+        cancelled: list = []
+        results: list = []
+
+        import subprocess
+
+        mock_result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with patch("subprocess.run", return_value=mock_result):
+            worker = SplitWorker(source, self._chapters(tmp_path), 60.0, out_dir)
+            worker.request_cancel()  # cancel before starting
+            worker.cancelled.connect(lambda: cancelled.append(True))
+            worker.result_ready.connect(results.append)
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert cancelled == [True]
+        assert results == []

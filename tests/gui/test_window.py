@@ -45,6 +45,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: F401, E402
 
 from m4bmaker.gui.window import MainWindow  # noqa: E402
@@ -88,7 +89,14 @@ def win(qapp, tmp_path):
     yield w, tmp_path
     w._is_busy = lambda: False  # type: ignore[method-assign]  # prevent dialog on teardown
     w.close()
-    qapp.processEvents()  # drain pending Qt events so the next test starts clean
+    # Destroy the window's widget tree for real: without this, windows
+    # accumulate across the suite and every app-level event (styles, etc.)
+    # touches all of them. processEvents alone never handles DeferredDelete —
+    # it must be flushed explicitly via sendPostedEvents.
+    w.deleteLater()
+    qapp.processEvents()  # deliver pending queued signals first
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+    qapp.processEvents()  # drain anything the deletions released
 
 
 # ── initial state ─────────────────────────────────────────────────────────────
@@ -166,17 +174,22 @@ class TestFolderLoading:
         mock_crit.assert_called_once()
         assert "boom" in mock_crit.call_args[0]
 
-    def test_on_folder_changed_starts_load_worker(self, win, tmp_path):
+    def test_on_folder_changed_starts_load_worker(self, win, tmp_path, qapp):
         w, _ = win
+        # PreflightWorker is mocked so the queued result_ready signal does not
+        # spawn a real ffprobe thread that would be destroyed at teardown.
         with (
-            patch("m4bmaker.gui.worker.shutil.which", return_value="/usr/bin/ffprobe"),
+            patch("m4bmaker.gui.worker.find_ffprobe", return_value="/usr/bin/ffprobe"),
             patch(
                 "m4bmaker.gui.worker.load_audiobook", return_value=_make_book(tmp_path)
             ),
+            patch("m4bmaker.gui.window.PreflightWorker") as MockPW,
         ):
+            MockPW.return_value = MagicMock()
             w._on_folder_changed(tmp_path)
             assert w._load_worker is not None
             w._load_worker.wait(3000)
+            qapp.processEvents()  # drain the queued result_ready signal
 
 
 # ── folder cleared ────────────────────────────────────────────────────────────
@@ -310,6 +323,29 @@ class TestChapterEditing:
         w._collect_book_edits()
         assert w._book.chapters[0].title == "Intro"  # type: ignore[union-attr]
 
+    def test_edited_time_applied_in_collect(self, win, tmp_path):
+        """M8: _collect_book_edits must apply time overrides, not just titles —
+        otherwise a user who edits a chapter time and Converts silently
+        loses that edit."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.set_chapter_time(1, 12_345)
+        book = w._collect_book_edits()
+        assert book.chapters[1].start_time == pytest.approx(12.345)
+
+    def test_unedited_time_left_as_original_in_collect(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        book = w._collect_book_edits()
+        assert book.chapters[1].start_time == pytest.approx(10.0)
+
+    def test_edited_time_not_applied_to_source_book(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._chapter_table.set_chapter_time(1, 12_345)
+        w._collect_book_edits()
+        assert w._book.chapters[1].start_time == pytest.approx(10.0)
+
 
 # ── output path computation ───────────────────────────────────────────────────
 
@@ -355,6 +391,69 @@ class TestOutputPath:
         w._title_edit.setText("New Title")
         assert "New Title" in w._out_nested.text()
 
+
+class TestOutputPathSanitization:
+    """M9: tag-prefilled author/title text must not leak path separators,
+    "..", or Windows-reserved characters into the computed output path."""
+
+    def test_author_with_slash_stays_one_path_component(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._author_edit.setText("AC/DC: Live")
+        w._out_nested.setChecked(True)
+        out = w._computed_output_path()
+        assert out is not None
+        # "AC/DC" must not have been split into two directory levels.
+        parts = out.relative_to(out.parents[2]).parts
+        assert len(parts) == 3  # author-component / title-component / file
+        assert "/" not in parts[0]
+
+    def test_title_with_dotdot_does_not_escape_output_dir(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._title_edit.setText("../../etc")
+        w._out_nested.setChecked(True)
+        out = w._computed_output_path()
+        assert out is not None
+        assert ".." not in out.parts
+
+    def test_windows_reserved_characters_stripped(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._title_edit.setText('Bad:Title*Name?"<>|')
+        w._out_flat.setChecked(True)
+        out = w._computed_output_path()
+        assert out is not None
+        for ch in ':*?"<>|':
+            assert ch not in out.name
+
+    def test_flat_path_author_with_slash_is_single_filename(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_flat.setChecked(True)
+        w._author_edit.setText("Jane Doe")
+        clean = w._computed_output_path()
+        assert clean is not None
+        w._author_edit.setText("Jane/Doe")
+        out = w._computed_output_path()
+        assert out is not None
+        # A raw "/" in the author would have split this into a subdirectory —
+        # sanitization keeps the whole thing one filename under the same parent
+        # rather than introducing an extra path level.
+        assert out.parent == clean.parent
+        assert out.name.endswith(".m4b")
+        assert "/" not in out.name
+
+    def test_plain_author_title_unaffected(self, win, tmp_path):
+        """Ordinary values pass through sanitize_filename_component unchanged."""
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_nested.setChecked(True)
+        out = w._computed_output_path()
+        assert out is not None
+        assert out.name == "My Book.m4b"
+        assert "Jane Doe" in str(out)
+
     def test_browse_custom_output_sets_path(self, win, tmp_path):
         """Lines 376-382: browse dialog sets custom output path."""
         w, _ = win
@@ -382,7 +481,9 @@ class TestOutputPath:
 
 
 class TestEncoding:
-    def test_convert_disabled_while_running(self, win, tmp_path):
+    def test_convert_btn_becomes_cancel_while_running(self, win, tmp_path):
+        """While a direct convert runs, the button stays enabled as Cancel
+        (F18) — it no longer simply disables."""
         w, _ = win
         w._on_load_finished(_make_book(tmp_path))
         w._out_nested.setChecked(True)
@@ -391,7 +492,8 @@ class TestEncoding:
         worker_mock.isRunning.return_value = True
         with patch("m4bmaker.gui.window.ConvertWorker", return_value=worker_mock):
             w._on_convert()
-        assert not w._convert_btn.isEnabled()
+        assert w._convert_btn.isEnabled()
+        assert w._convert_btn.text() == "Cancel"
 
     def test_convert_no_book_is_noop(self, win):
         w, _ = win
@@ -497,15 +599,16 @@ class TestEncoding:
 
 
 class TestMissingFfmpeg:
-    def test_load_worker_emits_error_on_sysexit(self, qapp, tmp_path):
-        """LoadWorker.error is emitted when ffprobe is missing (sys.exit)."""
+    def test_load_worker_emits_error_on_m4berror(self, qapp, tmp_path):
+        """LoadWorker.error is emitted when the library raises M4BError."""
+        from m4bmaker.errors import M4BError
         from m4bmaker.gui.worker import LoadWorker
 
         errors: list[str] = []
 
         with patch(
             "m4bmaker.gui.worker.load_audiobook",
-            side_effect=SystemExit("ffprobe not found"),
+            side_effect=M4BError("ffprobe not found"),
         ):
             worker = LoadWorker(tmp_path)
             worker.error.connect(errors.append)
@@ -516,8 +619,9 @@ class TestMissingFfmpeg:
         assert errors
         assert "ffprobe" in errors[0]
 
-    def test_convert_worker_emits_error_on_sysexit(self, qapp, tmp_path):
-        """ConvertWorker.error is emitted when ffmpeg is missing (sys.exit)."""
+    def test_convert_worker_emits_error_on_m4berror(self, qapp, tmp_path):
+        """ConvertWorker.error is emitted when the library raises M4BError."""
+        from m4bmaker.errors import M4BError
         from m4bmaker.gui.worker import ConvertWorker
 
         book = _make_book(tmp_path)
@@ -525,7 +629,7 @@ class TestMissingFfmpeg:
 
         with patch(
             "m4bmaker.gui.worker.run_pipeline",
-            side_effect=SystemExit("ffmpeg not found"),
+            side_effect=M4BError("ffmpeg not found"),
         ):
             worker = ConvertWorker(book=book, output_path=tmp_path / "out.m4b")
             worker.error.connect(errors.append)
@@ -721,13 +825,67 @@ class TestEditMode:
 
         MockW.assert_called_once()
 
+    def test_do_save_chapters_releases_player_before_starting_worker(
+        self, win, tmp_path
+    ):
+        """M6: the player must release its source before the worker starts
+        rewriting the file, or the save can hit a sharing violation."""
+        w, _ = win
+        book = _make_book(tmp_path)
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        w._book = book
+        w._mode = "edit"
+        w._m4b_total_duration = 120.0
+        w._folder_zone._edit.setText(str(m4b))
+
+        with (
+            patch.object(w._player, "release") as mock_release,
+            patch("m4bmaker.gui.window.SaveChaptersWorker") as MockW,
+        ):
+            mock_worker = MagicMock()
+            mock_worker.isRunning.return_value = False
+            MockW.return_value = mock_worker
+            w._on_convert()
+
+        mock_release.assert_called_once()
+
     def test_on_save_finished_updates_status(self, win, tmp_path):
         w, _ = win
         dest = tmp_path / "book.m4b"
         dest.write_bytes(b"\x00")
-        with patch("m4bmaker.gui.window.QMessageBox"):
+        with (
+            patch("m4bmaker.gui.window.QMessageBox"),
+            patch.object(w._player, "load_paused"),
+        ):
             w._on_save_finished(dest)
         assert "book.m4b" in w._status_label.text()
+
+    def test_on_save_finished_hides_progress_bar(self, win, tmp_path):
+        """L4: the bar must not sit at 100% forever after a save completes."""
+        w, _ = win
+        dest = tmp_path / "book.m4b"
+        dest.write_bytes(b"\x00")
+        w._progress_bar.setVisible(True)
+        with (
+            patch("m4bmaker.gui.window.QMessageBox"),
+            patch.object(w._player, "load_paused"),
+        ):
+            w._on_save_finished(dest)
+        assert not w._progress_bar.isVisible()
+
+    def test_on_save_finished_reloads_player_source(self, win, tmp_path):
+        """M6: after a successful save the player reloads the rewritten file."""
+        w, _ = win
+        dest = tmp_path / "book.m4b"
+        dest.write_bytes(b"\x00")
+        with (
+            patch("m4bmaker.gui.window.QMessageBox"),
+            patch.object(w._player, "load_paused") as mock_load_paused,
+        ):
+            w._on_save_finished(dest)
+        mock_load_paused.assert_called_once()
+        assert mock_load_paused.call_args[0][0] == dest
 
 
 # ── Player in Chapters tab ────────────────────────────────────────────────────
@@ -1056,14 +1214,21 @@ class TestChapterMoveUp:
         assert w._book.files[0] == original_file_1
         assert w._book.files[1] == original_file_0
 
-    def test_move_up_skips_files_in_edit_mode(self, win, tmp_path):
+    def test_move_up_is_full_noop_in_edit_mode(self, win, tmp_path):
+        """Reordering time slices within a single .m4b is meaningless — the
+        handler is a no-op in edit mode (defense in depth; the toolbar
+        already hides these buttons there)."""
         w, _ = win
         _load_multi(w, tmp_path)
         w._mode = "edit"
         original_files = list(w._book.files)
+        original_titles = [ch.title for ch in w._book.chapters]
+        original_starts = [ch.start_time for ch in w._book.chapters]
         w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
         w._on_chapter_move_up()
         assert w._book.files == original_files
+        assert [ch.title for ch in w._book.chapters] == original_titles
+        assert [ch.start_time for ch in w._book.chapters] == original_starts
 
     def test_move_up_at_row_0_is_noop(self, win, tmp_path):
         w, _ = win
@@ -1101,14 +1266,19 @@ class TestChapterMoveDown:
         assert w._book.files[0] == original_file_1
         assert w._book.files[1] == original_file_0
 
-    def test_move_down_skips_files_in_edit_mode(self, win, tmp_path):
+    def test_move_down_is_full_noop_in_edit_mode(self, win, tmp_path):
+        """See test_move_up_is_full_noop_in_edit_mode — same rationale."""
         w, _ = win
         _load_multi(w, tmp_path)
         w._mode = "edit"
         original_files = list(w._book.files)
+        original_titles = [ch.title for ch in w._book.chapters]
+        original_starts = [ch.start_time for ch in w._book.chapters]
         w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)
         w._on_chapter_move_down()
         assert w._book.files == original_files
+        assert [ch.title for ch in w._book.chapters] == original_titles
+        assert [ch.start_time for ch in w._book.chapters] == original_starts
 
     def test_move_down_at_last_row_is_noop(self, win, tmp_path):
         w, _ = win
@@ -1154,6 +1324,85 @@ class TestChapterRemove:
         w._chapter_table.setCurrentCell(-1, 0)
         w._on_chapter_remove()
         assert len(w._book.chapters) == 5  # unchanged
+
+
+# ── chapter remove (edit-mode timeline invariant) ─────────────────────────────
+
+
+class TestChapterRemoveEditModeTimeline:
+    """A chapter is a time slice of one file in edit mode — removing a marker
+    must not shift the timeline.  The removed span merges into the PREVIOUS
+    chapter (or, for the first chapter, into the new first chapter, whose
+    start moves to 0)."""
+
+    def test_remove_middle_chapter_leaves_other_starts_untouched(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)  # starts: 0, 10, 20, 30, 40 — 10s each
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)  # remove ch3 (20s)
+        w._on_chapter_remove()
+        starts = [ch.start_time for ch in w._book.chapters]
+        # ch1(0), ch2(10) untouched; ch4(30)->ch5(40) untouched — no shift.
+        assert starts == pytest.approx([0.0, 10.0, 30.0, 40.0])
+
+    def test_remove_middle_chapter_merges_span_into_previous(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)  # remove ch3
+        w._on_chapter_remove()
+        # ch2's duration absorbs ch3's 10s span: 10s -> 20s (until ch4 at 30).
+        assert w._chapter_durations[1] == pytest.approx(20.0)
+
+    def test_remove_first_chapter_moves_new_first_start_to_zero(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(0, ChapterTable.COL_TITLE)  # remove ch1
+        w._on_chapter_remove()
+        assert w._book.chapters[0].start_time == pytest.approx(0.0)
+        # ch2's span absorbs ch1's: originally 10s (10->20), now 0->20 = 20s.
+        assert w._chapter_durations[0] == pytest.approx(20.0)
+        # ch3 (was at 20) is untouched.
+        assert w._book.chapters[1].start_time == pytest.approx(20.0)
+
+    def test_remove_preserves_total_span_sum(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)  # total span 50s
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        w._on_chapter_remove()
+        assert sum(w._chapter_durations) == pytest.approx(50.0)
+
+    def test_remove_last_chapter_leaves_earlier_starts_untouched(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        w._chapter_table.setCurrentCell(4, ChapterTable.COL_TITLE)  # remove last
+        w._on_chapter_remove()
+        starts = [ch.start_time for ch in w._book.chapters]
+        assert starts == pytest.approx([0.0, 10.0, 20.0, 30.0])
+        # Last remaining chapter absorbs the removed span (extends to book end).
+        assert w._chapter_durations[-1] == pytest.approx(20.0)
+
+    def test_remove_does_not_touch_files_in_edit_mode(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._mode = "edit"
+        original_files = list(w._book.files)
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)
+        w._on_chapter_remove()
+        assert w._book.files == original_files
+
+    def test_build_mode_remove_still_shifts_timeline(self, win, tmp_path):
+        """Contrast case: build mode keeps the cumulative-rebuild behaviour."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=5)
+        w._chapter_table.setCurrentCell(2, ChapterTable.COL_TITLE)  # build mode
+        w._on_chapter_remove()
+        starts = [ch.start_time for ch in w._book.chapters]
+        # Cumulative rebuild: every later chapter shifts earlier by 10s.
+        assert starts == pytest.approx([0.0, 10.0, 20.0, 30.0])
 
 
 # ── chapter merge ─────────────────────────────────────────────────────────────
@@ -1369,13 +1618,16 @@ class TestUpdateChapterButtons:
         assert not w._ch_remove_btn.isHidden()
         assert not w._ch_merge_btn.isHidden()
 
-    def test_buttons_visible_in_edit_mode(self, win, tmp_path):
+    def test_reorder_hidden_in_edit_mode(self, win, tmp_path):
+        """Move-up/move-down reorder time slices — meaningless in a single
+        .m4b — so edit mode hides them.  Remove stays available (it merges
+        the span instead of reordering)."""
         w, _ = win
         _load_multi(w, tmp_path)
         w._mode = "edit"
         w._update_chapter_buttons()
-        assert not w._ch_up_btn.isHidden()
-        assert not w._ch_down_btn.isHidden()
+        assert w._ch_up_btn.isHidden()
+        assert w._ch_down_btn.isHidden()
         assert not w._ch_remove_btn.isHidden()
         assert not w._ch_merge_btn.isHidden()
 
@@ -1615,3 +1867,237 @@ class TestAddChapter:
         # ch1 dur should now be 8 s; ch2 dur = total(20) - 8 = 12 s
         assert w._chapter_durations[0] == pytest.approx(8.0)
         assert w._chapter_durations[1] == pytest.approx(12.0)
+
+
+# ── Threading / lifecycle fixes (this wave) ───────────────────────────────────
+
+
+class TestLoadGenerationStaleness:
+    """H5: a slow scan of folder A must not populate the UI under folder B."""
+
+    def test_stale_load_result_ignored(self, win, tmp_path):
+        w, _ = win
+        # Simulate two folder-change events bumping the generation twice.
+        w._load_generation = 5
+        book = _make_book(tmp_path)
+        # A result stamped with an older generation must be dropped.
+        w._on_load_finished(book, generation=4)
+        assert w._book is None
+
+    def test_current_load_result_applied(self, win, tmp_path):
+        w, _ = win
+        w._load_generation = 5
+        # Stub player so PreflightWorker path stays quiet on teardown.
+        w._player.load = lambda *a, **kw: None
+        w._player.load_paused = lambda *a, **kw: None
+        book = _make_book(tmp_path)
+        with patch("m4bmaker.gui.window.PreflightWorker") as MockPW:
+            MockPW.return_value = MagicMock()
+            w._on_load_finished(book, generation=5)
+        assert w._book is book
+
+    def test_stale_m4b_result_ignored(self, win, tmp_path):
+        w, _ = win
+        w._load_generation = 3
+        book = _make_book(tmp_path)
+        w._on_m4b_loaded((book, 120.0), generation=2)
+        assert w._book is None
+
+    def test_stale_load_error_ignored(self, win, tmp_path):
+        w, _ = win
+        w._load_generation = 3
+        with patch("m4bmaker.gui.window.QMessageBox.critical") as mock_crit:
+            w._on_load_error("boom", generation=1)
+        mock_crit.assert_not_called()
+
+    def test_folder_changed_bumps_generation(self, win, tmp_path):
+        w, _ = win
+        before = w._load_generation
+        with patch("m4bmaker.gui.window.LoadWorker") as MockLW:
+            MockLW.return_value = MagicMock()
+            w._on_folder_changed(tmp_path)
+        assert w._load_generation == before + 1
+
+
+class TestM4bPayloadValidation:
+    """L8: _on_m4b_loaded validates the payload shape before unpacking."""
+
+    def test_non_tuple_payload_is_noop(self, win):
+        w, _ = win
+        w._on_m4b_loaded("not a tuple")  # must not raise
+        assert w._book is None
+
+    def test_wrong_length_tuple_is_noop(self, win, tmp_path):
+        w, _ = win
+        w._on_m4b_loaded((_make_book(tmp_path),))  # 1-tuple
+        assert w._book is None
+
+    def test_wrong_types_is_noop(self, win):
+        w, _ = win
+        w._on_m4b_loaded(("book", "duration"))  # wrong element types
+        assert w._book is None
+
+
+class TestPreflightError:
+    """M2: PreflightWorker.error surfaces in the analysis panel."""
+
+    def test_preflight_error_shown_in_panel(self, win):
+        w, _ = win
+        w._on_preflight_error("ffprobe blew up")
+        assert "ffprobe blew up" in w._analysis_label.text()
+
+
+class TestBusyStateGating:
+    """H6: direct convert and the batch queue are mutually exclusive."""
+
+    def test_convert_disabled_while_queue_running(self, win, tmp_path):
+        """Drive the real queue state machine: start with a stubbed worker so
+        is_running is genuinely True, then check the direct controls."""
+        from m4bmaker.gui.job import job_from_book
+
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        assert w._convert_btn.isEnabled()
+
+        job = job_from_book(_make_book(tmp_path), tmp_path / "out.m4b")
+        w._queue_manager.add(job)
+
+        slow_worker = MagicMock()
+        slow_worker.isRunning.return_value = True
+        with patch("m4bmaker.gui.queue_manager.JobWorker", return_value=slow_worker):
+            w._queue_manager.start()
+            assert w._queue_manager.is_running  # real property, real state
+            w._update_controls()
+            assert not w._convert_btn.isEnabled()
+            assert not w._split_btn.isEnabled()
+            # Adding to a running queue stays allowed — only direct encodes
+            # are mutually exclusive with the queue.
+            assert w._add_to_queue_btn.isEnabled()
+        # Unwind: mark the worker done so teardown sees an idle queue.
+        slow_worker.isRunning.return_value = False
+        w._queue_manager._running = False
+
+    def test_queue_add_gated_while_direct_convert_runs(self, win, tmp_path):
+        """The + Queue button disables while a direct convert is running."""
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        assert w._add_to_queue_btn.isEnabled()
+        conv = MagicMock()
+        conv.isRunning.return_value = True
+        w._convert_worker = conv
+        w._update_controls()
+        assert not w._add_to_queue_btn.isEnabled()
+        w._convert_worker = None
+
+
+class TestConvertCancel:
+    """F18: the Convert button becomes a Cancel control during a direct encode."""
+
+    def test_convert_becomes_cancel_and_requests_cancel(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_nested.setChecked(True)
+
+        worker = MagicMock()
+        worker.isRunning.return_value = True
+        with patch("m4bmaker.gui.window.ConvertWorker", return_value=worker):
+            w._on_convert()
+        assert w._convert_running is True
+        assert w._convert_btn.text() == "Cancel"
+
+        # A second click on the (now Cancel) button requests cancellation.
+        w._on_convert()
+        worker.request_cancel.assert_called_once()
+
+    def test_on_convert_cancelled_clears_state(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._convert_running = True
+        w._on_convert_cancelled()
+        assert w._convert_running is False
+        assert "Cancelled" in w._status_label.text()
+        assert not w._progress_bar.isVisible()
+
+
+class TestCloseEventCancelsWorkers:
+    """F10: closeEvent cancels and waits for all live workers."""
+
+    def test_close_requests_cancel_and_waits(self, win):
+        w, _ = win
+        conv = MagicMock()
+        conv.isRunning.return_value = True
+        conv.wait.return_value = True
+        w._convert_worker = conv
+
+        from PySide6.QtGui import QCloseEvent
+
+        event = QCloseEvent()
+        # No busy prompt path (is_busy False via _convert only counts if running,
+        # so patch _is_busy to avoid the dialog) — we still want the cancel/wait.
+        with patch.object(w, "_is_busy", return_value=False):
+            w.closeEvent(event)
+        conv.request_cancel.assert_called_once()
+        conv.wait.assert_called()
+
+    def test_close_proceeds_on_wait_timeout(self, win):
+        w, _ = win
+        stuck = MagicMock()
+        stuck.isRunning.return_value = True
+        stuck.wait.return_value = False  # never finishes
+        w._convert_worker = stuck
+
+        from PySide6.QtGui import QCloseEvent
+
+        event = QCloseEvent()
+        with patch.object(w, "_is_busy", return_value=False):
+            w.closeEvent(event)  # must not hang / raise
+        assert event.isAccepted()
+
+
+class TestQuitRoutesThroughClose:
+    """F11: File→Quit routes through close() so closeEvent runs."""
+
+    def test_quit_action_runs_close_event(self, qapp):
+        """Triggering File→Quit must deliver a QCloseEvent (guard runs).
+
+        Qt captured the bound ``self.close`` at connect time, so patching the
+        instance after construction cannot intercept it — instead we patch the
+        *class* closeEvent before constructing the window and assert it fires.
+        """
+        from PySide6.QtGui import QAction
+
+        seen: list[object] = []
+
+        def spy_close_event(self, event):  # noqa: ANN001
+            seen.append(event)
+            event.accept()
+
+        with patch.object(MainWindow, "closeEvent", spy_close_event):
+            w = MainWindow()
+            w.show()
+            quit_action = None
+            for action in w.findChildren(QAction):
+                if action.text() == "Quit m4Bookmaker":
+                    quit_action = action
+                    break
+            assert quit_action is not None
+            quit_action.trigger()
+            qapp.processEvents()
+        assert len(seen) == 1
+
+
+class TestExtraWindowsCleanup:
+    """L2: _extra_windows drops entries when their window is destroyed."""
+
+    def test_forget_extra_windows_prunes_destroyed(self, win):
+        import shiboken6
+
+        w, _ = win
+        extra = MainWindow()
+        w._extra_windows.append(extra)
+        extra.close()
+        # deleteLater is only processed at event-loop level, which never
+        # spins in tests — destroy the C++ object directly instead.
+        shiboken6.delete(extra)
+        w._forget_extra_windows()
+        assert extra not in w._extra_windows

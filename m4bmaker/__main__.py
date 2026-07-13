@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from argparse import Namespace
 from pathlib import Path
 
 from m4bmaker import __version__
@@ -12,17 +13,14 @@ from m4bmaker.chapters_file import load_chapters_file
 from m4bmaker.cli import parse_args
 from m4bmaker.cover import download_cover, find_cover, is_url
 from m4bmaker.encoder import _render_bar
+from m4bmaker.errors import EncodeCancelled, M4BError
 from m4bmaker.metadata import extract_metadata, prompt_missing
 from m4bmaker.models import BookMetadata, Chapter
 from m4bmaker.pipeline import load_audiobook, run_pipeline
 from m4bmaker.preflight import format_preflight_report, run_preflight
 from m4bmaker.repair import apply_repair, format_repair_report, run_repair
-from m4bmaker.utils import find_ffmpeg, find_ffprobe, log
-
-
-def _safe(s: str) -> str:
-    """Sanitise a string for use as a filename or directory component."""
-    return s.replace("/", "-").replace("\x00", "")
+from m4bmaker.utils import find_ffmpeg, find_ffprobe, log, safe_input
+from m4bmaker.utils import sanitize_filename_component as _safe
 
 
 def _output_path(base_dir: Path, meta: dict[str, str], flat: bool = False) -> Path:
@@ -52,7 +50,7 @@ def _confirm_output(proposed: Path, interactive: bool) -> Path:
     """Confirm or override the output path interactively."""
     if not interactive:
         return proposed
-    value = input(f"Output [{proposed}]: ").strip()
+    value = safe_input(f"Output [{proposed}]: ").strip()
     if not value:
         return proposed
     return Path(value).expanduser().resolve()
@@ -73,7 +71,7 @@ def _edit_chapters_inline(chapters: list[Chapter]) -> list[Chapter]:
     """
     edited: list[Chapter] = []
     for ch in chapters:
-        value = input(f"  Chapter {ch.index} [{ch.title}]: ").strip()
+        value = safe_input(f"  Chapter {ch.index} [{ch.title}]: ").strip()
         edited.append(
             Chapter(
                 index=ch.index,
@@ -144,7 +142,7 @@ def _resolve_cover(
 def _fetch_cover_url(url: str, tmp_dir: Path, interactive: bool) -> Path | None:
     """Download a cover image URL.
 
-    On failure, prompt for retry if *interactive*; otherwise exit.
+    On failure, prompt for retry if *interactive*; otherwise raise.
     """
     pending: str | None = url
     while True:
@@ -154,8 +152,8 @@ def _fetch_cover_url(url: str, tmp_dir: Path, interactive: bool) -> Path | None:
             except Exception as exc:
                 log(f"Cover download failed: {exc}")
         if not interactive:
-            sys.exit(1)
-        source = input(
+            raise M4BError("Error: cover download failed.")
+        source = safe_input(
             "Enter a different URL or local path (or press Enter to skip): "
         ).strip()
         if not source:
@@ -176,7 +174,7 @@ def _prompt_cover(tmp_dir: Path) -> Path | None:
     Loops until a valid source is provided or the user presses Enter to skip.
     """
     while True:
-        source = input(
+        source = safe_input(
             "Enter URL or local path for cover art (or press Enter to skip): "
         ).strip()
         if not source:
@@ -202,7 +200,7 @@ def _confirm_cover(
         return cover
     while True:
         display = str(cover) if cover else "none"
-        value = input(f"Cover image [{display}]: ").strip()
+        value = safe_input(f"Cover image [{display}]: ").strip()
         if not value:
             return cover  # confirmed as-is
         if value.lower() in ("none", "skip"):
@@ -218,22 +216,28 @@ def _confirm_cover(
             log(f"Cover error: {exc} — please try again.")
 
 
-def main() -> None:
-    args = parse_args()
+def _run(args: Namespace) -> None:
+    """Drive the conversion pipeline. Raises M4BError/EncodeCancelled on failure."""
     directory: Path = args.directory.resolve()
     interactive = not args.no_prompt
 
     log(f"m4bmaker {__version__}")
     log(f"Working directory: {directory}")
 
-    # 1. Detect tool locations (exits early if missing).
+    # 1. Detect tool locations (raises M4BError if missing).
     ffmpeg = find_ffmpeg()
     ffprobe = find_ffprobe()
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
 
-        # 2. Locate cover image (URL download, auto-detect, or interactive prompt).
+        # 2. Scan the directory first, so a bad path surfaces the scanner's
+        # clean error instead of find_cover's raw FileNotFoundError.
+        log("Scanning audio files…")
+        book = load_audiobook(directory, ffprobe, progress_fn=_probe_progress)
+        log(f"Found {len(book.files)} audio file(s)")
+
+        # 2b. Locate cover image (URL download, auto-detect, or interactive prompt).
         log("Looking for cover art...")
         cover, cover_user_specified = _resolve_cover(
             args.cover, directory, tmp_dir, interactive
@@ -243,21 +247,18 @@ def main() -> None:
         else:
             log("No cover art found — skipping")
 
-        # 2b. Confirm or replace cover interactively.
+        # 2c. Confirm or replace cover interactively.
         if not cover_user_specified:
             cover = _confirm_cover(cover, tmp_dir, interactive)
-
-        # 3. Load audiobook: scan files, extract metadata, build chapters.
-        log("Scanning audio files…")
-        book = load_audiobook(directory, ffprobe, progress_fn=_probe_progress)
-        log(f"Found {len(book.files)} audio file(s)")
 
         # 3b. Audio preflight analysis.
         log("Analysing audio formats…")
         analysis = run_preflight(book.files, ffprobe)
         print(format_preflight_report(analysis))
 
-        # 3c. Repair damaged / non-standard input files.
+        # 3c. Repair damaged / non-standard input files. The result is
+        # passed into run_pipeline below so repair does not run a second
+        # time inside the pipeline.
         log("Checking for damaged audio files…")
         repair_result = run_repair(book.files, tmp_dir, ffmpeg, ffprobe)
         if repair_result.needed_repair:
@@ -309,7 +310,7 @@ def main() -> None:
         # 6. Chapter preview + optional inline editing (interactive only).
         if interactive and sys.stdout.isatty():
             _print_chapter_table(book.chapters)
-            answer = input("  Edit chapter titles? [y/N]: ").strip().lower()
+            answer = safe_input("  Edit chapter titles? [y/N]: ").strip().lower()
             if answer == "y":
                 book.chapters = _edit_chapters_inline(book.chapters)
 
@@ -327,8 +328,23 @@ def main() -> None:
             stereo=args.stereo,
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
+            repair_result=repair_result,
         )
         log(f"Done. Created: {output}")
+
+
+def main() -> None:
+    args = parse_args()
+    try:
+        _run(args)
+    except EncodeCancelled:
+        log("Cancelled.")
+        sys.exit(130)
+    except KeyboardInterrupt:
+        log("Cancelled.")
+        sys.exit(130)
+    except M4BError as exc:
+        sys.exit(str(exc))
 
 
 if __name__ == "__main__":  # pragma: no cover

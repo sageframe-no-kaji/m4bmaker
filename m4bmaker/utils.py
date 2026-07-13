@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import atexit
 import os
+import re
 import shutil
 import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from m4bmaker.errors import M4BError
 
 _INSTALL_HINT = (
     "  macOS (Homebrew): brew install ffmpeg\n"
@@ -90,7 +97,7 @@ def find_ffprobe() -> str:
     return path
 
 
-def subprocess_flags() -> dict:
+def subprocess_flags() -> dict[str, Any]:
     """Return kwargs that suppress console windows on Windows frozen builds."""
     if sys.platform == "win32" and getattr(sys, "frozen", False):
         import subprocess as _sp
@@ -102,3 +109,74 @@ def subprocess_flags() -> dict:
 def log(msg: str) -> None:
     """Print a timestamped progress message to stdout."""
     print(msg, flush=True)
+
+
+# ── filename sanitisation ────────────────────────────────────────────────────
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+_RESERVED_CHARS_RE = re.compile(r'[/\\:*?"<>|]')
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+
+_MAX_FILENAME_LENGTH = 120
+
+
+def sanitize_filename_component(s: str) -> str:
+    """Return *s* made safe for use as a single filename or directory component.
+
+    - Strips NUL and other control characters.
+    - Replaces each of ``/ \\ : * ? " < > |`` with ``-``.
+    - Collapses runs of whitespace into a single space.
+    - Strips leading/trailing dots and spaces (Windows disallows trailing
+      dots/spaces; leading dots create hidden files on POSIX).
+    - A result of ``""``, ``"."``, or ``".."`` becomes ``"Untitled"``.
+    - Truncates to 120 characters.
+    """
+    cleaned = _CONTROL_CHARS_RE.sub("", s)
+    cleaned = _RESERVED_CHARS_RE.sub("-", cleaned)
+    cleaned = _WHITESPACE_RUN_RE.sub(" ", cleaned)
+    cleaned = cleaned.strip(" .")
+
+    if cleaned in ("", ".", ".."):
+        return "Untitled"
+
+    return cleaned[:_MAX_FILENAME_LENGTH]
+
+
+# ── process-lifetime temp root ───────────────────────────────────────────────
+
+_temp_root: str | None = None
+
+
+def get_temp_root() -> Path:
+    """Return a per-process temp directory, created lazily on first call.
+
+    The directory is registered with :mod:`atexit` for recursive removal so
+    callers (e.g. :mod:`m4bmaker.cover`) can allocate short-lived subdirs
+    under it without leaking them across the life of the process.
+    """
+    global _temp_root
+    if _temp_root is None:
+        _temp_root = tempfile.mkdtemp(prefix="m4bmaker_")
+        atexit.register(shutil.rmtree, _temp_root, ignore_errors=True)
+    return Path(_temp_root)
+
+
+# ── interactive input helper ─────────────────────────────────────────────────
+
+
+def safe_input(prompt: str, no_prompt_hint: str = "--no-prompt") -> str:
+    """Wrap :func:`input` so EOF/interrupt produce a clean exit, not a traceback.
+
+    Raises :class:`~m4bmaker.errors.M4BError` with a one-line message
+    suggesting *no_prompt_hint* when stdin is closed (EOFError) or the user
+    interrupts (KeyboardInterrupt) while a prompt is awaiting input.
+    """
+    try:
+        return input(prompt)
+    except EOFError:
+        raise M4BError(
+            f"No input available for prompt. Use {no_prompt_hint} to run "
+            "non-interactively."
+        ) from None
+    except KeyboardInterrupt:
+        raise M4BError("Cancelled.") from None

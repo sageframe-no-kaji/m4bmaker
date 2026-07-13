@@ -36,8 +36,37 @@ _TIMEOUT = 5  # seconds
 
 
 def _parse_version(tag: str) -> tuple[int, ...]:
-    """Convert a version tag like 'v1.2.3' or '1.2.3' to a comparable tuple."""
-    return tuple(int(x) for x in tag.lstrip("v").split(".") if x.isdigit())
+    """Convert a version tag to a comparable tuple of ints.
+
+    Consumes the leading numeric dot-run: purely-numeric segments are taken in
+    full, and the run stops at the first segment that is not purely numeric
+    (after taking that segment's own numeric prefix).  This keeps pre-release
+    and build suffixes from corrupting the ordering:
+
+        ``v1.2.3-beta``   → ``(1, 2, 3)``   (not ``(1, 2)`` as a naive
+                                             ``str.isdigit`` filter produced)
+        ``1.4.0+build.7`` → ``(1, 4, 0)``   (build metadata dropped)
+        ``2.10rc1.5``     → ``(2, 10)``     (stops at the ``rc`` segment)
+
+    Pre-release ordering itself is handled in :meth:`UpdateChecker.run`.
+    Garbage input yields ``()`` — a fail-safe that never compares as newer.
+    """
+    parts: list[int] = []
+    for segment in tag.lstrip("vV").split("."):
+        if segment.isdigit():
+            parts.append(int(segment))
+            continue
+        # First non-numeric segment: take its numeric prefix, then stop.
+        num = ""
+        for ch in segment:
+            if ch.isdigit():
+                num += ch
+            else:
+                break
+        if num:
+            parts.append(int(num))
+        break
+    return tuple(parts)
 
 
 class UpdateChecker(QThread):
@@ -65,8 +94,14 @@ class UpdateChecker(QThread):
             remote = _parse_version(tag)
             local = _parse_version(__version__)
 
+            # Compare numeric versions.  A pre-release of a *higher* numeric
+            # version (1.2.3-beta) is newer than the current release (1.2.2)
+            # because its parsed tuple (1,2,3) already exceeds (1,2,2).  A
+            # pre-release with the *same* numeric tuple as the current release
+            # is NOT newer (don't offer 1.2.3-beta to a 1.2.3 user).  Empty
+            # tuples from garbage tags never compare as newer (fail-safe).
             if remote > local:
-                self.update_available.emit(tag.lstrip("v"))
+                self.update_available.emit(tag.lstrip("vV"))
 
         except (urllib.error.URLError, OSError, JSONDecodeError, ValueError) as exc:
             _log.debug("Update check failed (this is non-critical): %s", exc)

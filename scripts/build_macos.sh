@@ -7,7 +7,12 @@
 #   ./scripts/build_macos.sh --clean    # wipe build/ and dist/ only
 #
 # Prerequisites (in the active venv):
-#   pip install pyinstaller
+#   For a reproducible signed release build, install the fully pinned,
+#   hash-verified dependency set instead of loose requirements files:
+#     pip install --require-hashes -r requirements-build.lock
+#     pip install --no-deps -e .
+#   (requirements-build.lock is generated from requirements-dev.txt; see its
+#   header for the regen command. It already includes pyinstaller.)
 #
 # System dependencies stay external (NOT bundled):
 #   brew install ffmpeg
@@ -67,14 +72,42 @@ fi
 # universal2 .app we need fat ffmpeg/ffprobe binaries containing both slices,
 # otherwise Intel Macs fail with "Bad CPU type in executable" at first probe.
 echo "==> Ensuring universal2 ffmpeg/ffprobe"
-SF_DIR="$(python -c "from static_ffmpeg import run as r; from pathlib import Path; print(Path(r.get_or_fetch_platform_executables_else_raise()[0]).parent)")"
+# static_ffmpeg prints download progress to STDOUT on a cold cache, which
+# would corrupt this command substitution — keep only the last line (the
+# actual path printed by our print()).
+SF_DIR="$(python -c "from static_ffmpeg import run as r; from pathlib import Path; print(Path(r.get_or_fetch_platform_executables_else_raise()[0]).parent)" | tail -n 1)"
 NATIVE_FFMPEG="$SF_DIR/ffmpeg"
 NATIVE_FFPROBE="$SF_DIR/ffprobe"
+
+# Pinned SHA-256 of the third-party x86_64 ffmpeg/ffprobe archive fetched below.
+# This binary is downloaded from an external repo (not Apple/ffmpeg.org) and
+# lipo-merged into the app BEFORE codesigning/notarization — if that repo were
+# ever compromised, an unpinned download would let us unknowingly sign and
+# notarize malware. If upstream publishes a new archive (version bump, etc.),
+# the hash below WILL mismatch and the build WILL fail; that is intentional.
+# To update: manually re-vet the new binary (e.g. run it, diff behavior,
+# check the upstream repo/commit), then recompute and replace the pin with:
+#   curl -fsSL "https://github.com/zackees/ffmpeg_bins/raw/main/v8.0/darwin.zip" -o /tmp/darwin.zip && shasum -a 256 /tmp/darwin.zip
+EXPECTED_DARWIN_ZIP_SHA256="70fd5b21cb37b6ea97c8b584cf76b3cc6a90179831c9c269811b9716c28605fb"
 
 if ! file "$NATIVE_FFMPEG" | grep -q "universal binary"; then
     echo "    Native ffmpeg is single-arch — building universal2 fat binaries"
     X86_DIR="$(mktemp -d)"
-    curl -sL "https://github.com/zackees/ffmpeg_bins/raw/main/v8.0/darwin.zip" -o "$X86_DIR/darwin.zip"
+    curl -fsSL "https://github.com/zackees/ffmpeg_bins/raw/main/v8.0/darwin.zip" -o "$X86_DIR/darwin.zip"
+
+    ACTUAL_DARWIN_ZIP_SHA256="$(shasum -a 256 "$X86_DIR/darwin.zip" | awk '{print $1}')"
+    if [[ "$ACTUAL_DARWIN_ZIP_SHA256" != "$EXPECTED_DARWIN_ZIP_SHA256" ]]; then
+        echo "ERROR: darwin.zip SHA-256 mismatch — refusing to use unverified binary."
+        echo "       expected: $EXPECTED_DARWIN_ZIP_SHA256"
+        echo "       actual:   $ACTUAL_DARWIN_ZIP_SHA256"
+        echo "       The upstream archive at zackees/ffmpeg_bins has changed since this"
+        echo "       pin was set. Do NOT just update the pin to make this pass — manually"
+        echo "       re-vet the new binary first, then update EXPECTED_DARWIN_ZIP_SHA256"
+        echo "       in this script to match."
+        rm -rf "$X86_DIR"
+        exit 1
+    fi
+
     unzip -q -o "$X86_DIR/darwin.zip" -d "$X86_DIR"
     cp "$NATIVE_FFMPEG" "$X86_DIR/ffmpeg-native"
     cp "$NATIVE_FFPROBE" "$X86_DIR/ffprobe-native"

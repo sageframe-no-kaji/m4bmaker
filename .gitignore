@@ -10,6 +10,9 @@ build/
 
 # Lock files & minified assets
 *.lock
+# The build-dependency lock IS meant to be committed — it pins the
+# hash-verified toolchain for reproducible signed release builds.
+!requirements-build.lock
 *.min.js
 
 # Testing & coverage
@@ -61,3 +64,6 @@ devlog/
 
 # Ho System process docs (private; versioned in nested repo)
 ho-process/
+
+# Virtual environments (build/dev/release) — never commit
+.venv*/

@@ -31,7 +31,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QThread, QUrl
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -82,6 +82,7 @@ from m4bmaker.gui.queue_manager import QueueManager
 from m4bmaker.gui.queue_window import QueueWindow
 from m4bmaker.gui.updater import UpdateChecker, _RELEASES_URL
 from m4bmaker.preflight import format_preflight_summary
+from m4bmaker.utils import sanitize_filename_component
 
 try:
     from PySide6.QtSvg import QSvgRenderer as _QSvgRenderer
@@ -147,13 +148,26 @@ class MainWindow(QMainWindow):
         self._load_worker: Optional[LoadWorker] = None
         self._m4b_load_worker: Optional[LoadM4bWorker] = None
         self._convert_worker: Optional[ConvertWorker] = None
+        self._convert_running: bool = False
         self._preflight_worker: Optional[PreflightWorker] = None
         self._preflight_sample_rate: Optional[int] = None
         self._save_worker: Optional[SaveChaptersWorker] = None
         self._split_worker: Optional[SplitWorker] = None
+        # Generation counter for load workers: each load stamps a generation id,
+        # and result slots ignore payloads from a superseded generation so a slow
+        # scan of folder A cannot populate the UI under folder B's path (H5).
+        self._load_generation: int = 0
+        # Superseded load workers kept alive until their native finished fires,
+        # so a still-running QThread is never destroyed.
+        self._stale_load_workers: list[QThread] = []
         self._extra_windows: list["MainWindow"] = []
         self._queue_manager = QueueManager()
         self._queue_window: Optional[QueueWindow] = None
+        # H6: keep direct-convert controls gated on live queue state.
+        # Bound methods only — a lambda here would outlive the window and a
+        # late queue signal would invoke a slot on a destroyed C++ object.
+        self._queue_manager.job_updated.connect(self._on_job_updated)
+        self._queue_manager.queue_finished.connect(self._update_controls)
 
         self._build_menu_bar()
         self._build_ui()
@@ -197,7 +211,10 @@ class MainWindow(QMainWindow):
 
         quit_action = QAction("Quit m4Bookmaker", self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
-        quit_action.triggered.connect(QApplication.quit)
+        # F11: route through close() so closeEvent's cancel/wait guard runs,
+        # rather than QApplication.quit which bypasses it (Cmd+Q mid-encode
+        # would otherwise abort the QThread and orphan ffmpeg).
+        quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
         # Queue action
@@ -269,16 +286,39 @@ class MainWindow(QMainWindow):
     def _toggle_dark_mode(self) -> None:
         self._dark_mode = self._dark_action.isChecked()
         _prefs_set("dark_mode", self._dark_mode)
-        QApplication.instance().setStyleSheet(get_stylesheet(self._dark_mode))
+        # Setting the application stylesheet forces Qt to re-polish every
+        # live widget in the process — skip it when nothing changed (e.g. a
+        # second window opening in the already-active mode).
+        app = QApplication.instance()
+        stylesheet = get_stylesheet(self._dark_mode)
+        if app.styleSheet() != stylesheet:
+            app.setStyleSheet(stylesheet)
         if hasattr(self, "_dark_btn"):
             self._dark_btn.setText("☀️" if self._dark_mode else "🌙")
         if self._queue_window is not None:
             self._queue_window.apply_stylesheet(self._dark_mode)
 
+    def _on_job_updated(self, _job_id: object) -> None:
+        self._update_controls()
+
     def _new_window(self) -> None:
         win = MainWindow()
         win.show()
         self._extra_windows.append(win)
+        # L2: drop the reference when the window is destroyed so the list does
+        # not grow without bound across the session. Bound method, not a
+        # lambda: the connection dies with THIS window instead of dangling.
+        win.destroyed.connect(self._forget_extra_windows)
+
+    def _forget_extra_windows(self, _obj: object = None) -> None:
+        """Prune destroyed windows from the keep-alive list.
+
+        The ``destroyed`` payload is the dying QObject's shell, so identity
+        comparison against our list is unreliable — prune by validity instead.
+        """
+        import shiboken6
+
+        self._extra_windows = [w for w in self._extra_windows if shiboken6.isValid(w)]
 
     def _open_m4b_file(self) -> None:
         """Open a .m4b file via dialog and load it in edit mode.
@@ -824,7 +864,24 @@ class MainWindow(QMainWindow):
             or (self._split_worker is not None and self._split_worker.isRunning())
         )
 
+    def _live_workers(self) -> list[QThread]:
+        """All owned QThreads that are currently running."""
+        candidates = [
+            self._convert_worker,
+            self._save_worker,
+            self._split_worker,
+            self._load_worker,
+            self._m4b_load_worker,
+            self._preflight_worker,
+            getattr(self, "_update_checker", None),
+        ]
+        candidates.extend(self._stale_load_workers)
+        return [w for w in candidates if w is not None and w.isRunning()]
+
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
+        import logging
+
+        _log = logging.getLogger(__name__)
         queue_busy = self._queue_manager.is_running
         if self._is_busy() or queue_busy:
             msg = (
@@ -842,10 +899,33 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
-            # Stop the queue and wait for the worker to finish cleanly
-            self._queue_manager.stop()
-            if self._queue_manager._worker is not None:
-                self._queue_manager._worker.wait(5000)
+
+        # F10: request cancellation on everything that has a cancel event, then
+        # wait (bounded) for every live worker.  ffmpeg children die when their
+        # cancel events fire; a wait that times out is logged, not fatal.
+        self._queue_manager.stop()
+        for cancellable in (self._convert_worker, self._split_worker):
+            if cancellable is not None and cancellable.isRunning():
+                cancellable.request_cancel()
+        qm_worker = self._queue_manager._worker
+        if qm_worker is not None and qm_worker.isRunning():
+            qm_worker.request_cancel()
+
+        workers: list[QThread] = self._live_workers()
+        if qm_worker is not None and qm_worker.isRunning():
+            workers.append(qm_worker)
+        for worker in workers:
+            if not worker.wait(5000):
+                _log.warning(
+                    "Worker %s did not finish within timeout during shutdown; "
+                    "proceeding.",
+                    type(worker).__name__,
+                )
+
+        # L6: close the queue window explicitly so it does not linger.
+        if self._queue_window is not None:
+            self._queue_window.close()
+
         super().closeEvent(event)
 
     def _update_controls(self) -> None:
@@ -853,14 +933,32 @@ class MainWindow(QMainWindow):
         busy = self._convert_worker is not None and self._convert_worker.isRunning()
         save_busy = self._save_worker is not None and self._save_worker.isRunning()
         split_busy = self._split_worker is not None and self._split_worker.isRunning()
-        self._convert_btn.setEnabled(
-            has_book and not busy and not save_busy and not split_busy
+        queue_busy = self._queue_manager.is_running
+        # H6: a direct convert/save/split and the batch queue must never run the
+        # same book to the same output path concurrently.  Each side disables the
+        # other while it is active.
+        direct_busy = busy or save_busy or split_busy
+
+        # While a direct convert is running, the Convert button is a live Cancel
+        # control — leave it enabled and labelled by _on_convert wiring.
+        if self._convert_running:
+            self._convert_btn.setEnabled(True)
+        else:
+            self._convert_btn.setEnabled(
+                has_book and not direct_busy and not queue_busy
+            )
+        self._add_to_queue_btn.setEnabled(
+            has_book and self._mode == "build" and not direct_busy
         )
-        self._add_to_queue_btn.setEnabled(has_book and self._mode == "build")
         self._split_btn.setVisible(self._mode == "edit")
-        self._split_btn.setEnabled(has_book and not split_busy and not save_busy)
+        self._split_btn.setEnabled(
+            has_book and not split_busy and not save_busy and not queue_busy
+        )
         self._tabs.setTabEnabled(1, has_book)
-        if self._mode == "edit":
+        if self._convert_running:
+            # Keep the Cancel label the running convert set.
+            self._build_encoding_section_visibility(True)
+        elif self._mode == "edit":
             self._convert_btn.setText("Save Chapter Edits")
             self._build_encoding_section_visibility(False)
         else:
@@ -879,8 +977,19 @@ class MainWindow(QMainWindow):
 
     def _computed_output_path(self) -> Optional[Path]:
         folder = self._folder_zone.path()
-        author = self._author_edit.text().strip() or "Unknown Author"
-        title = self._title_edit.text().strip() or "Unknown Title"
+        # M9: tag-prefilled title/author text can contain path separators,
+        # "..", or Windows-reserved characters — sanitize before they become
+        # filename/directory components.
+        author = (
+            sanitize_filename_component(self._author_edit.text().strip())
+            if self._author_edit.text().strip()
+            else "Unknown Author"
+        )
+        title = (
+            sanitize_filename_component(self._title_edit.text().strip())
+            if self._title_edit.text().strip()
+            else "Unknown Title"
+        )
         base = folder.parent if folder else Path.home()
 
         choice = self._out_group.checkedId()
@@ -909,7 +1018,13 @@ class MainWindow(QMainWindow):
         )
 
     def _collect_book_edits(self) -> Book:
-        """Deep-copy the book and apply current UI field values."""
+        """Deep-copy the book and apply current UI field values.
+
+        Applies both title and start-time overrides from the chapter table
+        (mirrors ``_gather_chapters_from_table``) so a user who edits a
+        chapter's time and then Converts or Adds to Queue does not silently
+        lose that edit (M8).
+        """
         assert self._book is not None
         book = deepcopy(self._book)
         book.metadata.title = self._title_edit.text().strip()
@@ -917,8 +1032,14 @@ class MainWindow(QMainWindow):
         book.metadata.narrator = self._narrator_edit.text().strip()
         book.metadata.genre = self._genre_edit.text().strip()
         book.cover = self._cover_widget.cover_path()
-        for ch, new_title in zip(book.chapters, self._chapter_table.titles()):
+        times_ms = self._chapter_table.times_ms()
+        for i, (ch, new_title) in enumerate(
+            zip(book.chapters, self._chapter_table.titles())
+        ):
             ch.title = new_title
+            ms = times_ms[i] if i < len(times_ms) else None
+            if ms is not None:
+                ch.start_time = ms / 1000.0
         return book
 
     # ── Slots ─────────────────────────────────────────────────────────────────
@@ -950,7 +1071,8 @@ class MainWindow(QMainWindow):
             output_dir=Path(out_dir),
         )
         self._split_worker.progress.connect(self._on_progress)
-        self._split_worker.finished.connect(self._on_split_finished)
+        self._split_worker.result_ready.connect(self._on_split_finished)
+        self._split_worker.cancelled.connect(self._on_split_cancelled)
         self._split_worker.error.connect(self._on_split_error)
         self._split_worker.start()
 
@@ -959,11 +1081,17 @@ class MainWindow(QMainWindow):
         self._update_controls()
         self._set_status(f"Split complete → {Path(out_dir).name}/")
 
+    def _on_split_cancelled(self) -> None:
+        self._progress_bar.setVisible(False)
+        self._update_controls()
+        self._set_status("Cancelled.")
+
     def _on_split_error(self, msg: str) -> None:
         self._progress_bar.setVisible(False)
         self._update_controls()
         self._set_status("Split failed.")
-        QMessageBox.critical(self, "Split Error", msg)
+        if self.isVisible():
+            QMessageBox.critical(self, "Split Error", msg)
 
     def _collect_job(self):
         """Snapshot current GUI state as a Job for the queue."""
@@ -993,7 +1121,9 @@ class MainWindow(QMainWindow):
 
     def _show_queue_window(self) -> None:
         if self._queue_window is None:
-            self._queue_window = QueueWindow(self._queue_manager)
+            # L6: parent to the main window so it does not outlive it as a
+            # detached top-level keeping the app alive with stale rows.
+            self._queue_window = QueueWindow(self._queue_manager, parent=self)
             self._queue_window.apply_stylesheet(self._dark_mode)
         self._queue_window.show()
         self._queue_window.raise_()
@@ -1001,6 +1131,7 @@ class MainWindow(QMainWindow):
 
     def _on_folder_changed(self, p: Path) -> None:
         self._book = None
+        self._preflight_sample_rate = None  # M1: reset on any folder change
         self._analysis_label.setText("No analysis yet.")
         self._player.stop()
         self._update_controls()
@@ -1008,20 +1139,79 @@ class MainWindow(QMainWindow):
         self._progress_bar.setVisible(True)
         self._progress_bar.setRange(0, 0)  # indeterminate spinner
 
+        # Supersede any in-flight load (H5): bump the generation so late results
+        # from the previous scan are ignored, and park the old worker so its
+        # QThread is not destroyed while still running.
+        self._load_generation += 1
+        generation = self._load_generation
+        self._retire_load_worker(self._load_worker)
+        self._retire_load_worker(self._m4b_load_worker)
+        self._load_worker = None
+        self._m4b_load_worker = None
+
+        # Worker signals are connected as BOUND METHODS, never lambdas: Qt
+        # tracks the receiver of a bound-method connection and both disconnects
+        # it and discards queued events when the window is destroyed. A lambda
+        # has no receiver context, so a late signal from a worker thread would
+        # invoke a slot on a destroyed window — a fatal error under PySide6.
+        # The scan generation therefore rides on the worker object (read back
+        # via sender()), not in a closure.
         if p.is_dir():
             self._mode = "build"
             self._mode_badge.setText("Build")
             self._load_worker = LoadWorker(p)
-            self._load_worker.finished.connect(self._on_load_finished)
+            self._load_worker.generation = generation
+            self._load_worker.result_ready.connect(self._on_load_finished)
             self._load_worker.error.connect(self._on_load_error)
             self._load_worker.start()
         else:
             self._mode = "edit"
             self._mode_badge.setText("Edit")
             self._m4b_load_worker = LoadM4bWorker(p)
-            self._m4b_load_worker.finished.connect(self._on_m4b_loaded)
+            self._m4b_load_worker.generation = generation
+            self._m4b_load_worker.result_ready.connect(self._on_m4b_loaded)
             self._m4b_load_worker.error.connect(self._on_load_error)
             self._m4b_load_worker.start()
+
+    def _sender_generation(self, generation: int) -> int:
+        """Resolve the scan generation for a load-worker slot.
+
+        Slots receive the default ``-1`` when invoked through a Qt signal
+        (bound-method connections can't carry extra arguments) and read the
+        real generation off the emitting worker; tests pass it explicitly.
+        """
+        if generation != -1:
+            return generation
+        return int(getattr(self.sender(), "generation", -1))
+
+    def _retire_load_worker(self, worker: Optional[QThread]) -> None:
+        """Disconnect a superseded load worker and keep it alive until it exits.
+
+        Its signals are already generation-guarded, but we also drop the Qt
+        connections and park the object so its native ``finished`` can clean it
+        up without the QThread being garbage-collected mid-run.
+        """
+        if worker is None:
+            return
+        try:
+            worker.result_ready.disconnect()  # type: ignore[attr-defined]
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            worker.error.disconnect()  # type: ignore[attr-defined]
+        except (RuntimeError, TypeError):
+            pass
+        if worker.isRunning():
+            self._stale_load_workers.append(worker)
+            worker.finished.connect(self._prune_stale_load_worker)
+
+    def _prune_stale_load_worker(self) -> None:
+        """Drop the finished worker (``sender()``) from the parking list."""
+        worker = self.sender()
+        if worker in self._stale_load_workers:
+            self._stale_load_workers.remove(worker)
+        if isinstance(worker, QThread):
+            worker.deleteLater()
 
     def _on_folder_cleared(self) -> None:
         self._preflight_sample_rate = None
@@ -1036,23 +1226,52 @@ class MainWindow(QMainWindow):
         self._set_status("")
         self._update_controls()
 
-    def _on_load_finished(self, book: Book) -> None:
+    def _on_load_finished(self, book: Book, generation: int = -1) -> None:
+        # H5: ignore results from a superseded scan.  ``generation == -1``
+        # (signal invocation or a direct test call) resolves via sender().
+        generation = self._sender_generation(generation)
+        if generation != -1 and generation != self._load_generation:
+            return
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
         self._apply_book_to_ui(book)
         # Start preflight analysis in the background
         self._preflight_worker = PreflightWorker(book.files)
-        self._preflight_worker.finished.connect(self._on_preflight_finished)
+        self._preflight_worker.result_ready.connect(self._on_preflight_finished)
+        self._preflight_worker.error.connect(self._on_preflight_error)
         self._preflight_worker.start()
 
-    def _on_m4b_loaded(self, payload: object) -> None:
-        book, total_duration = payload  # type: ignore[misc]
-        self._m4b_total_duration = total_duration
+    def _on_m4b_loaded(self, payload: object, generation: int = -1) -> None:
+        # H5: ignore results from a superseded scan (see _sender_generation).
+        generation = self._sender_generation(generation)
+        if generation != -1 and generation != self._load_generation:
+            return
+        # L8: validate the payload shape before unpacking.
+        if not (isinstance(payload, tuple) and len(payload) == 2):
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "LoadM4bWorker returned an unexpected payload: %r", payload
+            )
+            return
+        book, total_duration = payload
+        if not isinstance(book, Book) or not isinstance(total_duration, (int, float)):
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "LoadM4bWorker payload has wrong types: %r", payload
+            )
+            return
+        self._m4b_total_duration = float(total_duration)
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
         self._apply_book_to_ui(book)
+
+    def _on_preflight_error(self, msg: str) -> None:
+        """M2: surface preflight probe failures in the Analysis panel."""
+        self._analysis_label.setText(f"Analysis unavailable: {msg}")
 
     def _on_preflight_finished(self, analysis: object) -> None:
         summary = format_preflight_summary(analysis)  # type: ignore[arg-type]
@@ -1256,19 +1475,23 @@ class MainWindow(QMainWindow):
         self._chapter_durations = self._derive_durations(self._book)
 
     def _update_chapter_buttons(self) -> None:
-        """Show/enable chapter toolbar buttons based on mode, merge state, and selection."""
+        """Show/enable chapter toolbar buttons based on mode, merge, selection."""
         if not hasattr(self, "_ch_up_btn"):
             return
         has_book = self._book is not None
         in_edit = has_book and self._mode == "edit"
         in_build = has_book and self._mode == "build"
         # After a merge in build mode files/chapters diverge — hide file-reorder ops.
-        # In edit mode the count always differs (1 file, many chapters) so never hide.
         build_merged = in_build and self._chapters_merged
-        show_reorder = has_book and not build_merged
+        # Move-up/move-down reorder time slices, which is physically meaningless
+        # within a single .m4b — edit mode never shows reorder controls.
+        show_reorder = in_build and not build_merged
+        # Remove stays available in both modes; it merges the span in edit mode
+        # rather than reordering anything (see _remove_chapters_edit_mode).
+        show_remove = has_book and not build_merged
         self._ch_up_btn.setVisible(show_reorder)
         self._ch_down_btn.setVisible(show_reorder)
-        self._ch_remove_btn.setVisible(show_reorder)
+        self._ch_remove_btn.setVisible(show_remove)
         self._ch_merge_btn.setVisible(has_book)
         self._ch_add_btn.setVisible(in_edit)
         if not has_book:
@@ -1297,6 +1520,8 @@ class MainWindow(QMainWindow):
             n = self._chapter_table.rowCount()
             self._ch_up_btn.setEnabled(row > 0)
             self._ch_down_btn.setEnabled(0 <= row < n - 1)
+        if show_remove:
+            n = self._chapter_table.rowCount()
             self._ch_remove_btn.setEnabled(sel_count > 0 and sel_count < n)
         # Enable Merge when 2+ consecutive rows are selected
         is_consecutive = len(selected) >= 2 and selected == list(
@@ -1305,6 +1530,11 @@ class MainWindow(QMainWindow):
         self._ch_merge_btn.setEnabled(is_consecutive)
 
     def _on_chapter_move_up(self) -> None:
+        # Reordering time slices within a single .m4b is physically
+        # meaningless (edit mode) — the toolbar hides these buttons, but
+        # guard the handler too since it may be reached via other paths.
+        if self._mode != "build":
+            return
         row = self._chapter_table.currentRow()
         if row <= 0 or self._book is None:
             return
@@ -1314,11 +1544,10 @@ class MainWindow(QMainWindow):
             self._chapter_durations[i - 1],
             self._chapter_durations[i],
         )
-        if self._mode == "build":
-            self._book.files[i], self._book.files[i - 1] = (
-                self._book.files[i - 1],
-                self._book.files[i],
-            )
+        self._book.files[i], self._book.files[i - 1] = (
+            self._book.files[i - 1],
+            self._book.files[i],
+        )
         self._book.chapters[i], self._book.chapters[i - 1] = (
             self._book.chapters[i - 1],
             self._book.chapters[i],
@@ -1328,6 +1557,8 @@ class MainWindow(QMainWindow):
         self._chapter_table.setCurrentCell(i - 1, ChapterTable.COL_TITLE)
 
     def _on_chapter_move_down(self) -> None:
+        if self._mode != "build":
+            return
         if self._book is None:
             return
         row = self._chapter_table.currentRow()
@@ -1340,11 +1571,10 @@ class MainWindow(QMainWindow):
             self._chapter_durations[i + 1],
             self._chapter_durations[i],
         )
-        if self._mode == "build":
-            self._book.files[i], self._book.files[i + 1] = (
-                self._book.files[i + 1],
-                self._book.files[i],
-            )
+        self._book.files[i], self._book.files[i + 1] = (
+            self._book.files[i + 1],
+            self._book.files[i],
+        )
         self._book.chapters[i], self._book.chapters[i + 1] = (
             self._book.chapters[i + 1],
             self._book.chapters[i],
@@ -1365,12 +1595,10 @@ class MainWindow(QMainWindow):
         if len(selected) >= self._chapter_table.rowCount():
             return
         self._sync_titles_from_table()
-        for row in reversed(selected):
-            del self._chapter_durations[row]
-            if self._mode == "build":
-                del self._book.files[row]
-            del self._book.chapters[row]
-        self._reindex_chapters()
+        if self._mode == "edit":
+            self._remove_chapters_edit_mode(selected)
+        else:
+            self._remove_chapters_build_mode(selected)
         self._chapter_table.populate(self._book.chapters)
         new_row = min(selected[0], self._chapter_table.rowCount() - 1)
         if new_row >= 0:
@@ -1378,6 +1606,43 @@ class MainWindow(QMainWindow):
         self._set_status(
             f"{len(self._book.files)} file(s) · {len(self._book.chapters)} chapter(s)."
         )
+
+    def _remove_chapters_build_mode(self, selected: list[int]) -> None:
+        """Remove chapters (= files) and cumulatively rebuild the timeline."""
+        assert self._book is not None
+        for row in reversed(selected):
+            del self._chapter_durations[row]
+            del self._book.files[row]
+            del self._book.chapters[row]
+        self._reindex_chapters()
+
+    def _remove_chapters_edit_mode(self, selected: list[int]) -> None:
+        """Remove chapter markers without shifting the underlying timeline.
+
+        A chapter is a time slice of one file, so deleting a marker must not
+        change any other chapter's start time.  The removed span merges into
+        the PREVIOUS chapter (row 0's span merges forward into the chapter
+        that becomes the new row 0, whose start time moves to 0.0).  Files
+        are never touched in edit mode.
+        """
+        assert self._book is not None
+        for row in reversed(selected):
+            removed_dur = self._chapter_durations[row]
+            del self._chapter_durations[row]
+            del self._book.chapters[row]
+            if row > 0:
+                # Absorb the removed span into the previous (still-present)
+                # chapter; that chapter's own start_time is unchanged.
+                self._chapter_durations[row - 1] += removed_dur
+            elif self._chapter_durations:
+                # First chapter removed: the new first chapter's start moves
+                # to 0 and its duration grows by the removed span.
+                self._chapter_durations[0] += removed_dur
+                self._book.chapters[0].start_time = 0.0
+        # Renumber indices only — start_times of surviving chapters (besides
+        # a new row 0) are left exactly as they were.
+        for i, ch in enumerate(self._book.chapters):
+            ch.index = i + 1
 
     def _on_chapter_merge(self) -> None:
         """Merge selected consecutive rows into a single chapter.
@@ -1417,12 +1682,19 @@ class MainWindow(QMainWindow):
             f"{len(self._book.files)} file(s) · {len(self._book.chapters)} chapter(s)."
         )
 
-    def _on_load_error(self, msg: str) -> None:
+    def _on_load_error(self, msg: str, generation: int = -1) -> None:
+        # H5: ignore errors from a superseded scan (see _sender_generation).
+        generation = self._sender_generation(generation)
+        if generation != -1 and generation != self._load_generation:
+            return
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setVisible(False)
         self._set_status("Error loading folder.")
         self._update_controls()
-        QMessageBox.critical(self, "Load Error", msg)
+        # No modal on a closed window: the user abandoned this scan, and a
+        # dialog parented to a deletion-pending window is fatal under Qt.
+        if self.isVisible():
+            QMessageBox.critical(self, "Load Error", msg)
 
     def _on_cover_changed(self, p: Path) -> None:
         if self._book:
@@ -1438,6 +1710,14 @@ class MainWindow(QMainWindow):
             self._custom_path_edit.setText(path)
 
     def _on_convert(self) -> None:
+        # While a direct convert is running the button is a Cancel control.
+        if self._convert_running:
+            if self._convert_worker is not None and self._convert_worker.isRunning():
+                self._convert_worker.request_cancel()
+                self._set_status("Cancelling…")
+                self._convert_btn.setEnabled(False)
+            return
+
         if not self._book:
             return
 
@@ -1469,9 +1749,14 @@ class MainWindow(QMainWindow):
             sample_rate=self._preflight_sample_rate,
         )
         self._convert_worker.progress.connect(self._on_progress)
-        self._convert_worker.finished.connect(self._on_convert_finished)
+        self._convert_worker.result_ready.connect(self._on_convert_finished)
+        self._convert_worker.cancelled.connect(self._on_convert_cancelled)
         self._convert_worker.error.connect(self._on_convert_error)
         self._convert_worker.start()
+        # Turn the Convert button into a Cancel control while the encode runs.
+        self._convert_running = True
+        self._convert_btn.setText("Cancel")
+        self._convert_btn.setEnabled(True)
 
     def _do_save_chapters(self) -> None:
         source = self._folder_zone.path()
@@ -1491,6 +1776,11 @@ class MainWindow(QMainWindow):
         self._set_status("Saving chapter edits…")
         self._convert_btn.setEnabled(False)
 
+        # M6: the player may still hold the .m4b being rewritten — release
+        # it (stop + clear source) before the worker starts, or the save can
+        # fail with a sharing violation on Windows.
+        self._player.release()
+
         self._save_worker = SaveChaptersWorker(
             source=source,
             chapters=chapters,
@@ -1498,7 +1788,7 @@ class MainWindow(QMainWindow):
             dest=source,  # in-place edit
             metadata=metadata,
         )
-        self._save_worker.finished.connect(self._on_save_finished)
+        self._save_worker.result_ready.connect(self._on_save_finished)
         self._save_worker.error.connect(self._on_convert_error)
         self._save_worker.start()
 
@@ -1512,15 +1802,23 @@ class MainWindow(QMainWindow):
             zip(chapters, self._chapter_table.titles())
         ):
             ch.title = new_title
-            if i < len(times_ms) and times_ms[i] is not None:
-                ch.start_time = times_ms[i] / 1000.0
+            ms = times_ms[i] if i < len(times_ms) else None
+            if ms is not None:
+                ch.start_time = ms / 1000.0
         return chapters
 
     def _on_save_finished(self, dest: object) -> None:
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(100)
+        # L4: don't leave the bar sitting at 100% forever — match the error path.
+        self._progress_bar.setVisible(False)
         self._set_status(f"Saved — {Path(str(dest)).name}")
         self._update_controls()
+        # M6: the save released the player's source; reload it now that the
+        # rewrite is complete so playback/seek continues to work.
+        self._player.load_paused(Path(str(dest)), 0)
+        if not self.isVisible():
+            return
         msg = QMessageBox(self)
         msg.setWindowTitle("Saved")
         msg.setIcon(QMessageBox.Icon.NoIcon)
@@ -1537,9 +1835,12 @@ class MainWindow(QMainWindow):
         self._progress_bar.setValue(int(fraction * 100))
 
     def _on_convert_finished(self, result: PipelineResult) -> None:
+        self._convert_running = False
         self._progress_bar.setValue(100)
         self._set_status(f"Done — {result.output_file.name}")
         self._update_controls()
+        if not self.isVisible():
+            return
         mins = result.duration_seconds / 60
         msg = QMessageBox(self)
         msg.setWindowTitle("Saved")
@@ -1551,8 +1852,17 @@ class MainWindow(QMainWindow):
         )
         msg.exec()
 
+    def _on_convert_cancelled(self) -> None:
+        """ConvertWorker cancellation: hide progress, no error dialog (F18)."""
+        self._convert_running = False
+        self._progress_bar.setVisible(False)
+        self._set_status("Cancelled.")
+        self._update_controls()
+
     def _on_convert_error(self, msg: str) -> None:
+        self._convert_running = False
         self._progress_bar.setVisible(False)
         self._set_status("Conversion failed.")
         self._update_controls()
-        QMessageBox.critical(self, "Conversion Error", msg)
+        if self.isVisible():
+            QMessageBox.critical(self, "Conversion Error", msg)

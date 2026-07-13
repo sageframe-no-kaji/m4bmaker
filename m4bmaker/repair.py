@@ -8,9 +8,9 @@ Detection heuristics (via ``ffprobe``)
 --------------------------------------
 1. **Embedded cover / non-audio streams** — video stream present → embedded
    artwork needs stripping so the concat demuxer does not choke.
-2. **Corruption markers** — ffprobe stderr contains known error strings
-   (``Header missing``, ``Invalid data``, ``corrupt``, ``moov atom``) that
-   indicate frame-level damage.
+2. **Corruption markers** — ffprobe stderr contains known decode-corruption
+   signatures (``header missing``, ``error while decoding``, ``invalid data
+   found``, ``corrupt``, ``invalid frame``) that indicate frame-level damage.
 
 Repair strategy
 ---------------
@@ -29,14 +29,15 @@ from pathlib import Path
 
 from m4bmaker.utils import subprocess_flags
 
-# ffprobe stderr strings that indicate corruption / structural damage
+# ffprobe stderr strings that indicate real decode-corruption (matched
+# case-insensitively). Deliberately narrower than a bare "error" substring
+# match, which flagged unrelated warnings as corruption.
 _CORRUPTION_MARKERS = (
     "header missing",
-    "invalid data",
+    "error while decoding",
+    "invalid data found",
     "corrupt",
-    "moov atom",
-    "error",
-    "could not find codec",
+    "invalid frame",
 )
 
 
@@ -84,10 +85,14 @@ def needs_repair(path: Path, ffprobe: str) -> bool:
     ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, encoding="utf-8", **subprocess_flags()
+            cmd,
+            capture_output=True,
+            encoding="utf-8",
+            timeout=120,
+            **subprocess_flags(),
         )
-    except OSError:
-        # ffprobe not found or not executable — assume no repair needed
+    except (OSError, subprocess.TimeoutExpired):
+        # ffprobe not found, not executable, or timed out — assume no repair needed
         return False
 
     # 1. Check for non-audio streams (embedded cover art is codec_type=video)
@@ -109,16 +114,18 @@ def needs_repair(path: Path, ffprobe: str) -> bool:
 # ── repair ────────────────────────────────────────────────────────────────────
 
 
-def repair_file(source: Path, dest_dir: Path, ffmpeg: str) -> Path:
+def repair_file(source: Path, dest_dir: Path, ffmpeg: str, index: int = 0) -> Path:
     """Remux *source* to a cleaned copy in *dest_dir*, audio-only, stream-copy.
+
+    *index* is prefixed onto the cleaned filename (``f"{index:03d}_{name}"``)
+    so that two same-named source files (from different input directories)
+    never collide — without the prefix a third same-named file would
+    silently overwrite the ``_repaired`` fallback.
 
     Returns the path to the cleaned file.  Raises :exc:`subprocess.CalledProcessError`
     on ffmpeg failure (caller decides whether to abort or warn).
     """
-    cleaned = dest_dir / source.name
-    # Ensure unique name if two source files share the same base name
-    if cleaned.exists():
-        cleaned = dest_dir / f"{source.stem}_repaired{source.suffix}"
+    cleaned = dest_dir / f"{index:03d}_{source.name}"
 
     cmd = [
         ffmpeg,
@@ -138,7 +145,12 @@ def repair_file(source: Path, dest_dir: Path, ffmpeg: str) -> Path:
         str(cleaned),
     ]
     subprocess.run(
-        cmd, capture_output=True, encoding="utf-8", check=True, **subprocess_flags()
+        cmd,
+        capture_output=True,
+        encoding="utf-8",
+        check=True,
+        timeout=600,
+        **subprocess_flags(),
     )
     return cleaned
 
@@ -179,13 +191,16 @@ def run_repair(
     if not needs:
         return result
 
-    result.repaired = len(needs)
     _cb(f"Repairing {len(needs)} damaged audio file(s)…")
 
-    for path in needs:
+    # result.repaired counts only successful remuxes — a file whose remux
+    # fails is used as-is (original) and reported separately via
+    # error_paths, not counted as repaired.
+    for index, path in enumerate(needs):
         try:
-            cleaned = repair_file(path, repair_dir, ffmpeg)
+            cleaned = repair_file(path, repair_dir, ffmpeg, index=index)
             result.repaired_paths.append((path, cleaned))
+            result.repaired += 1
         except (subprocess.CalledProcessError, OSError) as exc:
             stderr = getattr(exc, "stderr", None) or str(exc)
             result.error_paths.append((path, stderr.strip()))
@@ -217,6 +232,7 @@ def format_repair_report(result: RepairResult) -> str:
     ]
     if result.error_paths:
         lines.append(
-            f"  ({len(result.error_paths)} file(s) could not be repaired and will be used as-is)"
+            f"  ({result.repaired} repaired, {len(result.error_paths)} file(s) "
+            f"could not be repaired and were used as-is)"
         )
     return "\n".join(lines)

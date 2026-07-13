@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
+from m4bmaker.errors import EncodeCancelled, M4BError
 from m4bmaker.utils import subprocess_flags
 
 
@@ -68,6 +71,12 @@ def write_concat_list(files: list[Path], dest: Path) -> None:
     The only reliable approach is to leave paths unquoted and escape each
     special character individually with a leading backslash.
 
+    Raises :class:`~m4bmaker.errors.M4BError` if a resolved path contains a
+    newline, carriage return, or tab: the concat demuxer's escaping for
+    those characters is unverified (see the warning below), so rather than
+    risk silently mis-parsing the list, the file is rejected and the user is
+    told to rename it.
+
     .. warning::
         Unit tests for this function can only assert on the *string content* of
         the concat file, not on ffmpeg's actual parsing of it.  If you change
@@ -79,6 +88,14 @@ def write_concat_list(files: list[Path], dest: Path) -> None:
     lines: list[str] = []
     for path in files:
         posix_path = path.resolve().as_posix()
+        if any(c in posix_path for c in ("\n", "\r", "\t")):
+            raise M4BError(
+                f"File path contains a newline, carriage return, or tab "
+                f"character that cannot be safely written to the ffmpeg "
+                f"concat list: {path}\n"
+                f"Please rename the file (or its containing directory) to "
+                f"remove that character."
+            )
         # Backslash must be escaped first to avoid double-escaping.
         escaped = (
             posix_path.replace("\\", "\\\\")
@@ -113,7 +130,19 @@ def encode(
 
     The output is an AAC-encoded M4B (MP4 audiobook) container.
     ffmpeg progress data is read from stdout via ``-progress pipe:1``.
+
+    Encoding is atomic: ffmpeg writes to a sibling ``<output>.partial`` path
+    in the same directory, which is moved onto *output* via :func:`os.replace`
+    only after a successful (returncode 0) run. On failure, cancellation, or
+    a ``KeyboardInterrupt``, the partial file is removed and any pre-existing
+    good file at *output* is left untouched.
+
+    Raises:
+        M4BError: if the ffmpeg executable is missing or exits non-zero.
+        EncodeCancelled: if *cancel_event* fires while ffmpeg is running.
     """
+    partial = output.with_name(output.name + ".partial")
+
     cmd: list[str] = [
         ffmpeg,
         "-y",  # overwrite without asking
@@ -171,11 +200,18 @@ def encode(
         "-progress",
         "pipe:1",  # write progress key=value pairs to stdout
         "-nostdin",  # do not read from stdin
-        str(output),
+        "-f",
+        "mp4",  # explicit muxer — the ".partial" staging suffix defeats
+        # ffmpeg's extension-based auto-detection, which would otherwise
+        # fail with "Unable to choose an output format".
+        str(partial),
     ]
 
     stderr_buf: list[str] = []
     done = threading.Event()
+
+    def _cleanup_partial() -> None:
+        partial.unlink(missing_ok=True)
 
     try:
         proc = subprocess.Popen(
@@ -185,8 +221,8 @@ def encode(
             encoding="utf-8",
             **subprocess_flags(),
         )
-    except FileNotFoundError:
-        sys.exit(f"Error: ffmpeg executable not found at '{ffmpeg}'.")
+    except FileNotFoundError as exc:
+        raise M4BError(f"Error: ffmpeg executable not found at '{ffmpeg}'.") from exc
 
     def _read_stderr() -> None:
         assert proc.stderr is not None
@@ -202,16 +238,30 @@ def encode(
     reader.start()
     stderr_thread.start()
 
+    cancelled = False
     try:
         while proc.poll() is None:
             if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
                 proc.kill()
                 break
-            threading.Event().wait(0.1)
+            time.sleep(0.1)
+    except BaseException:
+        # Covers KeyboardInterrupt as well as any other propagating
+        # exception: the child process and partial output must not survive.
+        proc.kill()
+        proc.wait()
+        _cleanup_partial()
+        raise
     finally:
         done.set()
         reader.join()
         stderr_thread.join()
+
+    if cancelled:
+        proc.wait()
+        _cleanup_partial()
+        raise EncodeCancelled("Encoding cancelled.")
 
     if sys.stdout is not None and sys.stdout.isatty():
         if proc.returncode == 0 and total_ms > 0:
@@ -225,9 +275,13 @@ def encode(
         sys.stdout.flush()
 
     if proc.returncode != 0:
+        _cleanup_partial()
         stderr_data = "".join(stderr_buf)
-        sys.exit(
+        tail = "\n".join(stderr_data.strip().splitlines()[-30:])
+        raise M4BError(
             f"Error: ffmpeg exited with code {proc.returncode}.\n"
             f"Command: {' '.join(cmd)}\n"
-            f"stderr:\n{stderr_data.strip()}"
+            f"stderr (last 30 lines):\n{tail}"
         )
+
+    os.replace(partial, output)

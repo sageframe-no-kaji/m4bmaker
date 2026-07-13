@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections import Counter
+from functools import lru_cache
 
 from m4bmaker.utils import subprocess_flags
 from dataclasses import dataclass, field
@@ -35,10 +36,10 @@ class AudioAnalysis:
     """Aggregated preflight results across all source files."""
 
     file_count: int
-    sample_rates: Counter = field(default_factory=Counter)  # {rate_hz: count}
-    channels: Counter = field(default_factory=Counter)  # {n_channels: count}
-    bit_rates: Counter = field(default_factory=Counter)  # {bps: count}
-    codecs: Counter = field(default_factory=Counter)  # {codec_name: count}
+    sample_rates: "Counter[int]" = field(default_factory=Counter)  # {rate_hz: count}
+    channels: "Counter[int]" = field(default_factory=Counter)  # {n_channels: count}
+    bit_rates: "Counter[int]" = field(default_factory=Counter)  # {bps: count}
+    codecs: "Counter[str]" = field(default_factory=Counter)  # {codec_name: count}
     total_duration_seconds: float = 0.0
 
     @property
@@ -46,15 +47,27 @@ class AudioAnalysis:
         """True if files differ in sample rate or channel count."""
         return len(self.sample_rates) > 1 or len(self.channels) > 1
 
+    @property
+    def has_codec_mismatch(self) -> bool:
+        """True if files differ in codec — concat demuxer requires uniformity."""
+        return len(self.codecs) > 1
+
 
 # ── probing ──────────────────────────────────────────────────────────────────
 
 
+@lru_cache(maxsize=1024)
 def probe_file(path: Path, ffprobe: str) -> FileInfo:
     """Probe a single file's first audio stream with ffprobe.
 
     Returns a :class:`FileInfo` with ``None`` fields for any property that
     could not be read (e.g. the tool fails or the stream tag is absent).
+
+    Results are cached per ``(path, ffprobe)`` for the life of the process:
+    source files do not change mid-run, and both the preflight report and
+    the pipeline's codec-uniformity check probe the same paths. Callers must
+    treat the returned :class:`FileInfo` as read-only — it is shared between
+    cache hits.
     """
     cmd = [
         ffprobe,
@@ -81,26 +94,44 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
     if result.returncode == 0:
         try:
             data = json.loads(result.stdout)
-            streams = data.get("streams", [])
-            if streams:
-                s = streams[0]
-                if "sample_rate" in s:
+        except json.JSONDecodeError:
+            data = {}
+
+        streams = data.get("streams", [])
+        if streams:
+            s = streams[0]
+            # Each field is parsed independently so one malformed value
+            # (e.g. a non-numeric bit_rate) doesn't discard the rest.
+            if "sample_rate" in s:
+                try:
                     sample_rate = int(s["sample_rate"])
-                if "channels" in s:
+                except (TypeError, ValueError):
+                    pass
+            if "channels" in s:
+                try:
                     channels = int(s["channels"])
-                if "bit_rate" in s:
+                except (TypeError, ValueError):
+                    pass
+            if "bit_rate" in s:
+                try:
                     bit_rate = int(s["bit_rate"])
-                if "codec_name" in s:
-                    codec_name = s["codec_name"]
-                if "duration" in s:
+                except (TypeError, ValueError):
+                    pass
+            if "codec_name" in s:
+                codec_name = s["codec_name"]
+            if "duration" in s:
+                try:
                     duration_seconds = float(s["duration"])
-            # Fall back to format-level duration (more reliable for MP3 etc.)
-            if duration_seconds is None:
-                fmt = data.get("format", {})
-                if "duration" in fmt:
+                except (TypeError, ValueError):
+                    pass
+        # Fall back to format-level duration (more reliable for MP3 etc.)
+        if duration_seconds is None:
+            fmt = data.get("format", {})
+            if "duration" in fmt:
+                try:
                     duration_seconds = float(fmt["duration"])
-        except (KeyError, ValueError, json.JSONDecodeError):
-            pass
+                except (TypeError, ValueError):
+                    pass
 
     return FileInfo(
         path=path,
@@ -114,10 +145,10 @@ def probe_file(path: Path, ffprobe: str) -> FileInfo:
 
 def run_preflight(files: list[Path], ffprobe: str) -> AudioAnalysis:
     """Probe all *files* and return a consolidated :class:`AudioAnalysis`."""
-    sample_rates: Counter = Counter()
-    channels: Counter = Counter()
-    bit_rates: Counter = Counter()
-    codecs: Counter = Counter()
+    sample_rates: "Counter[int]" = Counter()
+    channels: "Counter[int]" = Counter()
+    bit_rates: "Counter[int]" = Counter()
+    codecs: "Counter[str]" = Counter()
     total_duration: float = 0.0
 
     for path in files:
@@ -159,14 +190,17 @@ def _fmt_duration(seconds: float) -> str:
 def format_preflight_report(analysis: AudioAnalysis) -> str:
     """Return a human-readable multi-line preflight summary."""
 
-    def _fmt_sr(counter: Counter) -> str:
+    def _fmt_sr(counter: "Counter[int]") -> str:
         return ", ".join(f"{r}Hz ({v})" for r, v in sorted(counter.items()))
 
-    def _fmt_ch(counter: Counter) -> str:
+    def _fmt_ch(counter: "Counter[int]") -> str:
         labels = {1: "mono", 2: "stereo"}
         return ", ".join(
             f"{labels.get(k, f'{k}-ch')} ({v})" for k, v in sorted(counter.items())
         )
+
+    def _fmt_codec(counter: "Counter[str]") -> str:
+        return ", ".join(f"{name.upper()} ({v})" for name, v in sorted(counter.items()))
 
     lines = [
         "Audio analysis:",
@@ -180,6 +214,15 @@ def format_preflight_report(analysis: AudioAnalysis) -> str:
         lines.append(f"  Sample rates: {_fmt_sr(analysis.sample_rates)}")
     if analysis.channels:
         lines.append(f"  Channels: {_fmt_ch(analysis.channels)}")
+    if analysis.codecs and len(analysis.codecs) > 1:
+        lines.append(f"  Codecs: {_fmt_codec(analysis.codecs)}")
+
+    if analysis.has_codec_mismatch:
+        lines.append("")
+        lines.append(
+            "  \u26a0 Mixed codecs detected — all files must share one format "
+            "before encoding."
+        )
 
     if analysis.has_mismatches:
         lines.append("")
@@ -201,9 +244,8 @@ def format_preflight_summary(analysis: AudioAnalysis) -> str:
 
     # File count + total duration (always shown if available)
     if analysis.total_duration_seconds > 0:
-        parts.append(
-            f"{analysis.file_count} file(s)  ·  {_fmt_duration(analysis.total_duration_seconds)}"
-        )
+        dur = _fmt_duration(analysis.total_duration_seconds)
+        parts.append(f"{analysis.file_count} file(s)  ·  {dur}")
     else:
         parts.append(f"{analysis.file_count} file(s)")
 

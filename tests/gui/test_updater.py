@@ -45,6 +45,22 @@ class TestParseVersion:
     def test_patch_zero(self) -> None:
         assert _parse_version("v1.0.0") == (1, 0, 0)
 
+    def test_prerelease_keeps_full_numeric_tuple(self) -> None:
+        # Regression: naive isdigit filtering dropped the patch → (1, 2).
+        assert _parse_version("v1.2.3-beta") == (1, 2, 3)
+
+    def test_prerelease_plus_build_metadata(self) -> None:
+        assert _parse_version("1.4.0+build.7") == (1, 4, 0)
+
+    def test_numeric_prefix_of_segment(self) -> None:
+        assert _parse_version("2.10rc1.5") == (2, 10)
+
+    def test_garbage_tag_parses_empty(self) -> None:
+        assert _parse_version("nightly") == ()
+
+    def test_empty_string(self) -> None:
+        assert _parse_version("") == ()
+
 
 # ---------------------------------------------------------------------------
 # UpdateChecker.run() — direct call (no QThread machinery in unit tests)
@@ -141,6 +157,46 @@ class TestUpdateCheckerRun:
             patch(
                 "m4bmaker.gui.updater.urllib.request.urlopen",
                 return_value=_make_response("v1.0.0"),
+            ),
+        ):
+            checker.run()
+        assert emitted == []
+
+    # -- pre-release ordering (F19) ----------------------------------------
+
+    def test_prerelease_of_higher_version_is_newer(self) -> None:
+        """1.2.3-beta must be offered to a user on 1.2.2 (numeric 1.2.3>1.2.2)."""
+        checker, emitted = self._make_checker()
+        with (
+            patch("m4bmaker.gui.updater.__version__", "1.2.2"),
+            patch(
+                "m4bmaker.gui.updater.urllib.request.urlopen",
+                return_value=_make_response("v1.2.3-beta"),
+            ),
+        ):
+            checker.run()
+        assert emitted == ["1.2.3-beta"]
+
+    def test_prerelease_of_same_version_not_offered(self) -> None:
+        """1.2.3-beta must NOT be offered to a user already on 1.2.3."""
+        checker, emitted = self._make_checker()
+        with (
+            patch("m4bmaker.gui.updater.__version__", "1.2.3"),
+            patch(
+                "m4bmaker.gui.updater.urllib.request.urlopen",
+                return_value=_make_response("v1.2.3-beta"),
+            ),
+        ):
+            checker.run()
+        assert emitted == []
+
+    def test_garbage_tag_never_offered(self) -> None:
+        checker, emitted = self._make_checker()
+        with (
+            patch("m4bmaker.gui.updater.__version__", "1.0.0"),
+            patch(
+                "m4bmaker.gui.updater.urllib.request.urlopen",
+                return_value=_make_response("nightly-build"),
             ),
         ):
             checker.run()

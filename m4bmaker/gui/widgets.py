@@ -11,13 +11,10 @@ FindReplaceDialog — simple find / replace dialog
 from __future__ import annotations
 
 import re
-import tempfile
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt, QPoint, QTimer, Signal
+from PySide6.QtCore import QProcess, Qt, QPoint, QThread, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
@@ -53,6 +50,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from m4bmaker.cover import download_cover
+from m4bmaker.errors import M4BError
+from m4bmaker.utils import get_temp_root
+
 # ── Palette constants used in inline styles ──────────────────────────────────
 _GROUND_WARM = "#ebe6dd"
 _ACCENT = "#c45a2d"
@@ -82,6 +83,7 @@ class FolderDropZone(QFrame):
     ) -> None:
         super().__init__(parent)
         self._accept_m4b = accept_m4b
+        self._m4b_picker_proc: Optional[QProcess] = None
         self.setAcceptDrops(True)
         self._build()
 
@@ -149,12 +151,15 @@ class FolderDropZone(QFrame):
 
         On macOS: uses osascript (AppleScript ``choose file``) to open the
         real NSOpenPanel with no type filter — avoids the UTI grey-out issue.
+        Runs via an async QProcess (M3): a blocking ``subprocess.run`` here
+        would freeze the whole event loop for as long as the panel is open,
+        and there is no reason to bound how long the user takes to pick.
         On other platforms: falls back to QFileDialog with DontUseNativeDialog.
         """
         import sys as _sys
 
         if _sys.platform == "darwin":
-            path = self._browse_m4b_macos()
+            self._browse_m4b_macos()
         else:
             path, _ = QFileDialog.getOpenFileName(
                 self,
@@ -164,7 +169,10 @@ class FolderDropZone(QFrame):
                 "",
                 QFileDialog.Option.DontUseNativeDialog,
             )
+            self._handle_m4b_path(path)
 
+    def _handle_m4b_path(self, path: str) -> None:
+        """Apply a picked path (from either backend) — shared result handling."""
         if path and path.lower().endswith(".m4b"):
             self.set_path(Path(path))
         elif path:
@@ -174,26 +182,50 @@ class FolderDropZone(QFrame):
                 f"'{Path(path).name}' is not an .m4b file.",
             )
 
-    @staticmethod
-    def _browse_m4b_macos() -> str:
-        """Invoke AppleScript ``choose file`` — returns POSIX path or ''."""
-        import subprocess
+    def _browse_m4b_macos(self) -> None:
+        """Start AppleScript ``choose file`` asynchronously via QProcess.
 
+        No timeout — the panel can legitimately stay open indefinitely
+        while the user browses; killing it after a fixed window would
+        silently discard a real selection.  On any QProcess start error
+        (osascript missing, etc.) falls back to QFileDialog.
+        """
         script = (
             'set theFile to choose file with prompt "Select an M4B audiobook"\n'
             "return POSIX path of theFile"
         )
-        try:
-            result = subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            return result.stdout.strip()
-        except Exception:  # noqa: BLE001
-            # osascript unavailable or user cancelled (exit 1) — return empty
-            return ""
+        proc = QProcess(self)
+        self._m4b_picker_proc = proc
+        proc.finished.connect(self._on_m4b_picker_finished)
+        proc.errorOccurred.connect(self._on_m4b_picker_error)
+        proc.start("osascript", ["-e", script])
+
+    def _on_m4b_picker_finished(
+        self, exit_code: int, exit_status: QProcess.ExitStatus
+    ) -> None:
+        proc = self._m4b_picker_proc
+        self._m4b_picker_proc = None
+        if proc is None:
+            return
+        path = ""
+        if exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0:
+            raw: bytes = bytes(proc.readAllStandardOutput().data())
+            path = raw.decode("utf-8").strip()
+        # A non-zero exit means the user cancelled the panel — no path, no error.
+        self._handle_m4b_path(path)
+
+    def _on_m4b_picker_error(self, _error: QProcess.ProcessError) -> None:
+        """osascript failed to start — fall back to the Qt dialog."""
+        self._m4b_picker_proc = None
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Edit M4B Chapters",
+            "",
+            "M4B Audiobooks (*.m4b);;All Files (*)",
+            "",
+            QFileDialog.Option.DontUseNativeDialog,
+        )
+        self._handle_m4b_path(path)
 
     def _on_clear_clicked(self) -> None:
         self._edit.setText("")
@@ -203,7 +235,14 @@ class FolderDropZone(QFrame):
     # ── drag-and-drop ─────────────────────────────────────────────────────────
 
     def _is_accepted(self, p: Path) -> bool:
-        return p.is_dir() or (self._accept_m4b and p.suffix.lower() == ".m4b")
+        if self._accept_m4b and p.suffix.lower() == ".m4b":
+            return True
+        try:
+            return p.is_dir()
+        except OSError:
+            # L7: a dead network mount can hang/fail stat() during a drag
+            # hover — treat it as not-accepted rather than propagating.
+            return False
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
@@ -227,6 +266,40 @@ class FolderDropZone(QFrame):
         event.acceptProposedAction()
 
 
+# ── cover URL download worker ────────────────────────────────────────────────
+
+
+class _CoverDownloadWorker(QThread):
+    """Download a cover image off the UI thread.
+
+    Delegates to :func:`m4bmaker.cover.download_cover`, which enforces
+    https-only, a content-type check, and a size cap, and writes under the
+    process-lifetime managed temp root (cleaned at exit) rather than a
+    leaked :class:`~tempfile.NamedTemporaryFile`.
+    """
+
+    result_ready = Signal(object)  # Path
+    error = Signal(str)
+
+    def __init__(self, url: str) -> None:
+        super().__init__()
+        self._url = url
+
+    def run(self) -> None:
+        try:
+            import tempfile as _tempfile
+
+            dest_dir = Path(
+                _tempfile.mkdtemp(prefix="m4bmaker_cover_url_", dir=get_temp_root())
+            )
+            path = download_cover(self._url, dest_dir)
+            self.result_ready.emit(path)
+        except M4BError as exc:
+            self.error.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.error.emit(str(exc))
+
+
 # ── CoverWidget ───────────────────────────────────────────────────────────────
 
 
@@ -242,6 +315,7 @@ class CoverWidget(QFrame):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self._cover_path: Optional[Path] = None
+        self._download_worker: Optional[_CoverDownloadWorker] = None
         self._build()
 
     def _build(self) -> None:
@@ -265,11 +339,11 @@ class CoverWidget(QFrame):
         btn.clicked.connect(self._browse)
         layout.addWidget(btn)
 
-        url_btn = QPushButton("URL…")
-        url_btn.setFixedWidth(btn_width)
-        url_btn.setToolTip("Set cover art from a web URL")
-        url_btn.clicked.connect(self._browse_url)
-        layout.addWidget(url_btn)
+        self._url_btn = QPushButton("URL…")
+        self._url_btn.setFixedWidth(btn_width)
+        self._url_btn.setToolTip("Set cover art from a web URL")
+        self._url_btn.clicked.connect(self._browse_url)
+        layout.addWidget(self._url_btn)
 
     # ── public interface ──────────────────────────────────────────────────────
 
@@ -308,8 +382,14 @@ class CoverWidget(QFrame):
             self._set_and_emit(Path(path))
 
     def _browse_url(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
+        """Prompt for a cover URL and download it off the UI thread (M4).
 
+        The download itself runs in :class:`_CoverDownloadWorker`, which
+        delegates to :func:`m4bmaker.cover.download_cover` (https-only,
+        content-type checked, size-capped, written under the managed temp
+        root). The URL button is disabled for the duration so a second
+        click cannot start an overlapping download.
+        """
         url, ok = QInputDialog.getText(
             self,
             "Cover Art URL",
@@ -318,35 +398,25 @@ class CoverWidget(QFrame):
         if not ok or not url.strip():
             return
         url = url.strip()
-        if not url.lower().startswith(("http://", "https://")):
-            from PySide6.QtWidgets import QMessageBox
-
-            QMessageBox.warning(
-                self, "Invalid URL", "Please enter an http:// or https:// URL."
-            )
+        if not url.lower().startswith("https://"):
+            QMessageBox.warning(self, "Invalid URL", "Please enter an https:// URL.")
             return
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "m4bmaker/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as response:  # noqa: S310
-                data = response.read()
-            suffix = Path(url.split("?")[0]).suffix.lower() or ".jpg"
-            if suffix not in self._EXTS:
-                suffix = ".jpg"
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            tmp.write(data)
-            tmp.close()
-            self._set_and_emit(Path(tmp.name))
-        except urllib.error.URLError as exc:
-            from PySide6.QtWidgets import QMessageBox
 
-            QMessageBox.critical(
-                self, "Download Error", f"Could not download image:\n{exc.reason}"
-            )
-        except Exception as exc:  # noqa: BLE001
-            from PySide6.QtWidgets import QMessageBox
+        self._url_btn.setEnabled(False)
+        self._download_worker = _CoverDownloadWorker(url)
+        self._download_worker.result_ready.connect(self._on_download_finished)
+        self._download_worker.error.connect(self._on_download_error)
+        self._download_worker.start()
 
+    def _on_download_finished(self, path: object) -> None:
+        self._url_btn.setEnabled(True)
+        self._set_and_emit(Path(str(path)))
+
+    def _on_download_error(self, msg: str) -> None:
+        self._url_btn.setEnabled(True)
+        if self.isVisible():
             QMessageBox.critical(
-                self, "Download Error", f"Could not download image:\n{exc}"
+                self, "Download Error", f"Could not download image:\n{msg}"
             )
 
     def _set_and_emit(self, p: Path) -> None:
@@ -732,33 +802,38 @@ class ChapterTable(QTableWidget):
         rows = sorted({i.row() for i in self.selectedIndexes()})
         return rows if rows else list(range(self.rowCount()))
 
-    def _find_replace(self) -> None:  # noqa: C901
+    def _find_replace(self) -> None:
         dlg = FindReplaceDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            find, replace, case_sensitive = dlg.values()
+            find, replace, case_sensitive, use_regex = dlg.values()
             if not find:
                 return
             before = self._snapshot_titles()
             flags = 0 if case_sensitive else re.IGNORECASE
-            try:
+            if use_regex:
+                # L5: regex mode is explicit opt-in — the replacement is a
+                # regex template here (backslash refs like \1 are honoured),
+                # matching the pre-existing "Find" behaviour.
+                try:
+                    pattern = re.compile(find, flags)
+                except re.error:
+                    QMessageBox.warning(
+                        self, "Invalid Pattern", f"Not a valid regex: {find!r}"
+                    )
+                    return
                 for row in self._selected_rows():
                     item = self.item(row, self.COL_TITLE)
                     if item:
-                        item.setText(re.sub(find, replace, item.text(), flags=flags))
-            except re.error:
-                # Plain-string fallback if pattern is invalid regex
-                repl_flags = 0 if case_sensitive else re.IGNORECASE
+                        item.setText(pattern.sub(replace, item.text()))
+            else:
+                # Literal mode (default): match find verbatim and insert
+                # replace verbatim too — a callable replacement so re.sub
+                # never interprets backslashes/\1 in `replace` as a template.
+                pattern = re.compile(re.escape(find), flags)
                 for row in self._selected_rows():
                     item = self.item(row, self.COL_TITLE)
                     if item:
-                        old = item.text()
-                        if not case_sensitive:
-                            new = re.sub(
-                                re.escape(find), replace, old, flags=repl_flags
-                            )
-                        else:
-                            new = old.replace(find, replace)
-                        item.setText(new)
+                        item.setText(pattern.sub(lambda _m: replace, item.text()))
             after = self._snapshot_titles()
             if before != after:
                 self._undo_stack.push(_TitlesCommand(self, before, after))
@@ -857,7 +932,12 @@ class ChapterTable(QTableWidget):
 
 
 class FindReplaceDialog(QDialog):
-    """Minimal find / replace dialog used by ChapterTable."""
+    """Minimal find / replace dialog used by ChapterTable.
+
+    "Find" matches literally by default (L5) — typing ``1.5`` no longer
+    matches ``125`` the way a regex ``.`` wildcard would.  Check "Regex" to
+    opt back into pattern matching.
+    """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -881,6 +961,13 @@ class FindReplaceDialog(QDialog):
         self._case_box = QCheckBox("Case sensitive")
         layout.addWidget(self._case_box)
 
+        self._regex_box = QCheckBox("Regex")
+        self._regex_box.setToolTip(
+            "Treat Find as a regular expression\n"
+            "(Replace may use \\1, \\2, … back-references)"
+        )
+        layout.addWidget(self._regex_box)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -888,9 +975,11 @@ class FindReplaceDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def values(self) -> tuple[str, str, bool]:
+    def values(self) -> tuple[str, str, bool, bool]:
+        """Return (find, replace, case_sensitive, use_regex)."""
         return (
             self._find_edit.text(),
             self._replace_edit.text(),
             self._case_box.isChecked(),
+            self._regex_box.isChecked(),
         )

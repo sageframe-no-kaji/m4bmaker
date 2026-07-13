@@ -103,6 +103,12 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         "tkinter", "unittest", "xmlrpc",
+        # Pillow is an optional test/dev dependency; cover.py degrades
+        # gracefully without it (_image_area returns 0). It must NOT ship in
+        # the app bundle: Pillow >= 11 has no universal2 wheels, so its thin
+        # arm64 extensions break the universal2 PyInstaller build. The shipped
+        # 1.0.5 app was likewise built without Pillow.
+        "PIL",
         # Heavy Qt modules not used by this app
         "PySide6.QtWebEngine", "PySide6.QtWebEngineCore",
         "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
@@ -168,8 +174,8 @@ app = BUNDLE(
     bundle_identifier="com.sageframe.m4bmaker",
     info_plist={
         "CFBundleDisplayName": "m4bmaker",
-        "CFBundleShortVersionString": "1.0.5",
-        "CFBundleVersion": "1.0.5",
+        "CFBundleShortVersionString": "1.1.0",
+        "CFBundleVersion": "1.1.0",
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,   # supports dark mode
         "LSMinimumSystemVersion": "13.0",

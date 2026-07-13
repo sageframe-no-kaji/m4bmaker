@@ -141,6 +141,13 @@ class TestFolderDropZone:
         assert self.w.path() is None
         assert not self.w._clear_btn.isVisible()
 
+    def test_is_accepted_swallows_oserror_from_dead_mount(self, tmp_path: Path):
+        """L7: a stat() failure (e.g. dead network mount) must not propagate —
+        the hover is simply rejected rather than hanging/raising."""
+        bogus = tmp_path / "unreachable"
+        with patch.object(Path, "is_dir", side_effect=OSError("stale handle")):
+            assert self.w._is_accepted(bogus) is False
+
 
 class TestFolderDropZoneM4b:
     """Tests for the accept_m4b=True variant — Edit… button / _browse_m4b."""
@@ -152,16 +159,17 @@ class TestFolderDropZoneM4b:
         self.w.close()
 
     def test_browse_m4b_sets_path(self, tmp_path: Path):
+        """_browse_m4b delegates a valid picked path to set_path (M3 async path)."""
         m4b = tmp_path / "book.m4b"
         m4b.write_bytes(b"\x00")
         macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
-        with patch(macos_patch, return_value=str(m4b)):
+        with patch(macos_patch, side_effect=lambda: self.w._handle_m4b_path(str(m4b))):
             self.w._browse_m4b()
         assert self.w.path() == m4b
 
     def test_browse_m4b_cancelled_is_noop(self):
         macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
-        with patch(macos_patch, return_value=""):
+        with patch(macos_patch, side_effect=lambda: self.w._handle_m4b_path("")):
             self.w._browse_m4b()
         assert self.w.path() is None
 
@@ -172,12 +180,67 @@ class TestFolderDropZoneM4b:
         self.w.folder_changed.connect(received.append)
         macos_patch = "m4bmaker.gui.widgets.FolderDropZone._browse_m4b_macos"
         with (
-            patch(macos_patch, return_value=str(mp3)),
+            patch(
+                macos_patch,
+                side_effect=lambda: self.w._handle_m4b_path(str(mp3)),
+            ),
             patch("m4bmaker.gui.widgets.QMessageBox.warning") as mock_warn,
         ):
             self.w._browse_m4b()
         mock_warn.assert_called_once()
         assert received == []
+
+    # ── async QProcess picker (M3) ──────────────────────────────────────────
+
+    def test_browse_m4b_macos_starts_qprocess(self):
+        """_browse_m4b_macos must not block — it starts a QProcess and returns."""
+        with patch("m4bmaker.gui.widgets.QProcess.start") as mock_start:
+            self.w._browse_m4b_macos()
+        mock_start.assert_called_once()
+        assert self.w._m4b_picker_proc is not None
+
+    def test_picker_finished_success_sets_path(self, tmp_path: Path):
+        from PySide6.QtCore import QByteArray, QProcess
+
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        # Never actually spawn osascript in tests — only its result handling
+        # is under test here.
+        with patch("m4bmaker.gui.widgets.QProcess.start"):
+            self.w._browse_m4b_macos()
+        proc = self.w._m4b_picker_proc
+        assert proc is not None
+        with patch.object(
+            proc, "readAllStandardOutput", return_value=QByteArray(str(m4b).encode())
+        ):
+            self.w._on_m4b_picker_finished(0, QProcess.ExitStatus.NormalExit)
+        assert self.w.path() == m4b
+        assert self.w._m4b_picker_proc is None
+
+    def test_picker_finished_nonzero_exit_is_noop(self):
+        """A non-zero exit means the user cancelled the panel — no path change."""
+        from PySide6.QtCore import QProcess
+
+        with patch("m4bmaker.gui.widgets.QProcess.start"):
+            self.w._browse_m4b_macos()
+        self.w._on_m4b_picker_finished(1, QProcess.ExitStatus.NormalExit)
+        assert self.w.path() is None
+        assert self.w._m4b_picker_proc is None
+
+    def test_picker_error_falls_back_to_qfiledialog(self, tmp_path: Path):
+        from PySide6.QtCore import QProcess
+
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        with patch("m4bmaker.gui.widgets.QProcess.start"):
+            self.w._browse_m4b_macos()
+        with patch(
+            "m4bmaker.gui.widgets.QFileDialog.getOpenFileName",
+            return_value=(str(m4b), ""),
+        ):
+            self.w._on_m4b_picker_error(QProcess.ProcessError.FailedToStart)
+        assert self.w.path() == m4b
+        assert self.w._m4b_picker_proc is None
 
     def test_drag_enter_m4b_accepted(self, tmp_path: Path):
         f = tmp_path / "book.m4b"
@@ -299,6 +362,108 @@ class TestCoverWidget:
         self.w.dragLeaveEvent(event)  # must not raise
 
 
+class TestCoverWidgetUrlDownload:
+    """M4: URL cover art downloads run in a QThread worker, not the UI thread."""
+
+    @pytest.fixture(autouse=True)
+    def widget(self, qapp):
+        self.w = CoverWidget()
+        yield
+        self.w.close()
+
+    def test_browse_url_rejects_http(self):
+        with (
+            patch(
+                "m4bmaker.gui.widgets.QInputDialog.getText",
+                return_value=("http://example.com/cover.jpg", True),
+            ),
+            patch("m4bmaker.gui.widgets.QMessageBox.warning") as mock_warn,
+        ):
+            self.w._browse_url()
+        mock_warn.assert_called_once()
+        assert self.w._download_worker is None
+
+    def test_browse_url_cancelled_is_noop(self):
+        with patch(
+            "m4bmaker.gui.widgets.QInputDialog.getText", return_value=("", False)
+        ):
+            self.w._browse_url()
+        assert self.w._download_worker is None
+
+    def test_browse_url_starts_worker_and_disables_button(self):
+        with (
+            patch(
+                "m4bmaker.gui.widgets.QInputDialog.getText",
+                return_value=("https://example.com/cover.jpg", True),
+            ),
+            patch("m4bmaker.gui.widgets._CoverDownloadWorker.start") as mock_start,
+        ):
+            self.w._browse_url()
+        mock_start.assert_called_once()
+        assert self.w._download_worker is not None
+        assert not self.w._url_btn.isEnabled()
+
+    def test_download_finished_sets_cover_and_reenables_button(self, tmp_path: Path):
+        img = tmp_path / "cover.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        self.w._url_btn.setEnabled(False)
+        received = []
+        self.w.cover_changed.connect(received.append)
+        self.w._on_download_finished(img)
+        assert self.w.cover_path() == img
+        assert received == [img]
+        assert self.w._url_btn.isEnabled()
+
+    def test_download_error_reenables_button_and_shows_message(self):
+        self.w.show()
+        self.w._url_btn.setEnabled(False)
+        with patch("m4bmaker.gui.widgets.QMessageBox.critical") as mock_crit:
+            self.w._on_download_error("boom")
+        mock_crit.assert_called_once()
+        assert self.w._url_btn.isEnabled()
+
+    def test_download_error_no_dialog_when_not_visible(self):
+        """A closed/hidden widget must not spawn a modal (mirrors window.py guard)."""
+        self.w._url_btn.setEnabled(False)
+        with patch("m4bmaker.gui.widgets.QMessageBox.critical") as mock_crit:
+            self.w._on_download_error("boom")
+        mock_crit.assert_not_called()
+        assert self.w._url_btn.isEnabled()
+
+    def test_browse_url_uses_download_cover(self, tmp_path: Path, qapp):
+        """The worker's run() delegates to m4bmaker.cover.download_cover."""
+        from m4bmaker.gui.widgets import _CoverDownloadWorker
+
+        dest = tmp_path / "downloaded_cover.jpg"
+        dest.write_bytes(b"\xff\xd8\xff")
+        with patch("m4bmaker.gui.widgets.download_cover", return_value=dest) as mock_dl:
+            worker = _CoverDownloadWorker("https://example.com/cover.jpg")
+            results: list = []
+            worker.result_ready.connect(results.append)
+            worker.start()
+            worker.wait(3000)
+        qapp.processEvents()
+        assert results == [dest]
+        mock_dl.assert_called_once()
+        assert mock_dl.call_args[0][0] == "https://example.com/cover.jpg"
+
+    def test_worker_emits_error_on_m4berror(self, qapp):
+        from m4bmaker.errors import M4BError
+        from m4bmaker.gui.widgets import _CoverDownloadWorker
+
+        with patch(
+            "m4bmaker.gui.widgets.download_cover",
+            side_effect=M4BError("bad content type"),
+        ):
+            worker = _CoverDownloadWorker("https://example.com/cover.jpg")
+            errors: list = []
+            worker.error.connect(errors.append)
+            worker.start()
+            worker.wait(3000)
+        qapp.processEvents()
+        assert errors == ["bad content type"]
+
+
 # ── ChapterTable ──────────────────────────────────────────────────────────────
 
 
@@ -402,11 +567,91 @@ class TestChapterTableBulkEdit:
                 return_value=FindReplaceDialog.DialogCode.Accepted,
             ),
             patch.object(
-                FindReplaceDialog, "values", return_value=("Opening", "Intro", False)
+                FindReplaceDialog,
+                "values",
+                return_value=("Opening", "Intro", False, False),
             ),
         ):
             self.t._find_replace()
         assert self.t.item(0, ChapterTable.COL_TITLE).text() == "01. Intro"  # type: ignore[union-attr]  # noqa: E501
+
+    def test_find_replace_literal_default_does_not_treat_dot_as_wildcard(self):
+        """L5: 'Find' is literal by default — '1.5' must not match '125'."""
+        self.t.populate(
+            [
+                _make_chapter(1, 0.0, "Track 1.5"),
+                _make_chapter(2, 60.0, "Track 125"),
+            ]
+        )
+        with (
+            patch.object(
+                FindReplaceDialog,
+                "exec",
+                return_value=FindReplaceDialog.DialogCode.Accepted,
+            ),
+            patch.object(
+                FindReplaceDialog,
+                "values",
+                return_value=("1.5", "X", False, False),
+            ),
+        ):
+            self.t._find_replace()
+        assert self.t.titles() == ["Track X", "Track 125"]
+
+    def test_find_replace_literal_replacement_inserted_verbatim(self):
+        """Backslash sequences in Replace must not be treated as a regex template."""
+        self.t.populate([_make_chapter(1, 0.0, "Opening")])
+        with (
+            patch.object(
+                FindReplaceDialog,
+                "exec",
+                return_value=FindReplaceDialog.DialogCode.Accepted,
+            ),
+            patch.object(
+                FindReplaceDialog,
+                "values",
+                return_value=("Opening", r"A\1B", False, False),
+            ),
+        ):
+            self.t._find_replace()
+        assert self.t.titles() == [r"A\1B"]
+
+    def test_find_replace_regex_mode_uses_backreferences(self):
+        """Regex checkbox opts back into pattern matching (old behaviour)."""
+        self.t.populate([_make_chapter(1, 0.0, "Chapter 12")])
+        with (
+            patch.object(
+                FindReplaceDialog,
+                "exec",
+                return_value=FindReplaceDialog.DialogCode.Accepted,
+            ),
+            patch.object(
+                FindReplaceDialog,
+                "values",
+                return_value=(r"(\d+)", r"[\1]", False, True),
+            ),
+        ):
+            self.t._find_replace()
+        assert self.t.titles() == ["Chapter [12]"]
+
+    def test_find_replace_invalid_regex_shows_warning(self):
+        original = self.t.titles()
+        with (
+            patch.object(
+                FindReplaceDialog,
+                "exec",
+                return_value=FindReplaceDialog.DialogCode.Accepted,
+            ),
+            patch.object(
+                FindReplaceDialog,
+                "values",
+                return_value=("(unterminated", "X", False, True),
+            ),
+            patch("m4bmaker.gui.widgets.QMessageBox.warning") as mock_warn,
+        ):
+            self.t._find_replace()
+        mock_warn.assert_called_once()
+        assert self.t.titles() == original
 
     def test_find_replace_empty_find_is_noop(self):
         original = self.t.titles()
@@ -416,7 +661,9 @@ class TestChapterTableBulkEdit:
                 "exec",
                 return_value=FindReplaceDialog.DialogCode.Accepted,
             ),
-            patch.object(FindReplaceDialog, "values", return_value=("", "X", False)),
+            patch.object(
+                FindReplaceDialog, "values", return_value=("", "X", False, False)
+            ),
         ):
             self.t._find_replace()
         assert self.t.titles() == original
@@ -476,12 +723,23 @@ class TestFindReplaceDialog:
         dlg._find_edit.setText("foo")
         dlg._replace_edit.setText("bar")
         dlg._case_box.setChecked(True)
-        assert dlg.values() == ("foo", "bar", True)
+        assert dlg.values() == ("foo", "bar", True, False)
 
     def test_case_insensitive_default(self, qapp):
         dlg = FindReplaceDialog()
-        _, _, case = dlg.values()
+        _, _, case, _ = dlg.values()
         assert case is False
+
+    def test_regex_unchecked_by_default(self, qapp):
+        dlg = FindReplaceDialog()
+        _, _, _, use_regex = dlg.values()
+        assert use_regex is False
+
+    def test_regex_checkbox_reflected_in_values(self, qapp):
+        dlg = FindReplaceDialog()
+        dlg._regex_box.setChecked(True)
+        _, _, _, use_regex = dlg.values()
+        assert use_regex is True
 
 
 # ── _TitleDelegate ─────────────────────────────────────────────────────────
@@ -589,7 +847,9 @@ class TestChapterTableContextMenu:
 
 
 class TestFindReplaceFallback:
-    """Lines 393-406: invalid-regex find falls back to plain-string replace."""
+    """Literal mode (default, L5): regex metacharacters in Find are matched
+    verbatim, so a string like ``[unclosed`` — invalid as a regex — still
+    matches literally without raising or needing any fallback."""
 
     @pytest.fixture(autouse=True)
     def widget(self, qapp):
@@ -603,8 +863,7 @@ class TestFindReplaceFallback:
         yield
         self.t.close()
 
-    def test_invalid_regex_case_insensitive_uses_re_escape(self):
-        """Lines 400-403: case_sensitive=False → re.sub(re.escape(find), ...)."""
+    def test_literal_mode_case_insensitive_matches_metacharacters(self):
         with (
             patch.object(
                 FindReplaceDialog,
@@ -614,14 +873,13 @@ class TestFindReplaceFallback:
             patch.object(
                 FindReplaceDialog,
                 "values",
-                return_value=("[unclosed", "REPLACED", False),
+                return_value=("[unclosed", "REPLACED", False, False),
             ),
         ):
             self.t._find_replace()
         assert self.t.titles()[0] == "REPLACED bracket title"
 
-    def test_invalid_regex_case_sensitive_uses_str_replace(self):
-        """Lines 404-406: case_sensitive=True → str.replace()."""
+    def test_literal_mode_case_sensitive_matches_metacharacters(self):
         with (
             patch.object(
                 FindReplaceDialog,
@@ -631,7 +889,7 @@ class TestFindReplaceFallback:
             patch.object(
                 FindReplaceDialog,
                 "values",
-                return_value=("[unclosed", "REPLACED", True),
+                return_value=("[unclosed", "REPLACED", True, False),
             ),
         ):
             self.t._find_replace()
@@ -729,7 +987,7 @@ class TestChapterTableUndo:
             patch.object(
                 FindReplaceDialog,
                 "values",
-                return_value=("alpha", "REPLACED", False),
+                return_value=("alpha", "REPLACED", False, False),
             ),
         ):
             self.t._find_replace()
@@ -748,7 +1006,7 @@ class TestChapterTableUndo:
             patch.object(
                 FindReplaceDialog,
                 "values",
-                return_value=("NOMATCH", "X", False),
+                return_value=("NOMATCH", "X", False, False),
             ),
         ):
             self.t._find_replace()
@@ -931,15 +1189,19 @@ class TestTimeDelegate:
 
         delegate.setModelData(editor, model, index)
 
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "2:15.500"  # type: ignore[union-attr]
-        assert self.t.item(0, ChapterTable.COL_TIME).data(Qt.ItemDataRole.UserRole) == 135_500  # type: ignore[union-attr]
+        item = self.t.item(0, ChapterTable.COL_TIME)
+        assert item is not None
+        assert item.text() == "2:15.500"
+        assert item.data(Qt.ItemDataRole.UserRole) == 135_500
 
     def test_invalid_input_leaves_cell_unchanged(self, qapp):
         """Invalid typed time must not change the cell at all."""
         from m4bmaker.gui.widgets import _TimeDelegate
         from unittest.mock import MagicMock
 
-        original_text = self.t.item(0, ChapterTable.COL_TIME).text()  # "1:15.000"
+        original_item = self.t.item(0, ChapterTable.COL_TIME)
+        assert original_item is not None
+        original_text = original_item.text()  # "1:15.000"
         delegate = _TimeDelegate(self.t)
         editor = MagicMock()
         editor.text.return_value = "not_a_time"
@@ -949,7 +1211,9 @@ class TestTimeDelegate:
 
         delegate.setModelData(editor, model, index)
 
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == original_text  # type: ignore[union-attr]
+        item = self.t.item(0, ChapterTable.COL_TIME)
+        assert item is not None
+        assert item.text() == original_text
 
     def test_valid_input_is_undoable(self, qapp):
         """Changes made via the delegate participate in undo."""
@@ -964,10 +1228,14 @@ class TestTimeDelegate:
         index.row.return_value = 0
 
         delegate.setModelData(editor, model, index)
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "3:00.000"  # type: ignore[union-attr]
+        item = self.t.item(0, ChapterTable.COL_TIME)
+        assert item is not None
+        assert item.text() == "3:00.000"
 
         self.t._undo_stack.undo()
-        assert self.t.item(0, ChapterTable.COL_TIME).text() == "1:15.000"  # type: ignore[union-attr]
+        item = self.t.item(0, ChapterTable.COL_TIME)
+        assert item is not None
+        assert item.text() == "1:15.000"
 
     def test_zero_ms_is_valid(self, qapp):
         """Timestamp 0:00 is valid and must not be rejected."""
@@ -983,4 +1251,6 @@ class TestTimeDelegate:
 
         delegate.setModelData(editor, model, index)
 
-        assert self.t.item(0, ChapterTable.COL_TIME).data(Qt.ItemDataRole.UserRole) == 0  # type: ignore[union-attr]
+        item = self.t.item(0, ChapterTable.COL_TIME)
+        assert item is not None
+        assert item.data(Qt.ItemDataRole.UserRole) == 0
