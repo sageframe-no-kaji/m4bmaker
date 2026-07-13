@@ -64,3 +64,6 @@ devlog/
 
 # Ho System process docs (private; versioned in nested repo)
 ho-process/
+
+# Virtual environments (build/dev/release) — never commit
+.venv*/

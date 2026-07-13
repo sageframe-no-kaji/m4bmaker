@@ -11,6 +11,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-07-12
+
+A hardening release: a full security, correctness, and performance review of
+the entire codebase, with every finding fixed. 992 tests (up from ~630),
+90% coverage.
+
+### Fixed
+
+- **Narrator edits to an existing M4B now stick.** The value was always
+  written, but reading it back preferred the file's `comment` tag (store
+  blurbs) over the saved atom, so the change looked lost. Narrator is now
+  read from `©nrt`/`©wrt` directly, and saves also write `©nrt` — the atom
+  Apple Books actually displays. Clearing a metadata field now clears it in
+  the file instead of silently keeping the old value.
+- **Edit mode: removing a chapter marker no longer corrupts the timeline.**
+  Previously every later chapter shifted earlier by the removed chapter's
+  length; the removed span now merges into the previous chapter. Reorder
+  buttons are hidden in edit mode (time slices of one file can't be
+  reordered).
+- **Chapter time edits are honoured on Convert and Add to Queue** (previously
+  only Save/Split applied them — edits were silently discarded).
+- **A failed or cancelled encode can no longer destroy your audiobook.**
+  Encoding stages to a temporary file and moves it into place only on
+  success; a pre-existing good file at the destination survives.
+- **Quitting mid-encode is now clean.** Cmd+Q / File→Quit cancels all
+  background work and terminates ffmpeg instead of crashing and leaving an
+  orphan process writing a half-finished file.
+- **Queue Stop→Start race fixed** — stopping and immediately restarting the
+  queue could strand remaining jobs and run two encodes at once. Failed queue
+  jobs now show the actual error (tooltip / double-click).
+- **Rapid folder switching can no longer mix up books** — a slow scan
+  finishing late can't populate the UI for a different folder or carry the
+  previous book's sample rate into the encode.
+- **Special characters in tags and filenames no longer corrupt chapter
+  metadata** — `#`, `=`, `;`, backslashes and newlines in titles/tags are
+  escaped correctly (a filename like `Part #2.mp3` used to silently truncate
+  its chapter title).
+- **Chapter markers stay accurate when damaged files are repaired** (repair
+  can shorten a file; markers are now recomputed afterwards). The repair scan
+  also stopped flagging healthy files, reports files it could not repair
+  honestly, and no longer collides same-named files from different discs.
+- Mixed-codec source folders (e.g. a stray `.flac` among `.mp3`s) are
+  rejected with a clear message before encoding — previously they produced
+  corrupt output with drifting chapters.
+- macOS `._*` AppleDouble files on USB/network drives no longer abort a
+  build as "corrupt".
+- GUI errors are real error dialogs again — library failures no longer kill
+  the worker thread silently (frozen progress bar).
+- Player: clicking chapters in quick succession no longer yanks playback
+  back to the previous chapter; saving chapter edits no longer conflicts
+  with the preview player holding the file open (Windows).
+- macOS: the .m4b file picker no longer freezes the app while open, and a
+  pick taking longer than two minutes is no longer lost.
+- Output filenames derived from tags are sanitized for Windows-invalid
+  characters (`Dune: Messiah` no longer fails at the end of a long encode)
+  and can no longer escape the chosen output folder.
+- Update check orders pre-release version tags correctly.
+
+### Changed
+
+- Find & Replace in the chapter table matches **literally** by default
+  (typing `1.5` no longer matches `125`); a new **Regex** checkbox restores
+  pattern matching.
+- The Convert button becomes **Cancel** during a direct conversion;
+  cancelling reports "Cancelled." instead of an ffmpeg error dump.
+- Cover-by-URL requires `https://` and rejects images over 20 MB outright
+  (previously silently truncated — corrupt covers).
+
+### Security
+
+- **macOS build: the third-party Intel ffmpeg binary is verified against a
+  pinned SHA-256 before being bundled** into the signed, notarized app.
+- Release builds (macOS script and Windows CI) install from a fully pinned,
+  hash-verified dependency lock (`requirements-build.lock`) for reproducible
+  builds.
+- Metadata and chapter text are escaped before reaching ffmpeg's metadata
+  files; output paths derived from untrusted tags are sanitized (traversal).
+- Cover downloads are https-only, size-capped, and content-type-checked;
+  hardened-runtime entitlements are documented with re-review criteria.
+
+---
+
 ## [1.0.5] - 2026-05-08
 
 ### Fixed
