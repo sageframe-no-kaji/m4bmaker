@@ -41,12 +41,12 @@
       ],
       "tech_stack": "Python (mutagen, natsort, platformdirs)",
       "created": "2026-02-05",
-      "last_updated": "2026-07-09",
+      "last_updated": "2026-07-12",
       "conceived": "2026-03-01",
-      "short_description": "Converts folders of MP3 (or other audio) files into clean, properly-chaptered M4B audiobooks for personal use. Ships as a signed macOS app and Windows installer; also distributed as a PyPI package. Full pipeline: automatic chapter detection from filenames, interactive visual chapter editor with built-in audio player, batch queue processing, automatic audio repair for common encoding problems. One of the first tools built under the Ho System; the GUI-to-CLI symmetry was a deliberate architectural choice to keep it scriptable without sacrificing approachability.",
+      "short_description": "A desktop app that converts folders of MP3 (or other audio) files into clean, properly chaptered M4B audiobooks you own outright.",
       "substantive_description": [
-        "A small app with a large argument. m4Bookmaker exists because Audible's ecosystem treats audiobook ownership as a license rather than a possession — a contract that can be revoked, a format that won't move, a library that lives on someone else's server and at someone else's discretion. The technical solution is small (rebuild the M4B yourself from MP3s) and the philosophical position is large (you own what you can hold, file by file, on your own machine).",
-        "The deeper argument is digital sovereignty as a default rather than a niche concern. The Ho System made it shippable as a small project — concept to signed, packaged, distributed product in 3.5 days — but the position it embodies is structural. Every time a tool gets repossessed by its platform, a small piece of personal capacity dies. m4Bookmaker is the refusal of that pattern, sized to one specific failure."
+        "A small app with a large argument. m4Bookmaker exists because Audible's ecosystem treats audiobook ownership as a license rather than a possession — a contract that can be revoked, a format that will not move, a library that lives on someone else's server at someone else's discretion. The technical solution is small — rebuild the M4B yourself from MP3s — and the position is large: you own what you can hold, file by file, on your own machine. The full pipeline handles automatic chapter detection from filenames, an interactive visual chapter editor with a built-in audio player, batch queue processing, and automatic repair of common encoding problems, with a deliberate GUI-to-CLI symmetry that keeps it scriptable without sacrificing approachability. It was one of the first tools built under the Ho System — concept to signed, packaged, distributed product in 3.5 days — and the position it embodies is structural: every time a tool gets repossessed by its platform, a small piece of personal capacity dies, and m4Bookmaker is the refusal of that pattern, sized to one specific failure.",
+        "Python with PyQt5 and FFmpeg; shipped as a signed macOS app and a Windows installer, and distributed as a PyPI package."
       ],
       "images": {
         "gallery": []
@@ -61,16 +61,18 @@
       ],
       "state": {
         "stage": "production",
-        "last": "Release 1.0.5: bundled universal2 ffmpeg/ffprobe binaries to fix build issue (`2111043`). Prior releases (1.0.4, 1.0.3, 1.0.2) addressed universal2 binary + UTI fix, narrator metadata reading, metadata preservation on chapter save, and cover-extraction rewrite. Release process documented in RELEASING.md.",
-        "next": "unset — practitioner to point (K6 seeded retroactively).",
-        "as_of": "2026-07-09"
+        "last": "Full security/correctness/optimization review of the codebase, then all findings fixed across four commits (`c518f54` core hardening: M4BError exception layer replacing library sys.exit, atomic encode via .partial + os.replace, FFMETADATA escaping, narrator ©nrt/©wrt fix incl. the reported \"narrator not saved\" bug (root cause: comment tag masked the saved composer atom on reload), post-repair chapter retiming, codec-uniformity check, probe caching; `328b2ee` build supply chain: SHA-256 pin on the third-party ffmpeg zip, hash-locked requirements-build.lock, entitlements documented; `d90d7ba` GUI thread lifecycle: quit/close cancels+waits workers, queue Stop→Start race fixed, bound-method signal connections (fatal quit-during-load crash), stylesheet quadratic-repolish fix; `dcef544` GUI edit-mode/widgets: timeline-preserving chapter remove, time edits honoured on Convert, output-path sanitization, async pickers/downloads, player seek-timer + release-before-save). Verification: 992 tests green (~10s), coverage 90% total, mypy 54→30 (rest is pre-existing window.py debt), live E2E smoke with hostile metadata passed.",
+        "next": "finish 1.1.0 release: test the DMG by launching it, test the Windows installer from the CI artifact, publish the draft GitHub Release (this triggers in-app update notifications), upload both installers to Payhip, close issue #20 referencing 1.1.0.",
+        "holdup": "Released so far: PyPI 1.1.0 live; tag v1.1.0 pushed (merge commit f357cb6, PR #21); signed+notarized+stapled DMG attached to DRAFT GitHub release. Two hash-locked-build lessons committed: static_ffmpeg 3.0 stdout chatter (SF_DIR capture) and Pillow 11 has no universal2 wheels (excluded from bundle — app ships Pillow-free as 1.0.5 did). Open bugs NOT in this release: #15/#16 \"output marked Protected\" (DRM-origin metadata via -map_metadata) — candidate next ho. Hygiene ho candidate: ~30 window.py mypy-strict errors, 15 E501s. Entitlements re-test on next PyInstaller/PySide6 major bump.",
+        "as_of": "2026-07-12"
       },
       "_keisaku": {
-        "generated_at": "2026-07-12T10:36:25",
+        "generated_at": "2026-07-13T10:31:22",
         "generator_version": "1",
         "sources": {
           "readme": "README.md",
           "contract": "ho-process/kamae-6-m4bmaker-state-memory.md",
+          "description": "metadata/description.md",
           "manifest": "pyproject.toml"
         },
         "derived_defaults": {
@@ -86,6 +88,11 @@
             "mutagen",
             "natsort",
             "platformdirs"
+          ],
+          "short_description": "A desktop app that converts folders of MP3 (or other audio) files into clean, properly chaptered M4B audiobooks you own outright.",
+          "substantive_description": [
+            "A small app with a large argument. m4Bookmaker exists because Audible's ecosystem treats audiobook ownership as a license rather than a possession — a contract that can be revoked, a format that will not move, a library that lives on someone else's server at someone else's discretion. The technical solution is small — rebuild the M4B yourself from MP3s — and the position is large: you own what you can hold, file by file, on your own machine. The full pipeline handles automatic chapter detection from filenames, an interactive visual chapter editor with a built-in audio player, batch queue processing, and automatic repair of common encoding problems, with a deliberate GUI-to-CLI symmetry that keeps it scriptable without sacrificing approachability. It was one of the first tools built under the Ho System — concept to signed, packaged, distributed product in 3.5 days — and the position it embodies is structural: every time a tool gets repossessed by its platform, a small piece of personal capacity dies, and m4Bookmaker is the refusal of that pattern, sized to one specific failure.",
+            "Python with PyQt5 and FFmpeg; shipped as a signed macOS app and a Windows installer, and distributed as a PyPI package."
           ]
         },
         "contract_issues": []
