@@ -59,6 +59,8 @@
           "note": "One of the first Ho System builds: concept to signed, packaged, distributed product in 3.5 days."
         }
       ],
+      "availability": "shipped",
+      "usage": "others",
       "state": {
         "stage": "production",
         "last": "Full security/correctness/optimization review of the codebase, then all findings fixed across four commits (`c518f54` core hardening: M4BError exception layer replacing library sys.exit, atomic encode via .partial + os.replace, FFMETADATA escaping, narrator ©nrt/©wrt fix incl. the reported \"narrator not saved\" bug (root cause: comment tag masked the saved composer atom on reload), post-repair chapter retiming, codec-uniformity check, probe caching; `328b2ee` build supply chain: SHA-256 pin on the third-party ffmpeg zip, hash-locked requirements-build.lock, entitlements documented; `d90d7ba` GUI thread lifecycle: quit/close cancels+waits workers, queue Stop→Start race fixed, bound-method signal connections (fatal quit-during-load crash), stylesheet quadratic-repolish fix; `dcef544` GUI edit-mode/widgets: timeline-preserving chapter remove, time edits honoured on Convert, output-path sanitization, async pickers/downloads, player seek-timer + release-before-save). Verification: 992 tests green (~10s), coverage 90% total, mypy 54→30 (rest is pre-existing window.py debt), live E2E smoke with hostile metadata passed.",
