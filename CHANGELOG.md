@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2026-08-23
+
+### Fixed
+
+- **App no longer crashes on launch on Apple Silicon.** The dark-mode toggle
+  was a button labelled with a colour emoji, built while the main window was
+  being constructed. macOS renders colour emoji by decoding an embedded PNG
+  inside ImageIO, and on Apple Silicon that decoder can hit a memory
+  alignment fault — the process died with `SIGBUS` before drawing a frame.
+  The toggle now uses an icon drawn with QPainter, which never touches the
+  emoji font and picks up the current theme's colour. Reported in #22 with a
+  full crash trace and a verified root cause.
+- **The same crash could fire after a successful conversion.** Both
+  save-confirmation dialogs put a colour-emoji tick in their message text;
+  they now use the native system icon.
+
+---
+
 ## [1.1.0] - 2026-07-12
 
 A hardening release: a full security, correctness, and performance review of
