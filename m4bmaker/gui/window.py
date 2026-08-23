@@ -31,7 +31,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, QUrl
+from PySide6.QtCore import QSize, Qt, QThread, QUrl
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -66,6 +66,7 @@ from PySide6.QtWidgets import (
 from m4bmaker import __version__
 from m4bmaker.models import Book, Chapter, PipelineResult
 from m4bmaker.gui.player import AudioPlayerWidget
+from m4bmaker.gui.icons import dark_mode_icon
 from m4bmaker.gui.styles import get_stylesheet
 from m4bmaker.gui.widgets import ChapterTable, CoverWidget, FolderDropZone
 from m4bmaker.gui.worker import (
@@ -294,7 +295,7 @@ class MainWindow(QMainWindow):
         if app.styleSheet() != stylesheet:
             app.setStyleSheet(stylesheet)
         if hasattr(self, "_dark_btn"):
-            self._dark_btn.setText("☀️" if self._dark_mode else "🌙")
+            self._dark_btn.setIcon(dark_mode_icon(self._dark_mode))
         if self._queue_window is not None:
             self._queue_window.apply_stylesheet(self._dark_mode)
 
@@ -491,7 +492,7 @@ class MainWindow(QMainWindow):
 
     def _show_update_bar(self, new_version: str) -> None:
         """Slot called by UpdateChecker when a newer release is available."""
-        self._update_label.setText(f"✨  m4Bookmaker {new_version} is available.")
+        self._update_label.setText(f"m4Bookmaker {new_version} is available.")
         self._update_bar.show()
 
     # ── Folder section ────────────────────────────────────────────────────────
@@ -794,9 +795,11 @@ class MainWindow(QMainWindow):
         btn_row.setSpacing(8)
 
         # Dark mode toggle (far left)
-        self._dark_btn = QPushButton("🌙")
+        self._dark_btn = QPushButton()
         self._dark_btn.setObjectName("darkModeBtn")
         self._dark_btn.setFixedSize(28, 28)
+        self._dark_btn.setIcon(dark_mode_icon(self._dark_mode))
+        self._dark_btn.setIconSize(QSize(16, 16))
         self._dark_btn.setToolTip("Toggle dark mode")
         self._dark_btn.clicked.connect(self._on_dark_mode_btn)
         btn_row.addWidget(self._dark_btn)
@@ -1821,10 +1824,10 @@ class MainWindow(QMainWindow):
             return
         msg = QMessageBox(self)
         msg.setWindowTitle("Saved")
-        msg.setIcon(QMessageBox.Icon.NoIcon)
+        msg.setIcon(QMessageBox.Icon.Information)
         mins = self._m4b_total_duration / 60
         msg.setText(
-            f"✅ Chapter metadata saved\n\n"
+            f"Chapter metadata saved\n\n"
             f"{Path(str(dest)).name}\n\n"
             f"{len(self._book.chapters) if self._book else 0} chapter(s)  ·  {mins:.1f} min"
         )
@@ -1844,9 +1847,9 @@ class MainWindow(QMainWindow):
         mins = result.duration_seconds / 60
         msg = QMessageBox(self)
         msg.setWindowTitle("Saved")
-        msg.setIcon(QMessageBox.Icon.NoIcon)
+        msg.setIcon(QMessageBox.Icon.Information)
         msg.setText(
-            f"✅ Audiobook saved\n\n"
+            f"Audiobook saved\n\n"
             f"{result.output_file}\n\n"
             f"{result.chapter_count} chapter(s)  ·  {mins:.1f} min"
         )
