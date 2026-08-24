@@ -35,10 +35,29 @@ Requires: macOS, Xcode, Developer ID Application certificate, Apple notarization
 
 ```bash
 export CODESIGN_IDENTITY="Developer ID Application: ANDREW TODD MARCUS (3N8F759K8D)"
-export NOTARIZE_KEYCHAIN_PROFILE="<profile name stored in keychain>"
+export NOTARIZE_KEYCHAIN_PROFILE="m4bmaker"
 
 ./scripts/build_macos.sh --dmg
 ```
+
+The `m4bmaker` profile holds the Apple ID, team ID, and app-specific password
+that notarytool needs. It lives in the login keychain; the profile *name* is
+not a secret, which is why it is written out here — leaving it as a placeholder
+once cost a release session a dig through shell history.
+
+If the profile is ever missing or its app-specific password is rotated, recreate
+it with:
+
+```bash
+xcrun notarytool store-credentials "m4bmaker" \
+    --apple-id atmarcus@gmail.com \
+    --team-id 3N8F759K8D
+```
+
+**Do not pass `--password` on that command line.** Omit it and notarytool
+prompts for the value, so it never lands in shell history. Passing it inline
+writes an app-specific password in the clear to `~/.bash_history`, where it
+stays until someone notices.
 
 Verify after the script finishes:
 ```bash
