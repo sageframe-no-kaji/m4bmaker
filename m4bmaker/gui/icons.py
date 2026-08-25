@@ -14,7 +14,7 @@ Painting the shapes ourselves keeps the emoji font out of the process
 entirely, and lets each icon take its theme's foreground colour instead of
 whatever the system emoji font decided it should be.
 
-``tests/test_no_color_emoji.py`` enforces that no colour-emoji codepoint comes
+``tests/gui/test_icons.py`` enforces that no colour-emoji codepoint comes
 back into the GUI package.
 """
 
