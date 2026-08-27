@@ -67,3 +67,6 @@ ho-process/
 
 # Virtual environments (build/dev/release) — never commit
 .venv*/
+
+# Agent task specs (private working documents, not part of the distribution)
+agent-tasks/
