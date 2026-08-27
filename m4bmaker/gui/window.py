@@ -132,6 +132,10 @@ def _muted_label(text: str) -> QLabel:
     return lbl
 
 
+# The first tab is relabelled to match the current mode; see _set_mode.
+_MODE_TAB_INDEX = 0
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -522,7 +526,7 @@ class MainWindow(QMainWindow):
 
     def _build_tabs(self) -> QTabWidget:
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_build_tab(), "Build")
+        self._tabs.addTab(self._build_build_tab(), "Build")  # _MODE_TAB_INDEX
         self._tabs.addTab(self._build_chapters_tab(), "Chapters")
         return self._tabs
 
@@ -1160,21 +1164,33 @@ class MainWindow(QMainWindow):
         # The scan generation therefore rides on the worker object (read back
         # via sender()), not in a closure.
         if p.is_dir():
-            self._mode = "build"
-            self._mode_badge.setText("Build")
+            self._set_mode("build")
             self._load_worker = LoadWorker(p)
             self._load_worker.generation = generation
             self._load_worker.result_ready.connect(self._on_load_finished)
             self._load_worker.error.connect(self._on_load_error)
             self._load_worker.start()
         else:
-            self._mode = "edit"
-            self._mode_badge.setText("Edit")
+            self._set_mode("edit")
             self._m4b_load_worker = LoadM4bWorker(p)
             self._m4b_load_worker.generation = generation
             self._m4b_load_worker.result_ready.connect(self._on_m4b_loaded)
             self._m4b_load_worker.error.connect(self._on_load_error)
             self._m4b_load_worker.start()
+
+    def _set_mode(self, mode: str) -> None:
+        """Switch between build and edit mode, moving every label with it.
+
+        The badge and the first tab both name the mode. They used to be set
+        independently, and the tab was simply never updated — opening an M4B
+        left it reading "Build" while the badge beside it said "Edit" (#13).
+        Routing both through here means the next mode-dependent label cannot
+        drift the same way.
+        """
+        self._mode = mode
+        label = "Edit" if mode == "edit" else "Build"
+        self._mode_badge.setText(label)
+        self._tabs.setTabText(_MODE_TAB_INDEX, label)
 
     def _sender_generation(self, generation: int) -> int:
         """Resolve the scan generation for a load-worker slot.
@@ -1219,8 +1235,7 @@ class MainWindow(QMainWindow):
     def _on_folder_cleared(self) -> None:
         self._preflight_sample_rate = None
         self._book = None
-        self._mode = "build"
-        self._mode_badge.setText("Build")
+        self._set_mode("build")
         self._analysis_label.setText("No analysis yet.")
         self._chapter_table.populate([])
         self._chapter_durations = []
