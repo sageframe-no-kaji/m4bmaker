@@ -116,6 +116,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Encode in stereo (2 channels). Default is mono (1 channel).",
     )
     parser.add_argument(
+        "--normalize",
+        action="store_true",
+        default=False,
+        help=(
+            "Normalize loudness to EBU R128 spoken-word targets "
+            "(I=-18 LUFS, TP=-2 dBTP, LRA=11). Off by default."
+        ),
+    )
+    parser.add_argument(
+        "--normalize-two-pass",
+        dest="normalize_two_pass",
+        action="store_true",
+        default=False,
+        help=(
+            "Measure loudness in a separate pass before encoding, for a more "
+            "accurate result. Implies --normalize and roughly doubles "
+            "encoding time."
+        ),
+    )
+    parser.add_argument(
         "--chapters-file",
         dest="chapters_file",
         type=Path,

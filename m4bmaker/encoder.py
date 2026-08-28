@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -60,6 +62,175 @@ def _progress_reader(
                     f"\r  Encoding {bar}  {pct:3d}%  {elapsed} / {total_str}\033[K"
                 )
                 sys.stdout.flush()
+
+
+#: EBU R128 targets for spoken word.  Broadcast presets (-23 LUFS) are too
+#: quiet for audiobook listening and music presets (-16) too hot; -18 is the
+#: value the audiobook tooling ecosystem has settled on.
+LOUDNORM_I = "-18"
+LOUDNORM_TP = "-2"
+LOUDNORM_LRA = "11"
+
+#: Fields ffmpeg's ``loudnorm=print_format=json`` pass must supply for the
+#: measurements to be usable in a second pass.  A block missing any of these
+#: is treated as malformed rather than partially applied.
+_LOUDNORM_REQUIRED_FIELDS = (
+    "input_i",
+    "input_tp",
+    "input_lra",
+    "input_thresh",
+    "target_offset",
+)
+
+#: Non-nested ``{...}`` blocks.  loudnorm's JSON object is flat, so this is
+#: sufficient and avoids pulling in a full brace matcher.
+_JSON_BLOCK_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
+
+
+def _build_loudnorm_filter(measured: dict[str, str] | None = None) -> str:
+    """Return the ``loudnorm`` filter string for the encode pass.
+
+    Without *measured*, this is a single-pass filter at the spoken-word
+    targets.  With *measured* (the output of :func:`measure_loudness`), the
+    measured values are supplied so loudnorm can apply ``linear=true`` — a
+    single gain adjustment across the whole book rather than the dynamic
+    compression the single-pass mode falls back to.
+    """
+    parts = [f"I={LOUDNORM_I}", f"TP={LOUDNORM_TP}", f"LRA={LOUDNORM_LRA}"]
+    if measured is not None:
+        parts += [
+            f"measured_I={measured['input_i']}",
+            f"measured_TP={measured['input_tp']}",
+            f"measured_LRA={measured['input_lra']}",
+            f"measured_thresh={measured['input_thresh']}",
+            f"offset={measured['target_offset']}",
+            "linear=true",
+        ]
+    return "loudnorm=" + ":".join(parts)
+
+
+def _parse_loudnorm_json(stderr_data: str) -> dict[str, str]:
+    """Extract loudnorm's measurement object from ffmpeg's *stderr_data*.
+
+    ffmpeg writes the JSON as a standalone block among ordinary log lines —
+    it is neither the whole stream nor reliably the last thing on it
+    (ffmpeg 8.x emits ``[out#0/null ...]`` and a ``size=`` summary after it).
+    So the block is located rather than assumed positionally: candidate
+    ``{...}`` spans are tried newest-first and the first one that parses and
+    carries the expected fields wins.
+
+    Raises:
+        M4BError: if no such block is present, or the one found is malformed.
+    """
+    for match in reversed(list(_JSON_BLOCK_RE.finditer(stderr_data))):
+        try:
+            parsed = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+        # _JSON_BLOCK_RE only matches ``{...}``, so a successful parse is
+        # always a dict — no isinstance guard is reachable here.
+        if any(field not in parsed for field in _LOUDNORM_REQUIRED_FIELDS):
+            continue
+        return {str(k): str(v) for k, v in parsed.items()}
+
+    tail = "\n".join(stderr_data.strip().splitlines()[-30:])
+    raise M4BError(
+        "Error: could not read loudness measurements from ffmpeg.\n"
+        "Expected a JSON block from the loudnorm filter containing "
+        f"{', '.join(_LOUDNORM_REQUIRED_FIELDS)}.\n"
+        f"stderr (last 30 lines):\n{tail}"
+    )
+
+
+def measure_loudness(
+    concat: Path,
+    ffmpeg: str,
+    cancel_event: "threading.Event | None" = None,
+) -> dict[str, str]:
+    """Measure the loudness of the assembled audio and return the raw fields.
+
+    Runs ffmpeg over the concat input with ``loudnorm`` in ``print_format=json``
+    mode and a null output — decoding the whole book without encoding it — then
+    parses the measurement block ffmpeg writes to **stderr**.  The result is
+    passed to :func:`encode` as *loudnorm_measured* for the second pass.
+
+    This is the analysis-pass shape: run ffmpeg over the concat list, read
+    stderr, stay cancellable, return parsed data.
+
+    Raises:
+        M4BError: if ffmpeg is missing, exits non-zero, or writes no usable
+            measurement block.
+        EncodeCancelled: if *cancel_event* fires while ffmpeg is running.
+    """
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat),
+        "-af",
+        _build_loudnorm_filter() + ":print_format=json",
+        "-nostdin",
+        "-f",
+        "null",
+        "-",
+    ]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            **subprocess_flags(),
+        )
+    except FileNotFoundError as exc:
+        raise M4BError(f"Error: ffmpeg executable not found at '{ffmpeg}'.") from exc
+
+    stderr_buf: list[str] = []
+
+    def _read_stderr() -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            stderr_buf.append(line)
+
+    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+    stderr_thread.start()
+
+    cancelled = False
+    try:
+        while proc.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                proc.kill()
+                break
+            time.sleep(0.1)
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        stderr_thread.join()
+
+    if cancelled:
+        proc.wait()
+        raise EncodeCancelled("Encoding cancelled.")
+
+    stderr_data = "".join(stderr_buf)
+
+    if proc.returncode != 0:
+        tail = "\n".join(stderr_data.strip().splitlines()[-30:])
+        raise M4BError(
+            f"Error: ffmpeg exited with code {proc.returncode} during the "
+            f"loudness measurement pass.\n"
+            f"Command: {' '.join(cmd)}\n"
+            f"stderr (last 30 lines):\n{tail}"
+        )
+
+    return _parse_loudnorm_json(stderr_data)
 
 
 def write_concat_list(files: list[Path], dest: Path) -> None:
@@ -120,6 +291,9 @@ def encode(
     sample_rate: int | None = None,
     progress_callback: Callable[[float], None] | None = None,
     cancel_event: "threading.Event | None" = None,
+    *,
+    normalize: bool = False,
+    loudnorm_measured: dict[str, str] | None = None,
 ) -> None:
     """Run ffmpeg to produce the final .m4b file with live progress bar.
 
@@ -130,6 +304,11 @@ def encode(
 
     The output is an AAC-encoded M4B (MP4 audiobook) container.
     ffmpeg progress data is read from stdout via ``-progress pipe:1``.
+
+    When *normalize* is true an EBU R128 ``loudnorm`` filter is applied at
+    spoken-word targets.  Supplying *loudnorm_measured* (from
+    :func:`measure_loudness`) switches it to the accurate two-pass form.  When
+    *normalize* is false no filter is added and the command is unchanged.
 
     Encoding is atomic: ffmpeg writes to a sibling ``<output>.partial`` path
     in the same directory, which is moved onto *output* via :func:`os.replace`
@@ -191,6 +370,9 @@ def encode(
         "-ac",
         str(channels),
         *(["-ar", str(sample_rate)] if sample_rate is not None else []),
+        # Nothing is emitted when normalize is false, so the default command
+        # is byte-for-byte what it was before loudness support existed.
+        *(["-af", _build_loudnorm_filter(loudnorm_measured)] if normalize else []),
         "-metadata",
         "stik=2",  # iTunes media type: Audiobook (required by Apple Books)
         "-brand",

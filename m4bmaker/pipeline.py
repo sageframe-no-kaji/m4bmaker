@@ -13,7 +13,7 @@ from pathlib import Path
 
 from m4bmaker.chapters import build_chapters, get_duration, write_ffmetadata
 from m4bmaker.cover import extract_cover_from_audio, find_cover
-from m4bmaker.encoder import encode, write_concat_list
+from m4bmaker.encoder import encode, measure_loudness, write_concat_list
 from m4bmaker.errors import M4BError
 from m4bmaker.metadata import extract_metadata
 from m4bmaker.models import Book, BookMetadata, Chapter, PipelineResult
@@ -107,6 +107,20 @@ def _check_codec_uniformity(files: list[Path], ffprobe: str) -> None:
     raise M4BError("\n".join(lines))
 
 
+def _source_sample_rate(files: list[Path], ffprobe: str) -> int | None:
+    """Return the dominant sample rate across *files*, or ``None`` if unreadable.
+
+    Used only to hold the output rate steady when normalising. ``run_preflight``
+    is backed by an lru_cached ``probe_file``, so calling it again after the
+    codec-uniformity check costs nothing.
+    """
+    analysis = run_preflight(files, ffprobe)
+    if not analysis.sample_rates:
+        return None
+    rate, _count = analysis.sample_rates.most_common(1)[0]
+    return int(rate)
+
+
 def _retime_chapters_after_repair(
     chapters: list[Chapter], active_files: list[Path], ffprobe: str
 ) -> list[Chapter]:
@@ -152,6 +166,8 @@ def run_pipeline(
     _tmp_dir: Path | None = None,
     cancel_event: "threading.Event | None" = None,
     repair_result: RepairResult | None = None,
+    normalize: bool = False,
+    normalize_two_pass: bool = False,
 ) -> PipelineResult:
     """Encode *book* to *output_path* and return a :class:`PipelineResult`.
 
@@ -183,11 +199,21 @@ def run_pipeline(
         the internal repair pass is skipped and this result is used instead
         — avoids running repair twice. Defaults to ``None``, which runs
         repair internally (unchanged behaviour for the GUI).
+    normalize:
+        Apply EBU R128 loudness normalisation during the encode. Off by
+        default; the encode command is unchanged when false.
+    normalize_two_pass:
+        Measure loudness in a separate ffmpeg pass before encoding and apply
+        the measured values, which is accurate but roughly doubles the work.
+        Implies *normalize*, matching the CLI's ``--normalize-two-pass``.
     """
     from m4bmaker.repair import apply_repair, run_repair
 
     effective_cover = cover if cover is not None else book.cover
     channels = 2 if stereo else 1
+    # Two-pass implies normalisation; measuring without applying is pointless
+    # and would silently do slow work for no output change.
+    effective_normalize = normalize or normalize_two_pass
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -256,6 +282,28 @@ def run_pipeline(
         write_ffmetadata(working_chapters, book.metadata, meta_file, total_duration_s)
         write_concat_list(active_files, concat_file)
 
+        # ── Output sample rate ───────────────────────────────────────────
+        # loudnorm resamples to 192 kHz internally and AAC cannot encode that,
+        # so ffmpeg silently falls back to 96 kHz — doubling the source rate
+        # and the file size for no audible gain on spoken word. Pin the output
+        # back to the source rate unless the caller asked for a specific one.
+        effective_sample_rate = sample_rate
+        if effective_normalize and effective_sample_rate is None and active_files:
+            effective_sample_rate = _source_sample_rate(active_files, ffprobe)
+
+        # ── Loudness measurement pass ────────────────────────────────────
+        # Only for two-pass: it decodes the whole book a second time, which is
+        # exactly what the one-pass mode exists to avoid.  Reported through the
+        # existing callback because silence here reads as a hang.
+        loudnorm_measured: dict[str, str] | None = None
+        if normalize_two_pass:
+            _cb("Measuring loudness (pass 1 of 2)…", 0.0)
+            loudnorm_measured = measure_loudness(
+                concat=concat_file,
+                ffmpeg=ffmpeg,
+                cancel_event=cancel_event,
+            )
+
         # ── Encode ───────────────────────────────────────────────────────
         _cb(f"Encoding {len(active_files)} file(s) to M4B…", 0.0)
 
@@ -270,11 +318,13 @@ def run_pipeline(
             output=output_path,
             bitrate=bitrate,
             channels=channels,
-            sample_rate=sample_rate,
+            sample_rate=effective_sample_rate,
             ffmpeg=ffmpeg,
             total_ms=total_ms,
             progress_callback=_encode_progress,
             cancel_event=cancel_event,
+            normalize=effective_normalize,
+            loudnorm_measured=loudnorm_measured,
         )
 
         _cb("Done.", 1.0)

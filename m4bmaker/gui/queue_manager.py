@@ -79,6 +79,7 @@ class JobWorker(QThread):
                 ffmpeg=ffmpeg,
                 ffprobe=ffprobe,
                 cancel_event=self._cancel_event,
+                normalize=self._job.normalize,
             )
             if self._cancel_event.is_set():
                 self.cancelled.emit(self._job.id)

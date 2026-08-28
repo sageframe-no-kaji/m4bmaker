@@ -38,6 +38,7 @@ class Job:
     bitrate: str = "96k"
     stereo: bool = False
     sample_rate: int | None = None  # None → let ffmpeg decide
+    normalize: bool = False  # EBU R128 loudness normalisation
 
     # ── runtime state (mutable) ───────────────────────────────────────────────
     status: JobStatus = JobStatus.QUEUED
@@ -70,6 +71,7 @@ def job_from_book(
     bitrate: str = "96k",
     stereo: bool = False,
     sample_rate: int | None = None,
+    normalize: bool = False,
 ) -> Job:
     """Create a :class:`Job` from the current GUI book state.
 
@@ -82,4 +84,5 @@ def job_from_book(
         bitrate=bitrate,
         stereo=stereo,
         sample_rate=sample_rate,
+        normalize=normalize,
     )
