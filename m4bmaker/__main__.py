@@ -146,6 +146,55 @@ def _resolve_cover(
     return None, False
 
 
+def _cover_from_lookup(
+    url: str,
+    current: Path | None,
+    tmp_dir: Path,
+    interactive: bool,
+) -> Path | None:
+    """Download the looked-up cover and decide whether it replaces *current*.
+
+    With no cover yet, the looked-up one is simply used. With one already
+    detected, the choice is the user's: interactively they are asked, and
+    under ``--no-prompt`` the existing cover is kept, because a non-interactive
+    run must not silently discard a file the user already had.
+
+    A cover that will not download is not worth failing the conversion over —
+    the metadata and chapter names are the point — so failures log and keep
+    whatever was already resolved.
+    """
+    try:
+        fetched = download_cover(url, tmp_dir)
+    except Exception as exc:  # noqa: BLE001
+        log(f"Could not download cover art from the lookup: {exc}")
+        return current
+
+    if current is None:
+        log(f"Using cover art from the lookup: {fetched.name}")
+        return fetched
+
+    if not interactive:
+        log(
+            f"Keeping the existing cover ({current.name}); the lookup also "
+            f"found one. Re-run without --no-prompt to choose, or pass "
+            f"--cover to force one."
+        )
+        return current
+
+    answer = (
+        safe_input(
+            f"  Replace cover '{current.name}' with the one from the lookup? [y/N]: "
+        )
+        .strip()
+        .lower()
+    )
+    if answer.startswith("y"):
+        log(f"Using cover art from the lookup: {fetched.name}")
+        return fetched
+    log(f"Keeping the existing cover: {current.name}")
+    return current
+
+
 def _fetch_cover_url(url: str, tmp_dir: Path, interactive: bool) -> Path | None:
     """Download a cover image URL.
 
@@ -317,6 +366,11 @@ def _run(args: Namespace) -> None:
                 applied = apply_names(remote.chapters, book.chapters)
             book.chapters = applied.chapters
             log(applied.message)
+
+        # 3f. Cover art from the lookup. Only offered when the user did not
+        # name a cover explicitly — an explicit --cover always wins.
+        if asin_meta is not None and asin_meta.cover_url and not cover_user_specified:
+            cover = _cover_from_lookup(asin_meta.cover_url, cover, tmp_dir, interactive)
 
         # Override cover with resolved value (interactive or CLI-supplied).
         book.cover = cover

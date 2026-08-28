@@ -26,6 +26,7 @@ from m4bmaker.gui.window import MainWindow  # noqa: E402
 from m4bmaker.models import Book, BookMetadata, Chapter  # noqa: E402
 
 QMB = "m4bmaker.gui.window.QMessageBox"
+DIALOG = "m4bmaker.gui.window.CoverChoiceDialog"
 WORKER = "m4bmaker.gui.window.LookupWorker"
 PREF_GET = "m4bmaker.gui.window._prefs_get"
 PREF_SET = "m4bmaker.gui.window._prefs_set"
@@ -292,21 +293,28 @@ class TestLookupResults:
         w._on_lookup_finished(self._book(), [], "done.", "")
         assert sorted(p.name for p in tmp_path.iterdir()) == before
 
-    def test_cover_is_applied_when_downloaded(self, win, tmp_path):
+    def test_cover_is_applied_when_there_is_none(self, win, tmp_path):
         w = _loaded(win, tmp_path)
         cover = tmp_path / "cover.jpg"
         cover.write_bytes(b"\xff\xd8\xff\xe0")
-        w._on_lookup_finished(self._book(), [], "done.", str(cover))
+        with patch(DIALOG) as dialog:
+            w._on_lookup_finished(self._book(), [], "done.", str(cover))
+        # Nothing to compare against, so nothing to ask about.
+        dialog.assert_not_called()
         assert w._cover_widget.cover_path() == cover
 
-    def test_existing_cover_is_not_overwritten(self, win, tmp_path):
+    def test_existing_cover_prompts_rather_than_being_overwritten(self, win, tmp_path):
         w = _loaded(win, tmp_path)
         mine = tmp_path / "mine.jpg"
         mine.write_bytes(b"\xff\xd8\xff\xe0")
         w._cover_widget.set_cover(mine)
         other = tmp_path / "theirs.jpg"
         other.write_bytes(b"\xff\xd8\xff\xe0")
-        w._on_lookup_finished(self._book(), [], "done.", str(other))
+        instance = MagicMock()
+        instance.chosen.return_value = mine
+        with patch(DIALOG, return_value=instance) as dialog:
+            w._on_lookup_finished(self._book(), [], "done.", str(other))
+        dialog.assert_called_once()
         assert w._cover_widget.cover_path() == mine
 
     def test_error_shows_a_dialog(self, win, tmp_path):
