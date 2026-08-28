@@ -41,7 +41,7 @@
       ],
       "tech_stack": "Python (mutagen, natsort, platformdirs)",
       "created": "2026-02-05",
-      "last_updated": "2026-07-12",
+      "last_updated": "2026-07-14",
       "conceived": "2026-03-01",
       "short_description": "A desktop app that converts folders of MP3 (or other audio) files into clean, properly chaptered M4B audiobooks you own outright.",
       "substantive_description": [
@@ -69,7 +69,7 @@
         "as_of": "2026-07-12"
       },
       "_keisaku": {
-        "generated_at": "2026-07-13T10:31:22",
+        "generated_at": "2026-07-19T11:32:58",
         "generator_version": "1",
         "sources": {
           "readme": "README.md",
