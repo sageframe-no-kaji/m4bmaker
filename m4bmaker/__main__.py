@@ -12,13 +12,14 @@ from m4bmaker.chapters import format_chapter_table
 from m4bmaker.chapters_file import load_chapters_file
 from m4bmaker.cli import parse_args
 from m4bmaker.cover import download_cover, find_cover, is_url
-from m4bmaker.encoder import _render_bar
+from m4bmaker.encoder import _render_bar, write_concat_list
 from m4bmaker.errors import EncodeCancelled, M4BError
 from m4bmaker.metadata import extract_metadata, prompt_missing
 from m4bmaker.models import BookMetadata, Chapter
 from m4bmaker.pipeline import load_audiobook, run_pipeline
 from m4bmaker.preflight import format_preflight_report, run_preflight
 from m4bmaker.repair import apply_repair, format_repair_report, run_repair
+from m4bmaker.silence import detect_silence, silence_to_chapters
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, log, safe_input
 from m4bmaker.utils import sanitize_filename_component as _safe
 
@@ -265,11 +266,27 @@ def _run(args: Namespace) -> None:
             print(format_repair_report(repair_result))
             book.files = apply_repair(book.files, repair_result)
 
-        # 3d. Override chapters from --chapters-file if supplied.
+        # 3d. Override chapters from --chapters-file or silence detection.
+        # An explicit chapter file is authoritative and beats the heuristic.
         if args.chapters_file:
             book.chapters = load_chapters_file(args.chapters_file)
             log(
                 f"Loaded {len(book.chapters)} chapter(s) from {args.chapters_file.name}"
+            )
+        elif args.detect_chapters:
+            log("Detecting chapters from silence…")
+            concat_file = tmp_dir / "detect-concat.txt"
+            write_concat_list(book.files, concat_file)
+            spans = detect_silence(
+                source=concat_file,
+                ffmpeg=ffmpeg,
+                threshold_db=args.silence_threshold,
+                min_duration=args.silence_duration,
+            )
+            book.chapters = silence_to_chapters(spans, book.total_duration)
+            log(
+                f"Detected {len(book.chapters)} chapter(s) from "
+                f"{len(spans)} silence span(s)"
             )
         else:
             log(f"Generated {len(book.chapters)} chapter(s)")
