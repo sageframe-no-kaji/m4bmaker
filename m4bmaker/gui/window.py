@@ -69,6 +69,7 @@ from m4bmaker.models import Book, Chapter, PipelineResult
 from m4bmaker.gui.player import AudioPlayerWidget
 from m4bmaker.gui.icons import dark_mode_icon
 from m4bmaker.gui.styles import get_stylesheet
+from m4bmaker.gui.cover_choice import CoverChoiceDialog
 from m4bmaker.gui.widgets import ChapterTable, CoverWidget, FolderDropZone
 from m4bmaker.gui.worker import (
     ConvertWorker,
@@ -1258,10 +1259,9 @@ class MainWindow(QMainWindow):
                 widget.setText(str(value))
 
         # The worker downloaded the cover off-thread via cover.py, which
-        # enforces https, a content-type check, and a size cap. An existing
-        # cover the user already chose is never overwritten.
-        if cover_path and self._cover_widget.cover_path() is None:
-            self._cover_widget.set_cover(Path(cover_path))
+        # enforces https, a content-type check, and a size cap.
+        if cover_path:
+            self._offer_cover(Path(cover_path))
 
         if isinstance(chapters, list) and chapters and self._book is not None:
             self._book.chapters = chapters
@@ -1272,6 +1272,31 @@ class MainWindow(QMainWindow):
         self._update_output_preview()
         self._set_status(f"{message} Review before converting.")
         self._update_controls()
+
+    def _offer_cover(self, fetched: Path) -> None:
+        """Apply *fetched* cover art, asking first if one is already set.
+
+        A book almost always has a cover by this point — m4Bookmaker detects
+        one on load, from disk or from art embedded in the files — so silently
+        keeping it would make the lookup's cover fetch do nothing, and silently
+        replacing it would discard a cover the user may have picked on purpose.
+        Neither is ours to decide, so when both exist the user chooses.
+        """
+        if not fetched.exists():
+            return
+
+        current = self._cover_widget.cover_path()
+        if current is None or not current.exists():
+            self._cover_widget.set_cover(fetched)
+            return
+
+        dialog = CoverChoiceDialog(current, fetched, self)
+        dialog.exec()
+        chosen = dialog.chosen()
+        # Dismissing the dialog keeps what is already there: doing nothing must
+        # never be the destructive option.
+        if chosen is not None and chosen != current:
+            self._cover_widget.set_cover(chosen)
 
     def _on_lookup_error(self, msg: str) -> None:
         self._lookup_worker = None

@@ -587,3 +587,93 @@ def test_client_uses_only_urllib() -> None:
     for forbidden in ("import requests", "import httpx", "import aiohttp"):
         assert forbidden not in source
     assert "urllib.request" in source
+
+
+# ---------------------------------------------------------------------------
+# CLI cover-from-lookup
+# ---------------------------------------------------------------------------
+
+
+class TestCoverFromLookup:
+    """The lookup's cover URL must reach the conversion, not be dropped."""
+
+    URL = "https://example.invalid/cover.jpg"
+
+    def _fake_download(self, tmp_path: Path):
+        def _download(url: str, dest: Path) -> Path:
+            out = dest / "downloaded.jpg"
+            out.write_bytes(b"\xff\xd8\xff\xe0")
+            return out
+
+        return _download
+
+    def test_no_existing_cover_uses_the_fetched_one(self, tmp_path) -> None:
+        from m4bmaker.__main__ import _cover_from_lookup
+
+        with patch(
+            "m4bmaker.__main__.download_cover",
+            side_effect=self._fake_download(tmp_path),
+        ):
+            result = _cover_from_lookup(self.URL, None, tmp_path, interactive=False)
+        assert result is not None and result.name == "downloaded.jpg"
+
+    def test_non_interactive_keeps_an_existing_cover(self, tmp_path) -> None:
+        # A --no-prompt run must not silently discard a file the user had.
+        from m4bmaker.__main__ import _cover_from_lookup
+
+        existing = tmp_path / "mine.jpg"
+        existing.write_bytes(b"\xff\xd8")
+        with patch(
+            "m4bmaker.__main__.download_cover",
+            side_effect=self._fake_download(tmp_path),
+        ):
+            result = _cover_from_lookup(self.URL, existing, tmp_path, interactive=False)
+        assert result == existing
+
+    def test_interactive_yes_replaces(self, tmp_path) -> None:
+        from m4bmaker.__main__ import _cover_from_lookup
+
+        existing = tmp_path / "mine.jpg"
+        existing.write_bytes(b"\xff\xd8")
+        with (
+            patch(
+                "m4bmaker.__main__.download_cover",
+                side_effect=self._fake_download(tmp_path),
+            ),
+            patch("m4bmaker.__main__.safe_input", return_value="y"),
+        ):
+            result = _cover_from_lookup(self.URL, existing, tmp_path, interactive=True)
+        assert result is not None and result.name == "downloaded.jpg"
+
+    def test_interactive_no_keeps(self, tmp_path) -> None:
+        from m4bmaker.__main__ import _cover_from_lookup
+
+        existing = tmp_path / "mine.jpg"
+        existing.write_bytes(b"\xff\xd8")
+        with (
+            patch(
+                "m4bmaker.__main__.download_cover",
+                side_effect=self._fake_download(tmp_path),
+            ),
+            patch("m4bmaker.__main__.safe_input", return_value=""),
+        ):
+            result = _cover_from_lookup(self.URL, existing, tmp_path, interactive=True)
+        assert result == existing
+
+    def test_download_failure_keeps_what_was_resolved(self, tmp_path) -> None:
+        # A cover that will not download must not fail the whole conversion.
+        from m4bmaker.__main__ import _cover_from_lookup
+
+        existing = tmp_path / "mine.jpg"
+        existing.write_bytes(b"\xff\xd8")
+        with patch("m4bmaker.__main__.download_cover", side_effect=OSError("boom")):
+            result = _cover_from_lookup(self.URL, existing, tmp_path, interactive=False)
+        assert result == existing
+
+    def test_download_failure_with_no_cover_yields_none(self, tmp_path) -> None:
+        from m4bmaker.__main__ import _cover_from_lookup
+
+        with patch("m4bmaker.__main__.download_cover", side_effect=OSError("boom")):
+            assert (
+                _cover_from_lookup(self.URL, None, tmp_path, interactive=False) is None
+            )
