@@ -74,6 +74,7 @@ from m4bmaker.gui.worker import (
     ConvertWorker,
     DetectChaptersWorker,
     LoadM4bWorker,
+    LookupWorker,
     LoadWorker,
     PreflightWorker,
     SaveChaptersWorker,
@@ -161,6 +162,7 @@ class MainWindow(QMainWindow):
         self._save_worker: Optional[SaveChaptersWorker] = None
         self._split_worker: Optional[SplitWorker] = None
         self._detect_worker: Optional[DetectChaptersWorker] = None
+        self._lookup_worker: Optional[LookupWorker] = None
         # Generation counter for load workers: each load stamps a generation id,
         # and result slots ignore payloads from a superseded generation so a slow
         # scan of folder A cannot populate the UI under folder B's path (H5).
@@ -254,6 +256,12 @@ class MainWindow(QMainWindow):
         self._updates_action.toggled.connect(self._toggle_update_check)
         help_menu.addAction(self._updates_action)
 
+        self._lookup_action = QAction("Allow Online Book Lookup", self)
+        self._lookup_action.setCheckable(True)
+        self._lookup_action.setChecked(bool(_prefs_get("audnexus_consented")))
+        self._lookup_action.toggled.connect(self._toggle_audnexus_lookup)
+        help_menu.addAction(self._lookup_action)
+
         bug_action = QAction("Report a Bug…", self)
         bug_action.triggered.connect(
             lambda: QDesktopServices.openUrl(QUrl(_BUG_REPORT_URL))
@@ -290,6 +298,15 @@ class MainWindow(QMainWindow):
 
     def _toggle_update_check(self, enabled: bool) -> None:
         _prefs_set("check_for_updates", enabled)
+
+    def _toggle_audnexus_lookup(self, enabled: bool) -> None:
+        """Enable or revoke consent for Audnexus lookups.
+
+        Turning this off revokes consent outright: no request can be made while
+        it is off, and the next lookup attempt asks again rather than silently
+        proceeding.
+        """
+        _prefs_set("audnexus_consented", enabled)
 
     def _toggle_dark_mode(self) -> None:
         self._dark_mode = self._dark_action.isChecked()
@@ -610,6 +627,32 @@ class MainWindow(QMainWindow):
             grid.addWidget(widget, i, 1)
             widget.textChanged.connect(self._update_output_preview)
 
+        # ASIN lookup row. Nothing here fires on its own — the button is the
+        # only path to a network request, and it is gated by consent.
+        asin_row = QHBoxLayout()
+        asin_row.setContentsMargins(0, 0, 0, 0)
+        asin_row.setSpacing(6)
+        self._asin_edit = QLineEdit()
+        self._asin_edit.setPlaceholderText("Audible ASIN (e.g. B017V4IM1G)")
+        self._asin_edit.returnPressed.connect(self._on_asin_lookup)
+        self._lookup_btn = QPushButton("Look Up")
+        self._lookup_btn.setFixedWidth(80)
+        self._lookup_btn.setToolTip(
+            "Fetch title, author, narrator, cover and chapter names\n"
+            "from Audnexus. Sends the ASIN and nothing else."
+        )
+        self._lookup_btn.setEnabled(False)
+        self._lookup_btn.clicked.connect(self._on_asin_lookup)
+        asin_row.addWidget(self._asin_edit)
+        asin_row.addWidget(self._lookup_btn)
+
+        asin_label = _muted_label("ASIN")
+        asin_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        grid.addWidget(asin_label, 4, 0)
+        grid.addLayout(asin_row, 4, 1)
+
         hbox.addLayout(grid, stretch=1)
         return box
 
@@ -896,6 +939,7 @@ class MainWindow(QMainWindow):
             self._save_worker,
             self._split_worker,
             self._detect_worker,
+            self._lookup_worker,
             self._load_worker,
             self._m4b_load_worker,
             self._preflight_worker,
@@ -990,6 +1034,10 @@ class MainWindow(QMainWindow):
         self._detect_btn.setEnabled(
             has_book and not detect_busy and not direct_busy and not queue_busy
         )
+        lookup_busy = self._lookup_worker is not None and (
+            self._lookup_worker.isRunning()
+        )
+        self._lookup_btn.setEnabled(has_book and not lookup_busy)
         self._tabs.setTabEnabled(1, has_book)
         if self._convert_running:
             # Keep the Cancel label the running convert set.
@@ -1128,6 +1176,109 @@ class MainWindow(QMainWindow):
         self._set_status("Split failed.")
         if self.isVisible():
             QMessageBox.critical(self, "Split Error", msg)
+
+    # ── Audnexus lookup ───────────────────────────────────────────────────────
+
+    def _ensure_audnexus_consent(self) -> bool:
+        """Return True if a lookup may proceed, asking once if it has not been.
+
+        The dialog names exactly what leaves the machine. Declining abandons the
+        lookup and makes no request; the preference stays off, so the next
+        attempt asks again rather than quietly going ahead.
+        """
+        if bool(_prefs_get("audnexus_consented")):
+            return True
+
+        reply = QMessageBox.question(
+            self,
+            "Look Up Book Data Online?",
+            "m4Bookmaker can fetch book details and chapter names from "
+            "Audnexus (api.audnex.us).\n\n"
+            "The only thing sent is the ASIN you type in. No filenames, no "
+            "file paths, no audio, and nothing about you or your library "
+            "leaves this machine.\n\n"
+            "If the book has cover art, the image is then downloaded from "
+            "Amazon's image server, which sees your IP address as any image "
+            "download would.\n\n"
+            "Allow this? You can change it later under Help > Allow Online "
+            "Book Lookup.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            self._set_status("Online lookup declined. Nothing was sent.")
+            return False
+
+        _prefs_set("audnexus_consented", True)
+        self._lookup_action.setChecked(True)
+        return True
+
+    def _on_asin_lookup(self) -> None:
+        """Fetch metadata and chapter names for the ASIN in the field."""
+        if self._book is None or self._lookup_worker is not None:
+            return
+
+        asin = self._asin_edit.text().strip()
+        if not asin:
+            self._set_status("Enter an Audible ASIN to look up.")
+            return
+
+        # Consent is checked before anything touches the network.
+        if not self._ensure_audnexus_consent():
+            return
+
+        region = str(_prefs_get("audnexus_region") or "us")
+        self._set_status(f"Looking up {asin.upper()} on Audnexus…")
+
+        # Bound methods, never lambdas — see the note in _on_folder_selected.
+        self._lookup_worker = LookupWorker(
+            asin=asin,
+            local_chapters=list(self._book.chapters),
+            region=region,
+        )
+        self._lookup_worker.result_ready.connect(self._on_lookup_finished)
+        self._lookup_worker.error.connect(self._on_lookup_error)
+        self._lookup_worker.start()
+        self._update_controls()
+
+    def _on_lookup_finished(
+        self, book: object, chapters: object, message: str, cover_path: str = ""
+    ) -> None:
+        """Populate fields and the chapter table for review. Nothing is saved."""
+        self._lookup_worker = None
+
+        for field_name, widget in (
+            ("title", self._title_edit),
+            ("author", self._author_edit),
+            ("narrator", self._narrator_edit),
+            ("genre", self._genre_edit),
+        ):
+            value = getattr(book, field_name, None)
+            if value:
+                widget.setText(str(value))
+
+        # The worker downloaded the cover off-thread via cover.py, which
+        # enforces https, a content-type check, and a size cap. An existing
+        # cover the user already chose is never overwritten.
+        if cover_path and self._cover_widget.cover_path() is None:
+            self._cover_widget.set_cover(Path(cover_path))
+
+        if isinstance(chapters, list) and chapters and self._book is not None:
+            self._book.chapters = chapters
+            self._chapter_table.populate(chapters)
+            self._chapter_durations = self._derive_durations(self._book)
+            self._chapters_merged = False
+
+        self._update_output_preview()
+        self._set_status(f"{message} Review before converting.")
+        self._update_controls()
+
+    def _on_lookup_error(self, msg: str) -> None:
+        self._lookup_worker = None
+        self._set_status("Lookup failed.")
+        self._update_controls()
+        if self.isVisible():
+            QMessageBox.critical(self, "Lookup Error", msg)
 
     # ── Detect chapters from silence ──────────────────────────────────────────
 

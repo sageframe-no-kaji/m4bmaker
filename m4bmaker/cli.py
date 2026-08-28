@@ -169,6 +169,38 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--asin",
+        default=None,
+        metavar="ASIN",
+        help=(
+            "Audible ASIN to fetch metadata and chapter names from Audnexus "
+            "(api.audnex.us). Passing this flag makes one network request; "
+            "the ASIN is the only thing sent."
+        ),
+    )
+    parser.add_argument(
+        "--asin-region",
+        dest="asin_region",
+        default="us",
+        metavar="REGION",
+        help=(
+            "Audible storefront the ASIN belongs to: us, uk, de, fr, ca, au, "
+            "etc. (default: us). An ASIN is storefront-specific."
+        ),
+    )
+    parser.add_argument(
+        "--asin-use-timings",
+        dest="asin_use_timings",
+        action="store_true",
+        default=False,
+        help=(
+            "Use Audible's chapter timings instead of only its names. The "
+            "shift needed to match your audio is derived, and no shift is "
+            "applied if the book does not line up consistently. Default is to "
+            "keep your own chapter boundaries and take only the names."
+        ),
+    )
+    parser.add_argument(
         "--chapters-file",
         dest="chapters_file",
         type=Path,

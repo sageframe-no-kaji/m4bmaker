@@ -8,6 +8,12 @@ from argparse import Namespace
 from pathlib import Path
 
 from m4bmaker import __version__
+from m4bmaker.audnexus import (
+    apply_names,
+    apply_timings,
+    fetch_chapters,
+    fetch_metadata,
+)
 from m4bmaker.chapters import format_chapter_table
 from m4bmaker.chapters_file import load_chapters_file
 from m4bmaker.cli import parse_args
@@ -291,12 +297,40 @@ def _run(args: Namespace) -> None:
         else:
             log(f"Generated {len(book.chapters)} chapter(s)")
 
+        # 3e. Audnexus lookup. Explicit per invocation: passing --asin is the
+        # consent, and nothing but the ASIN is sent. Runs after chapters exist
+        # so Audible's names land on this book's own boundaries.
+        asin_meta = None
+        if args.asin:
+            log(
+                f"Looking up ASIN {args.asin.strip().upper()} on Audnexus "
+                f"(api.audnex.us, region '{args.asin_region}'). "
+                "The ASIN is the only thing sent."
+            )
+            asin_meta = fetch_metadata(args.asin, args.asin_region)
+            remote = fetch_chapters(args.asin, args.asin_region)
+            if args.asin_use_timings:
+                applied = apply_timings(
+                    remote.chapters, book.chapters, remote.brand_intro_ms
+                )
+            else:
+                applied = apply_names(remote.chapters, book.chapters)
+            book.chapters = applied.chapters
+            log(applied.message)
+
         # Override cover with resolved value (interactive or CLI-supplied).
         book.cover = cover
 
         # 4. Complete metadata interactively.
         log("Reading metadata...")
         raw_meta = extract_metadata(book.files[0])
+        if asin_meta is not None:
+            # Audnexus is more authoritative than the files' own tags, but an
+            # explicit flag still wins — the user typed it on purpose.
+            for field_name in ("title", "author", "narrator", "genre"):
+                value = getattr(asin_meta, field_name)
+                if value and getattr(args, field_name, None) is None:
+                    setattr(args, field_name, value)
         hints = _hints_from_dirname(directory)
         filled = prompt_missing(raw_meta, args, hints=hints)
         book.metadata = BookMetadata(
