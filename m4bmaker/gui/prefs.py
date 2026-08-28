@@ -26,6 +26,12 @@ _PREFS_FILE = "prefs.json"
 _DEFAULTS: dict[str, object] = {
     "dark_mode": False,
     "check_for_updates": True,
+    # Audnexus lookup is opt-in and off until the user consents once. Region is
+    # stored rather than guessed from locale: an ASIN belongs to one Audible
+    # storefront, and a silent wrong guess reads to the user as "this book is
+    # not in the database".
+    "audnexus_region": "us",
+    "audnexus_consented": False,
 }
 
 

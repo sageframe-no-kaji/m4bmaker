@@ -21,6 +21,16 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
+import logging
+
+from m4bmaker.audnexus import (
+    AudnexusBook,
+    apply_names,
+    apply_timings,
+    fetch_chapters,
+    fetch_metadata,
+)
+from m4bmaker.cover import download_cover
 from m4bmaker.encoder import write_concat_list
 from m4bmaker.errors import EncodeCancelled, M4BError
 from m4bmaker.models import Book, BookMetadata, Chapter
@@ -32,6 +42,8 @@ from m4bmaker.silence import (
     silence_to_chapters,
 )
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, get_temp_root, subprocess_flags
+
+_log = logging.getLogger(__name__)
 
 
 class LoadWorker(QThread):
@@ -199,6 +211,70 @@ class DetectChaptersWorker(QThread):
             return
         frac = min(1.0, seconds / self._total_duration)
         self.progress.emit(f"Analysing audio for silence… {int(frac * 100)}%", frac)
+
+
+class LookupWorker(QThread):
+    """Fetch Audnexus metadata and chapter names off the UI thread.
+
+    Network calls never run on the UI thread. This worker is only ever started
+    after the user has consented; it does not check consent itself, and it is
+    never started implicitly.
+    """
+
+    # (AudnexusBook, list[Chapter], message, cover_path_or_empty)
+    result_ready = Signal(object, object, str, str)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        asin: str,
+        local_chapters: list[Chapter],
+        region: str = "us",
+        use_timings: bool = False,
+        want_cover: bool = True,
+    ) -> None:
+        super().__init__()
+        self._asin = asin
+        self._local = local_chapters
+        self._region = region
+        self._use_timings = use_timings
+        self._want_cover = want_cover
+        self._cover_url: str | None = None
+
+    def run(self) -> None:
+        try:
+            book: AudnexusBook = fetch_metadata(self._asin, self._region)
+            self._cover_url = book.cover_url
+            remote = fetch_chapters(self._asin, self._region)
+            if self._use_timings:
+                applied = apply_timings(
+                    remote.chapters, self._local, remote.brand_intro_ms
+                )
+            else:
+                applied = apply_names(remote.chapters, self._local)
+            self.result_ready.emit(
+                book, applied.chapters, applied.message, self._cover()
+            )
+        except M4BError as exc:
+            self.error.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.error.emit(str(exc))
+
+    def _cover(self) -> str:
+        """Download the cover art, returning its local path or ``""``.
+
+        Uses :func:`m4bmaker.cover.download_cover`, which already enforces
+        https-only, a content-type check, and a size cap. A cover that will not
+        download is not worth failing the whole lookup over — the metadata and
+        chapter names are the point — so any failure yields an empty path.
+        """
+        if not self._want_cover or self._cover_url is None:
+            return ""
+        try:
+            return str(download_cover(self._cover_url, get_temp_root()))
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("Could not download cover art: %s", exc)
+            return ""
 
 
 class PreflightWorker(QThread):
