@@ -595,6 +595,93 @@ class TestEncoding:
         assert captured_kwargs.get("bitrate") == "128k"
 
 
+# ── loudness normalization (#14) ──────────────────────────────────────────────
+
+
+class TestNormalizeCheckbox:
+    """The Encoding tab's "Normalize loudness" checkbox and its two paths.
+
+    The GUI reaches run_pipeline two ways — the Convert button via
+    ConvertWorker, and the batch queue via Job/JobWorker. A checkbox wired to
+    only one of them is a setting that works from one button and not the
+    other, so both are asserted here.
+    """
+
+    def _capture_worker_kwargs(self, w) -> dict:
+        captured: dict = {}
+
+        class _FakeWorker(MagicMock):
+            def __init__(self_inner, *args, **kwargs):  # type: ignore[misc]
+                captured.update(kwargs)
+                super().__init__()
+                self_inner.isRunning = MagicMock(return_value=True)
+
+            def start(self_inner):  # type: ignore[misc]
+                pass
+
+            progress = MagicMock()
+            finished = MagicMock()
+            error = MagicMock()
+
+        with patch("m4bmaker.gui.window.ConvertWorker", side_effect=_FakeWorker):
+            w._on_convert()
+        return captured
+
+    def test_checkbox_exists_in_encoding_tab(self, win):
+        w, _ = win
+        assert w._normalize_check is not None
+        assert w._normalize_check.text() == "Normalize loudness"
+
+    def test_checkbox_defaults_unchecked(self, win):
+        w, _ = win
+        assert not w._normalize_check.isChecked()
+
+    def test_unchecked_reaches_worker_as_false(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_nested.setChecked(True)
+        assert self._capture_worker_kwargs(w).get("normalize") is False
+
+    def test_checked_reaches_worker_as_true(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_nested.setChecked(True)
+        w._normalize_check.setChecked(True)
+        assert self._capture_worker_kwargs(w).get("normalize") is True
+
+    def test_checked_reaches_queued_job(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_nested.setChecked(True)
+        w._normalize_check.setChecked(True)
+        job = w._collect_job()
+        assert job is not None
+        assert job.normalize is True
+
+    def test_unchecked_leaves_queued_job_false(self, win, tmp_path):
+        w, _ = win
+        w._on_load_finished(_make_book(tmp_path))
+        w._out_nested.setChecked(True)
+        job = w._collect_job()
+        assert job is not None
+        assert job.normalize is False
+
+    def test_queue_worker_forwards_job_normalize(self, tmp_path):
+        """JobWorker must hand the Job's flag to run_pipeline, not drop it."""
+        from m4bmaker.gui.job import job_from_book
+        from m4bmaker.gui.queue_manager import JobWorker
+
+        job = job_from_book(_make_book(tmp_path), tmp_path / "out.m4b", normalize=True)
+        worker = JobWorker(job)
+        with (
+            patch("m4bmaker.pipeline.run_pipeline") as mock_pipeline,
+            patch("m4bmaker.gui.queue_manager.find_ffmpeg", return_value="ffmpeg"),
+            patch("m4bmaker.gui.queue_manager.find_ffprobe", return_value="ffprobe"),
+        ):
+            worker.run()
+        assert mock_pipeline.call_args.kwargs["normalize"] is True
+
+
 # ── missing ffmpeg ────────────────────────────────────────────────────────────
 
 

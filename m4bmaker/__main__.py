@@ -329,6 +329,8 @@ def _run(args: Namespace) -> None:
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
             repair_result=repair_result,
+            normalize=args.normalize,
+            normalize_two_pass=args.normalize_two_pass,
         )
         log(f"Done. Created: {output}")
 

@@ -66,6 +66,7 @@ class ConvertWorker(QThread):
         bitrate: str = "96k",
         stereo: bool = False,
         sample_rate: int | None = None,
+        normalize: bool = False,
     ) -> None:
         super().__init__()
         self._book = book
@@ -73,6 +74,7 @@ class ConvertWorker(QThread):
         self._bitrate = bitrate
         self._stereo = stereo
         self._sample_rate = sample_rate
+        self._normalize = normalize
         self._cancel_event = threading.Event()
 
     def request_cancel(self) -> None:
@@ -94,6 +96,7 @@ class ConvertWorker(QThread):
                 ffmpeg=ffmpeg,
                 ffprobe=ffprobe,
                 cancel_event=self._cancel_event,
+                normalize=self._normalize,
             )
             if self._cancel_event.is_set():
                 self.cancelled.emit()

@@ -43,6 +43,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -635,6 +636,12 @@ class MainWindow(QMainWindow):
         chan_group.addButton(self._stereo_radio)
         layout.addWidget(self._mono_radio)
         layout.addWidget(self._stereo_radio)
+
+        layout.addSpacing(10)
+        self._normalize_check = QCheckBox("Normalize loudness")
+        self._normalize_check.setChecked(False)
+        layout.addWidget(self._normalize_check)
+
         layout.addStretch()
         return w
 
@@ -1112,6 +1119,7 @@ class MainWindow(QMainWindow):
             bitrate=self._bitrate_combo.currentText(),
             stereo=self._stereo_radio.isChecked(),
             sample_rate=self._preflight_sample_rate,
+            normalize=self._normalize_check.isChecked(),
         )
 
     def _on_add_to_queue(self) -> None:
@@ -1765,6 +1773,7 @@ class MainWindow(QMainWindow):
             bitrate=self._bitrate_combo.currentText(),
             stereo=self._stereo_radio.isChecked(),
             sample_rate=self._preflight_sample_rate,
+            normalize=self._normalize_check.isChecked(),
         )
         self._convert_worker.progress.connect(self._on_progress)
         self._convert_worker.result_ready.connect(self._on_convert_finished)
