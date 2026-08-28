@@ -72,6 +72,7 @@ from m4bmaker.gui.styles import get_stylesheet
 from m4bmaker.gui.widgets import ChapterTable, CoverWidget, FolderDropZone
 from m4bmaker.gui.worker import (
     ConvertWorker,
+    DetectChaptersWorker,
     LoadM4bWorker,
     LoadWorker,
     PreflightWorker,
@@ -159,6 +160,7 @@ class MainWindow(QMainWindow):
         self._preflight_sample_rate: Optional[int] = None
         self._save_worker: Optional[SaveChaptersWorker] = None
         self._split_worker: Optional[SplitWorker] = None
+        self._detect_worker: Optional[DetectChaptersWorker] = None
         # Generation counter for load workers: each load stamps a generation id,
         # and result slots ignore payloads from a superseded generation so a slow
         # scan of folder A cannot populate the UI under folder B's path (H5).
@@ -737,6 +739,15 @@ class MainWindow(QMainWindow):
         self._ch_add_btn.setVisible(False)
         self._ch_add_btn.clicked.connect(self._on_add_chapter)
         ch_tools_row.addWidget(self._ch_add_btn)
+        self._detect_btn = QPushButton("Detect Chapters")
+        self._detect_btn.setToolTip(
+            "Find chapter breaks from silence in the audio.\n"
+            "Replaces the current chapter list — review the result\n"
+            "in the table and player before converting."
+        )
+        self._detect_btn.setEnabled(False)
+        self._detect_btn.clicked.connect(self._on_detect_chapters)
+        ch_tools_row.addWidget(self._detect_btn)
         self._ch_merge_btn = QPushButton("Merge")
         self._ch_merge_btn.setToolTip(
             "Merge selected consecutive rows into one chapter —\n"
@@ -884,6 +895,7 @@ class MainWindow(QMainWindow):
             self._convert_worker,
             self._save_worker,
             self._split_worker,
+            self._detect_worker,
             self._load_worker,
             self._m4b_load_worker,
             self._preflight_worker,
@@ -918,7 +930,11 @@ class MainWindow(QMainWindow):
         # wait (bounded) for every live worker.  ffmpeg children die when their
         # cancel events fire; a wait that times out is logged, not fatal.
         self._queue_manager.stop()
-        for cancellable in (self._convert_worker, self._split_worker):
+        for cancellable in (
+            self._convert_worker,
+            self._split_worker,
+            self._detect_worker,
+        ):
             if cancellable is not None and cancellable.isRunning():
                 cancellable.request_cancel()
         qm_worker = self._queue_manager._worker
@@ -967,6 +983,12 @@ class MainWindow(QMainWindow):
         self._split_btn.setVisible(self._mode == "edit")
         self._split_btn.setEnabled(
             has_book and not split_busy and not save_busy and not queue_busy
+        )
+        detect_busy = self._detect_worker is not None and (
+            self._detect_worker.isRunning()
+        )
+        self._detect_btn.setEnabled(
+            has_book and not detect_busy and not direct_busy and not queue_busy
         )
         self._tabs.setTabEnabled(1, has_book)
         if self._convert_running:
@@ -1106,6 +1128,77 @@ class MainWindow(QMainWindow):
         self._set_status("Split failed.")
         if self.isVisible():
             QMessageBox.critical(self, "Split Error", msg)
+
+    # ── Detect chapters from silence ──────────────────────────────────────────
+
+    def _on_detect_chapters(self) -> None:
+        """Replace the chapter list with boundaries detected from the audio."""
+        if self._book is None or self._detect_worker is not None:
+            return
+
+        existing = len(self._book.chapters)
+        reply = QMessageBox.question(
+            self,
+            "Detect Chapters",
+            f"Replace {existing} chapter(s) with chapters detected from "
+            f"silence?\n\n"
+            "Detection is a rough pass. Review the result in the table and "
+            "scrub each boundary in the player before converting.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        total = self._book.total_duration or self._m4b_total_duration
+        self._progress_bar.setVisible(True)
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        self._set_status("Analysing audio for silence…")
+
+        # Signals are connected as BOUND METHODS, never lambdas — see the note
+        # in _on_folder_selected for why a lambda here is fatal on teardown.
+        self._detect_worker = DetectChaptersWorker(
+            files=list(self._book.files),
+            total_duration=total,
+        )
+        self._detect_worker.progress.connect(self._on_progress)
+        self._detect_worker.result_ready.connect(self._on_detect_finished)
+        self._detect_worker.cancelled.connect(self._on_detect_cancelled)
+        self._detect_worker.error.connect(self._on_detect_error)
+        self._detect_worker.start()
+        self._update_controls()
+
+    def _on_detect_finished(self, chapters: object) -> None:
+        self._detect_worker = None
+        self._progress_bar.setVisible(False)
+        if not isinstance(chapters, list):  # defensive: payload shape (L8)
+            self._set_status("Detection returned nothing usable.")
+            self._update_controls()
+            return
+        if self._book is not None:
+            self._book.chapters = chapters
+            self._chapter_table.populate(chapters)
+            self._chapter_durations = self._derive_durations(self._book)
+            self._chapters_merged = False
+        self._set_status(
+            f"Detected {len(chapters)} chapter(s). Review before converting."
+        )
+        self._update_controls()
+
+    def _on_detect_cancelled(self) -> None:
+        self._detect_worker = None
+        self._progress_bar.setVisible(False)
+        self._set_status("Chapter detection cancelled.")
+        self._update_controls()
+
+    def _on_detect_error(self, msg: str) -> None:
+        self._detect_worker = None
+        self._progress_bar.setVisible(False)
+        self._set_status("Chapter detection failed.")
+        self._update_controls()
+        if self.isVisible():
+            QMessageBox.critical(self, "Detection Error", msg)
 
     def _collect_job(self):
         """Snapshot current GUI state as a Job for the queue."""

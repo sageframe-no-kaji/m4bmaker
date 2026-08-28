@@ -136,6 +136,39 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--detect-chapters",
+        dest="detect_chapters",
+        action="store_true",
+        default=False,
+        help=(
+            "Derive chapter markers from silence in the audio instead of from "
+            "filenames. Detection is heuristic — review the result before "
+            "relying on it. Ignored when --chapters-file is given."
+        ),
+    )
+    parser.add_argument(
+        "--silence-threshold",
+        dest="silence_threshold",
+        type=float,
+        default=-30.0,
+        metavar="DB",
+        help=(
+            "Noise floor for --detect-chapters, in dB. Audio quieter than this "
+            "counts as silence (default: -30.0)."
+        ),
+    )
+    parser.add_argument(
+        "--silence-duration",
+        dest="silence_duration",
+        type=float,
+        default=1.5,
+        metavar="SECONDS",
+        help=(
+            "Shortest silence that can mark a chapter break, in seconds "
+            "(default: 1.5)."
+        ),
+    )
+    parser.add_argument(
         "--chapters-file",
         dest="chapters_file",
         type=Path,

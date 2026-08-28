@@ -15,14 +15,22 @@ signals below never collide with the native one.
 
 from __future__ import annotations
 
+import tempfile
 import threading
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
+from m4bmaker.encoder import write_concat_list
 from m4bmaker.errors import EncodeCancelled, M4BError
 from m4bmaker.models import Book, BookMetadata, Chapter
 from m4bmaker.pipeline import load_audiobook, run_pipeline
+from m4bmaker.silence import (
+    DEFAULT_MIN_SILENCE,
+    DEFAULT_THRESHOLD_DB,
+    detect_silence,
+    silence_to_chapters,
+)
 from m4bmaker.utils import find_ffmpeg, find_ffprobe, get_temp_root, subprocess_flags
 
 
@@ -117,6 +125,80 @@ class ConvertWorker(QThread):
 
     def _on_progress(self, message: str, fraction: float) -> None:
         self.progress.emit(message, fraction)
+
+
+class DetectChaptersWorker(QThread):
+    """Detect chapter boundaries from silence, off the UI thread.
+
+    Analysis decodes the whole book, so on a long audiobook this is slow — it
+    must never run on the UI thread and must stay cancellable. Signals follow
+    the same shape as :class:`ConvertWorker`; see the module docstring for why
+    the completion signal is not called ``finished``.
+    """
+
+    progress = Signal(str, float)  # message, 0.0–1.0
+    result_ready = Signal(object)  # list[Chapter]
+    cancelled = Signal()  # user cancellation (not an error)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        files: list[Path],
+        total_duration: float,
+        threshold_db: float = DEFAULT_THRESHOLD_DB,
+        min_duration: float = DEFAULT_MIN_SILENCE,
+    ) -> None:
+        super().__init__()
+        self._files = files
+        self._total_duration = total_duration
+        self._threshold_db = threshold_db
+        self._min_duration = min_duration
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        """Signal the running ffmpeg subprocess to stop."""
+        self._cancel_event.set()
+
+    def run(self) -> None:
+        try:
+            ffmpeg = find_ffmpeg()
+            with tempfile.TemporaryDirectory() as tmp:
+                concat = Path(tmp) / "concat.txt"
+                write_concat_list(self._files, concat)
+                self.progress.emit("Analysing audio for silence…", 0.0)
+                spans = detect_silence(
+                    source=concat,
+                    ffmpeg=ffmpeg,
+                    threshold_db=self._threshold_db,
+                    min_duration=self._min_duration,
+                    cancel_event=self._cancel_event,
+                    progress_callback=self._on_analysed,
+                )
+            chapters = silence_to_chapters(spans, self._total_duration)
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.result_ready.emit(chapters)
+        except EncodeCancelled:
+            self.cancelled.emit()
+        except M4BError as exc:
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.error.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            if self._cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.error.emit(str(exc))
+
+    def _on_analysed(self, seconds: float) -> None:
+        """Turn seconds-analysed into a fraction using the known total."""
+        if self._total_duration <= 0:
+            self.progress.emit("Analysing audio for silence…", 0.0)
+            return
+        frac = min(1.0, seconds / self._total_duration)
+        self.progress.emit(f"Analysing audio for silence… {int(frac * 100)}%", frac)
 
 
 class PreflightWorker(QThread):
