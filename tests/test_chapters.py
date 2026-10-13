@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ import pytest
 
 from m4bmaker.chapters import (
     _escape_ffmeta,
+    _probe_file,
     _strip_chapter_prefix,
     _format_time,
     build_chapters,
@@ -497,3 +499,187 @@ class TestFormatChapterTable:
         lines = format_chapter_table(chapters).splitlines()
         # 3 header lines (top, header, sep) + 5 data rows + 1 bottom = 9
         assert len(lines) == 9
+
+
+# ---------------------------------------------------------------------------
+# Embedded chapters carried over from source files (#28)
+# ---------------------------------------------------------------------------
+
+
+def _probe_json(duration: float, chapters: list[tuple[float, str | None]]) -> str:
+    return json.dumps(
+        {
+            "format": {"duration": str(duration)},
+            "chapters": [
+                {"start_time": str(start), **({"tags": {"title": t}} if t else {})}
+                for start, t in chapters
+            ],
+        }
+    )
+
+
+def _run_returning(outputs: dict[str, str]):
+    """subprocess.run stub answering ffprobe per file name (last cmd arg)."""
+
+    def run(cmd, **_kw):
+        result = MagicMock()
+        result.stdout = outputs[Path(cmd[-1]).name]
+        return result
+
+    return run
+
+
+class TestEmbeddedChapters:
+    def test_probe_requests_and_parses_chapters(self, tmp_path: Path) -> None:
+        stub = tmp_path / "book.m4b"
+        seen: list[list[str]] = []
+
+        def run(cmd, **_kw):
+            seen.append(cmd)
+            result = MagicMock()
+            result.stdout = _probe_json(90.0, [(0.0, "One"), (45.0, None)])
+            return result
+
+        with patch("m4bmaker.chapters.subprocess.run", side_effect=run):
+            probe = _probe_file(stub, "ffprobe")
+
+        assert "-show_chapters" in seen[0]
+        assert probe.chapters == [(0.0, "One"), (45.0, None)]
+
+    def test_probe_skips_marker_without_start(self, tmp_path: Path) -> None:
+        data = json.dumps(
+            {
+                "format": {"duration": "90"},
+                "chapters": [{"tags": {"title": "No start"}}, {"start_time": "x"}],
+            }
+        )
+        with patch(
+            "m4bmaker.chapters.subprocess.run", return_value=MagicMock(stdout=data)
+        ):
+            probe = _probe_file(tmp_path / "b.m4b", "ffprobe")
+        assert probe.chapters == []
+
+    def test_two_chaptered_books_keep_all_chapters_shifted(
+        self, tmp_path: Path
+    ) -> None:
+        a, b = tmp_path / "a.m4b", tmp_path / "b.m4b"
+        outputs = {
+            "a.m4b": _probe_json(60.0, [(0.0, "A1"), (20.0, "A2"), (40.0, "A3")]),
+            "b.m4b": _probe_json(30.0, [(0.0, "B1"), (10.0, "B2")]),
+        }
+        with patch(
+            "m4bmaker.chapters.subprocess.run", side_effect=_run_returning(outputs)
+        ):
+            chapters = build_chapters([a, b], "ffprobe")
+
+        assert [c.title for c in chapters] == ["A1", "A2", "A3", "B1", "B2"]
+        assert [c.start_time for c in chapters] == [0.0, 20.0, 40.0, 60.0, 70.0]
+        assert [c.file_offset for c in chapters] == [0.0, 20.0, 40.0, 0.0, 10.0]
+        assert [c.source_file for c in chapters] == [a, a, a, b, b]
+        assert [c.index for c in chapters] == [1, 2, 3, 4, 5]
+
+    def test_mixed_chaptered_and_plain_files(self, tmp_path: Path) -> None:
+        a, b = tmp_path / "a.m4b", tmp_path / "02 - Epilogue.mp3"
+        outputs = {
+            "a.m4b": _probe_json(60.0, [(0.0, "A1"), (30.0, "A2")]),
+            "02 - Epilogue.mp3": _probe_json(15.0, []),
+        }
+        with patch(
+            "m4bmaker.chapters.subprocess.run", side_effect=_run_returning(outputs)
+        ):
+            chapters = build_chapters([a, b], "ffprobe")
+
+        assert [(c.title, c.start_time) for c in chapters] == [
+            ("A1", 0.0),
+            ("A2", 30.0),
+            ("Epilogue", 60.0),
+        ]
+
+    def test_first_marker_pinned_to_file_start(self, tmp_path: Path) -> None:
+        """Audio before the first marker must still belong to a chapter."""
+        a = tmp_path / "a.m4b"
+        outputs = {"a.m4b": _probe_json(60.0, [(2.5, "One"), (30.0, "Two")])}
+        with patch(
+            "m4bmaker.chapters.subprocess.run", side_effect=_run_returning(outputs)
+        ):
+            chapters = build_chapters([a], "ffprobe")
+        assert [c.start_time for c in chapters] == [0.0, 30.0]
+
+    def test_markers_past_end_dropped_and_sorted(self, tmp_path: Path) -> None:
+        a = tmp_path / "a.m4b"
+        outputs = {
+            "a.m4b": _probe_json(
+                60.0, [(30.0, "Two"), (0.0, "One"), (60.0, "End"), (99.0, "Past")]
+            )
+        }
+        with patch(
+            "m4bmaker.chapters.subprocess.run", side_effect=_run_returning(outputs)
+        ):
+            chapters = build_chapters([a], "ffprobe")
+        assert [c.title for c in chapters] == ["One", "Two"]
+
+    def test_untitled_markers_take_numbered_file_title(self, tmp_path: Path) -> None:
+        a = tmp_path / "01 - Dune.m4b"
+        outputs = {"01 - Dune.m4b": _probe_json(60.0, [(0.0, None), (30.0, None)])}
+        with patch(
+            "m4bmaker.chapters.subprocess.run", side_effect=_run_returning(outputs)
+        ):
+            chapters = build_chapters([a], "ffprobe")
+        assert [c.title for c in chapters] == ["Dune 1", "Dune 2"]
+
+    def test_single_untitled_marker_takes_plain_file_title(
+        self, tmp_path: Path
+    ) -> None:
+        a = tmp_path / "01 - Dune.m4b"
+        outputs = {"01 - Dune.m4b": _probe_json(60.0, [(0.0, None)])}
+        with patch(
+            "m4bmaker.chapters.subprocess.run", side_effect=_run_returning(outputs)
+        ):
+            chapters = build_chapters([a], "ffprobe")
+        assert [(c.title, c.file_offset) for c in chapters] == [("Dune", 0.0)]
+
+
+_FFMPEG = shutil.which("ffmpeg")
+_FFPROBE = shutil.which("ffprobe")
+
+
+@pytest.mark.skipif(
+    _FFMPEG is None or _FFPROBE is None, reason="ffmpeg/ffprobe not installed"
+)
+class TestEmbeddedChaptersRealFiles:
+    """Real ffmpeg-built M4Bs: proves ffprobe's chapter output is read right."""
+
+    @staticmethod
+    def _chaptered_m4b(path: Path, seconds: int, marks: list[tuple[int, str]]):
+        meta = path.with_suffix(".ffmeta")
+        bounds = [s for s, _ in marks] + [seconds]
+        lines = [";FFMETADATA1"]
+        for (start, title), end in zip(marks, bounds[1:]):
+            lines += [
+                "[CHAPTER]",
+                "TIMEBASE=1/1000",
+                f"START={start * 1000}",
+                f"END={end * 1000}",
+                f"title={title}",
+            ]
+        meta.write_text("\n".join(lines) + "\n")
+        subprocess.run(
+            [_FFMPEG, "-y", "-v", "error",
+             "-f", "lavfi", "-t", str(seconds), "-i", "anullsrc=r=22050:cl=mono",
+             "-i", str(meta), "-map_chapters", "1",
+             "-c:a", "aac", "-t", str(seconds), str(path)],
+            check=True,
+            timeout=30,
+        )  # fmt: skip
+        return path
+
+    def test_two_real_books_merge_with_all_chapters(self, tmp_path: Path) -> None:
+        a = self._chaptered_m4b(tmp_path / "a.m4b", 6, [(0, "A1"), (3, "A2")])
+        b = self._chaptered_m4b(tmp_path / "b.m4b", 4, [(0, "B1"), (2, "B2")])
+
+        chapters = build_chapters([a, b], _FFPROBE)
+
+        assert [c.title for c in chapters] == ["A1", "A2", "B1", "B2"]
+        starts = [c.start_time for c in chapters]
+        # AAC priming pads each file slightly, so allow a small tolerance.
+        assert starts == pytest.approx([0.0, 3.0, 6.0, 8.0], abs=0.1)

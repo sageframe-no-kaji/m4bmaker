@@ -9,6 +9,7 @@ from __future__ import annotations
 import tempfile
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from m4bmaker.chapters import build_chapters, get_duration, write_ffmetadata
@@ -61,9 +62,13 @@ def load_audiobook(
 
     chapters = build_chapters(files, ffprobe, progress_fn=progress_fn)
 
-    # Compute total duration for UI reorder/remove support
+    # Compute total duration for UI reorder/remove support. The last chapter
+    # may sit partway into the last file (embedded chapters, #28), so measure
+    # from where that file begins.
     if chapters:
-        total_duration = chapters[-1].start_time + get_duration(files[-1], ffprobe)
+        last = chapters[-1]
+        file_start = last.start_time - last.file_offset
+        total_duration = file_start + get_duration(files[-1], ffprobe)
     else:
         total_duration = 0.0
 
@@ -122,34 +127,55 @@ def _source_sample_rate(files: list[Path], ffprobe: str) -> int | None:
 
 
 def _retime_chapters_after_repair(
-    chapters: list[Chapter], active_files: list[Path], ffprobe: str
+    chapters: list[Chapter],
+    active_files: list[Path],
+    repaired: dict[Path, Path],
+    ffprobe: str,
 ) -> list[Chapter]:
-    """Rebuild chapter start_times cumulatively from *active_files* durations.
+    """Rebuild chapter start_times from *active_files* durations.
 
     Repair (``-fflags +discardcorrupt``) can shorten a file by dropping
     corrupt frames, so chapter start times computed from pre-repair
     durations drift for every chapter after a repaired file. This re-probes
-    each active (post-repair) file and rebuilds start_times from scratch,
-    preserving each chapter's index/title but replacing source_file with the
-    corresponding active file.
+    each active (post-repair) file, recomputes where each file begins, and
+    places every chapter at its file's new start plus its ``file_offset``,
+    preserving index/title and replacing source_file with the active file.
 
-    Only meaningful when chapters derive 1:1 from files (``source_file`` is
-    not ``None``); the caller is responsible for checking that precondition.
+    Chapters are matched to files by ``source_file``, not by position,
+    because a file with embedded chapters contributes several (#28). A
+    chapter's source may be the original file or its repaired copy —
+    *repaired* maps original to copy, and the CLI swaps ``book.files`` to the
+    copies before the pipeline runs — so both resolve. An offset that a
+    shortened file no longer reaches is clamped inside it. A chapter whose
+    source is not among *active_files* is returned unchanged.
+
+    Only meaningful when every chapter has a ``source_file``; the caller is
+    responsible for checking that precondition.
     """
-    retimed: list[Chapter] = []
+    starts: dict[Path, tuple[float, float]] = {}
     cursor_s = 0.0
-    for i, chapter in enumerate(chapters):
-        source = active_files[i] if i < len(active_files) else chapter.source_file
+    for path in active_files:
+        duration = get_duration(path, ffprobe)
+        starts[path] = (cursor_s, duration)
+        cursor_s += duration
+
+    retimed: list[Chapter] = []
+    for chapter in chapters:
+        source = chapter.source_file
+        active = repaired.get(source, source) if source is not None else None
+        if active is None or active not in starts:
+            retimed.append(chapter)
+            continue
+        file_start, duration = starts[active]
+        offset = min(chapter.file_offset, max(0.0, duration - 0.001))
         retimed.append(
-            Chapter(
-                index=chapter.index,
-                start_time=cursor_s,
-                title=chapter.title,
-                source_file=source,
+            replace(
+                chapter,
+                start_time=file_start + offset,
+                source_file=active,
+                file_offset=offset,
             )
         )
-        if source is not None:
-            cursor_s += get_duration(source, ffprobe)
     return retimed
 
 
@@ -256,7 +282,10 @@ def run_pipeline(
         )
         if active_repair_result.needed_repair and chapters_from_files:
             working_chapters = _retime_chapters_after_repair(
-                book.chapters, active_files, ffprobe
+                book.chapters,
+                active_files,
+                dict(active_repair_result.repaired_paths),
+                ffprobe,
             )
 
         # ── Compute total duration ────────────────────────────────────────
@@ -264,7 +293,8 @@ def run_pipeline(
             last_ch = working_chapters[-1]
             if last_ch.source_file is not None:
                 last_duration = get_duration(last_ch.source_file, ffprobe)
-                total_duration_s = last_ch.start_time + last_duration
+                file_start = last_ch.start_time - last_ch.file_offset
+                total_duration_s = file_start + last_duration
             else:
                 # Chapters loaded from a --chapters-file have no source_file;
                 # the book's total_duration (from load_audiobook) is the
