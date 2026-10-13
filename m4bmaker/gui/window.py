@@ -152,6 +152,9 @@ class MainWindow(QMainWindow):
         self._book: Optional[Book] = None
         self._mode: str = "build"  # "build" or "edit"
         self._m4b_total_duration: float = 0.0
+        # Cover embedded in the .m4b open in edit mode, as loaded. A save
+        # writes the cover only when the user has replaced it (#29).
+        self._m4b_saved_cover: Optional[Path] = None
         self._chapter_durations: list[float] = []
         self._chapters_merged: bool = False
         self._load_worker: Optional[LoadWorker] = None
@@ -1559,6 +1562,7 @@ class MainWindow(QMainWindow):
             )
             return
         self._m4b_total_duration = float(total_duration)
+        self._m4b_saved_cover = book.cover
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
@@ -2083,10 +2087,24 @@ class MainWindow(QMainWindow):
             total_duration=self._m4b_total_duration,
             dest=source,  # in-place edit
             metadata=metadata,
+            cover=self._changed_m4b_cover(),
         )
         self._save_worker.result_ready.connect(self._on_save_finished)
         self._save_worker.error.connect(self._on_convert_error)
         self._save_worker.start()
+
+    def _changed_m4b_cover(self) -> Optional[Path]:
+        """Return the cover to write on save, or ``None`` to keep the embedded one.
+
+        Reads the cover widget, as ``_collect_book_edits`` does for a build, so
+        a dropped image and one picked in the lookup's cover chooser are both
+        seen. The edit-mode save used to pass no cover at all, silently
+        keeping the old one (#29).
+        """
+        current = self._cover_widget.cover_path()
+        if current is None or current == self._m4b_saved_cover:
+            return None
+        return current
 
     def _gather_chapters_from_table(self) -> list[Chapter]:
         assert self._book is not None
@@ -2109,6 +2127,7 @@ class MainWindow(QMainWindow):
         # L4: don't leave the bar sitting at 100% forever — match the error path.
         self._progress_bar.setVisible(False)
         self._set_status(f"Saved — {Path(str(dest)).name}")
+        self._m4b_saved_cover = self._cover_widget.cover_path()
         self._update_controls()
         # M6: the save released the player's source; reload it now that the
         # rewrite is complete so playback/seek continues to work.

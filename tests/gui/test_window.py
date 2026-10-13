@@ -893,6 +893,15 @@ class TestEditMode:
         assert w._m4b_total_duration == 120.0
         assert w._title_edit.text() == "My Book"
 
+    def test_on_m4b_loaded_records_embedded_cover(self, win, tmp_path):
+        """#29: the loaded cover is the baseline a save compares against."""
+        w, _ = win
+        book = _make_book(tmp_path)
+        book.cover = tmp_path / "embedded.jpg"
+        w._mode = "edit"
+        w._on_m4b_loaded((book, 120.0))
+        assert w._m4b_saved_cover == book.cover
+
     def test_save_chapters_worker_started_in_edit_mode(self, win, tmp_path):
         w, _ = win
         book = _make_book(tmp_path)
@@ -911,6 +920,72 @@ class TestEditMode:
             w._on_convert()
 
         MockW.assert_called_once()
+
+    def _start_edit_save(self, w, tmp_path):
+        m4b = tmp_path / "book.m4b"
+        m4b.write_bytes(b"\x00")
+        w._mode = "edit"
+        w._m4b_total_duration = 120.0
+        w._folder_zone._edit.setText(str(m4b))
+        with patch("m4bmaker.gui.window.SaveChaptersWorker") as MockW:
+            mock_worker = MagicMock()
+            mock_worker.isRunning.return_value = False
+            MockW.return_value = mock_worker
+            w._on_convert()
+        return MockW
+
+    def test_edit_save_passes_replaced_cover(self, win, tmp_path):
+        """#29: a cover set after load must be written on save."""
+        w, _ = win
+        w._book = _make_book(tmp_path)
+        original = tmp_path / "embedded.jpg"
+        replacement = tmp_path / "new.jpg"
+        w._m4b_saved_cover = original
+        w._cover_widget.set_cover(replacement)
+
+        MockW = self._start_edit_save(w, tmp_path)
+
+        assert MockW.call_args.kwargs["cover"] == replacement
+
+    def test_edit_save_unchanged_cover_passes_none(self, win, tmp_path):
+        """An untouched cover is left to ffmpeg's stream copy, not rewritten."""
+        w, _ = win
+        w._book = _make_book(tmp_path)
+        original = tmp_path / "embedded.jpg"
+        w._m4b_saved_cover = original
+        w._cover_widget.set_cover(original)
+
+        MockW = self._start_edit_save(w, tmp_path)
+
+        assert MockW.call_args.kwargs["cover"] is None
+
+    def test_edit_save_no_cover_passes_none(self, win, tmp_path):
+        w, _ = win
+        w._book = _make_book(tmp_path)
+        w._m4b_saved_cover = None
+        w._cover_widget.set_cover(None)
+
+        MockW = self._start_edit_save(w, tmp_path)
+
+        assert MockW.call_args.kwargs["cover"] is None
+
+    def test_save_finished_resets_cover_baseline(self, win, tmp_path):
+        """After a save the written cover is the new baseline, so a second
+        save without changes does not rewrite it."""
+        w, _ = win
+        w._book = _make_book(tmp_path)
+        replacement = tmp_path / "new.jpg"
+        w._m4b_saved_cover = tmp_path / "embedded.jpg"
+        w._cover_widget.set_cover(replacement)
+
+        with (
+            patch.object(w._player, "load_paused"),
+            patch.object(w, "isVisible", return_value=False),
+        ):
+            w._on_save_finished(tmp_path / "book.m4b")
+
+        assert w._m4b_saved_cover == replacement
+        assert w._changed_m4b_cover() is None
 
     def test_do_save_chapters_releases_player_before_starting_worker(
         self, win, tmp_path

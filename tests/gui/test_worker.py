@@ -414,7 +414,7 @@ class TestSaveChaptersWorker:
         meta = BookMetadata(title="Test", author="Auth", narrator="Narr", genre="Gen")
         captured: list[dict] = []
 
-        def fake_save(src, ch, dur, dst, ffmpeg, *, metadata=None):
+        def fake_save(src, ch, dur, dst, ffmpeg, *, metadata=None, cover=None):
             captured.append({"metadata": metadata})
 
         with patch("m4bmaker.m4b_editor.save_m4b_chapters", side_effect=fake_save):
@@ -425,6 +425,30 @@ class TestSaveChaptersWorker:
         qapp.processEvents()
         assert captured, "save_m4b_chapters was not called"
         assert captured[0]["metadata"] == meta
+
+    def test_cover_passed_to_save(self, qapp, tmp_path):
+        """#29: a replacement cover must reach save_m4b_chapters."""
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00")
+        dest = tmp_path / "out.m4b"
+        cover = tmp_path / "new.jpg"
+        captured: list[Path | None] = []
+
+        def fake_save(src, ch, dur, dst, ffmpeg, *, metadata=None, cover=None):
+            captured.append(cover)
+
+        with (
+            patch("m4bmaker.gui.worker.find_ffmpeg", return_value="/usr/bin/ffmpeg"),
+            patch("m4bmaker.m4b_editor.save_m4b_chapters", side_effect=fake_save),
+        ):
+            worker = SaveChaptersWorker(
+                source, self._chapters(tmp_path), 60.0, dest, cover=cover
+            )
+            worker.start()
+            worker.wait(3000)
+
+        qapp.processEvents()
+        assert captured == [cover]
 
     def test_error_on_exception(self, qapp, tmp_path):
         source = tmp_path / "in.m4b"
