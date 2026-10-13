@@ -84,6 +84,42 @@ def _write_narrator_atom(dest: Path, narrator: str) -> None:
     audio.save()
 
 
+def _write_cover_atom(dest: Path, cover: Path) -> None:
+    """Replace the iTunes ``covr`` atom in *dest* with the image at *cover*.
+
+    The format is sniffed from the image bytes rather than the extension:
+    edit mode extracts embedded art to ``cover.jpg`` regardless of its real
+    format, and downloaded art can arrive under any name. Only JPEG and PNG
+    are valid in ``covr``; anything else raises :class:`M4BError` instead of
+    writing an atom players cannot display.
+
+    Unlike the narrator atom this write is not best-effort — the user chose
+    this image explicitly, so failing to store it must surface as an error.
+    """
+    from mutagen.mp4 import MP4, MP4Cover
+
+    data = cover.read_bytes()
+    if data.startswith(b"\xff\xd8\xff"):
+        image_format = MP4Cover.FORMAT_JPEG
+    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+        image_format = MP4Cover.FORMAT_PNG
+    else:
+        raise M4BError(
+            f"Cover image '{cover.name}' is not a JPEG or PNG file; "
+            "M4B cover art must be one of those formats."
+        )
+
+    audio: Any = MP4(str(dest))  # type: ignore[no-untyped-call]
+    if audio.tags is None:
+        audio.add_tags()
+    # mutagen ships no type stubs, so MP4Cover is an untyped call.
+    cover_atom = MP4Cover(  # type: ignore[no-untyped-call]
+        data, imageformat=image_format
+    )
+    audio.tags["covr"] = [cover_atom]
+    audio.save()
+
+
 def save_m4b_chapters(
     source: Path,
     chapters: list[Chapter],
@@ -92,6 +128,7 @@ def save_m4b_chapters(
     ffmpeg: str,
     *,
     metadata: BookMetadata | None = None,
+    cover: Path | None = None,
 ) -> None:
     """Rewrite *dest* with updated chapter metadata, keeping audio intact.
 
@@ -111,7 +148,14 @@ def save_m4b_chapters(
     written (via mutagen) after a successful ffmpeg run, since Apple Books
     reads narrator from ``©nrt`` rather than ``©wrt``.
 
-    Raises :class:`~m4bmaker.errors.M4BError` if ffmpeg fails.
+    When *cover* is provided it replaces the embedded cover art. ``None``
+    keeps the existing cover, which ffmpeg's stream copy carries through.
+    The cover is written to the intermediate output before it replaces
+    anything, so a failed cover write leaves an in-place *dest* untouched
+    and removes a partial new *dest*.
+
+    Raises :class:`~m4bmaker.errors.M4BError` if ffmpeg or the cover write
+    fails.
     """
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
@@ -177,6 +221,18 @@ def save_m4b_chapters(
             raise M4BError(
                 f"Error: ffmpeg timed out saving chapters to '{dest.name}'."
             ) from exc
+
+        if cover is not None:
+            try:
+                _write_cover_atom(out_path, cover)
+            except Exception as exc:
+                if not in_place:
+                    out_path.unlink(missing_ok=True)
+                if isinstance(exc, M4BError):
+                    raise
+                raise M4BError(
+                    f"Error writing cover art to '{dest.name}': {exc}"
+                ) from exc
 
         if in_place:
             replace_tmp = dest.with_name(dest.name + ".tmp_replace")

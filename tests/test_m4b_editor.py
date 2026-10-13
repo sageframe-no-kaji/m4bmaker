@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -482,3 +484,189 @@ class TestSaveM4bChapters:
         with patch("subprocess.run", side_effect=TimeoutExpired("ffmpeg", 600)):
             with pytest.raises(M4BError, match="timed out"):
                 save_m4b_chapters(source, chapters, 60.0, dest, "ffmpeg")
+
+
+# ── cover art (#29) ──────────────────────────────────────────────────────────
+
+_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 200
+
+
+class TestSaveM4bCover:
+    def _chapters(self, tmp_path: Path) -> list[Chapter]:
+        f = tmp_path / "book.m4b"
+        return [Chapter(index=1, start_time=0.0, title="Intro", source_file=f)]
+
+    @staticmethod
+    def _fake_run(content: bytes = b"UPDATED-M4B"):
+        def run(cmd, **_kw):
+            Path(cmd[-1]).write_bytes(content)
+            return MagicMock(returncode=0)
+
+        return run
+
+    @pytest.mark.parametrize(
+        ("data", "fmt_name"), [(_JPEG, "FORMAT_JPEG"), (_PNG, "FORMAT_PNG")]
+    )
+    def test_cover_written_with_sniffed_format(self, tmp_path, data, fmt_name):
+        from mutagen.mp4 import MP4Cover
+
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00" * 32)
+        dest = tmp_path / "out.m4b"
+        # Extension deliberately wrong: the format must come from the bytes.
+        cover = tmp_path / "cover.jpg"
+        cover.write_bytes(data)
+        mp4 = MagicMock()
+        mp4.tags = {}
+
+        with (
+            patch("subprocess.run", side_effect=self._fake_run()),
+            patch("mutagen.mp4.MP4", return_value=mp4) as mock_mp4,
+        ):
+            save_m4b_chapters(
+                source, self._chapters(tmp_path), 60.0, dest, "ffmpeg", cover=cover
+            )
+
+        mock_mp4.assert_called_once_with(str(dest))
+        written = mp4.tags["covr"][0]
+        assert bytes(written) == data
+        assert written.imageformat == getattr(MP4Cover, fmt_name)
+        mp4.save.assert_called_once()
+
+    def test_tags_added_when_file_has_none(self, tmp_path):
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00" * 32)
+        cover = tmp_path / "c.jpg"
+        cover.write_bytes(_JPEG)
+        mp4 = MagicMock()
+        mp4.tags = None
+
+        def add_tags():
+            mp4.tags = {}
+
+        mp4.add_tags.side_effect = add_tags
+        with (
+            patch("subprocess.run", side_effect=self._fake_run()),
+            patch("mutagen.mp4.MP4", return_value=mp4),
+        ):
+            save_m4b_chapters(
+                source,
+                self._chapters(tmp_path),
+                60.0,
+                tmp_path / "out.m4b",
+                "ffmpeg",
+                cover=cover,
+            )
+
+        assert "covr" in mp4.tags
+
+    def test_no_cover_skips_cover_write(self, tmp_path):
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00" * 32)
+        with (
+            patch("subprocess.run", side_effect=self._fake_run()),
+            patch("mutagen.mp4.MP4") as mock_mp4,
+        ):
+            save_m4b_chapters(
+                source, self._chapters(tmp_path), 60.0, tmp_path / "out.m4b", "ffmpeg"
+            )
+        mock_mp4.assert_not_called()
+
+    def test_unsupported_format_raises_and_removes_partial(self, tmp_path):
+        source = tmp_path / "in.m4b"
+        source.write_bytes(b"\x00" * 32)
+        dest = tmp_path / "out.m4b"
+        cover = tmp_path / "cover.webp"
+        cover.write_bytes(b"RIFF\x00\x00\x00\x00WEBP")
+
+        with patch("subprocess.run", side_effect=self._fake_run()):
+            with pytest.raises(M4BError, match="not a JPEG or PNG"):
+                save_m4b_chapters(
+                    source, self._chapters(tmp_path), 60.0, dest, "ffmpeg", cover=cover
+                )
+
+        assert not dest.exists()
+
+    def test_cover_failure_in_place_leaves_original_untouched(self, tmp_path):
+        """A failed cover write must not replace the user's file — the error
+        surfaces and the original survives (never-best-effort for covers)."""
+        source = tmp_path / "book.m4b"
+        source.write_bytes(b"ORIGINAL")
+        cover = tmp_path / "c.jpg"
+        cover.write_bytes(_JPEG)
+
+        with (
+            patch("subprocess.run", side_effect=self._fake_run()),
+            patch("mutagen.mp4.MP4", side_effect=Exception("mutagen exploded")),
+        ):
+            with pytest.raises(M4BError, match="cover art.*mutagen exploded"):
+                save_m4b_chapters(
+                    source,
+                    self._chapters(tmp_path),
+                    60.0,
+                    source,
+                    "ffmpeg",
+                    cover=cover,
+                )
+
+        assert source.read_bytes() == b"ORIGINAL"
+
+
+_FFMPEG = shutil.which("ffmpeg")
+
+
+@pytest.mark.skipif(_FFMPEG is None, reason="ffmpeg not installed")
+class TestSaveM4bCoverRoundTrip:
+    """Real ffmpeg + mutagen: proves the stream copy and the covr write."""
+
+    @staticmethod
+    def _image(path: Path, colour: str) -> Path:
+        subprocess.run(
+            [_FFMPEG, "-y", "-v", "error", "-f", "lavfi", "-i",
+             f"color={colour}:s=32x32", "-frames:v", "1", str(path)],
+            check=True,
+            timeout=30,
+        )  # fmt: skip
+        return path
+
+    def _m4b_with_cover(self, tmp_path: Path) -> tuple[Path, bytes]:
+        art = self._image(tmp_path / "old.jpg", "red")
+        m4b = tmp_path / "book.m4b"
+        subprocess.run(
+            [_FFMPEG, "-y", "-v", "error",
+             "-f", "lavfi", "-t", "2", "-i", "anullsrc=r=22050:cl=mono",
+             "-i", str(art), "-map", "0:a", "-map", "1:v",
+             "-c:a", "aac", "-c:v", "copy", "-disposition:v", "attached_pic",
+             "-t", "2", str(m4b)],
+            check=True,
+            timeout=30,
+        )  # fmt: skip
+        return m4b, self._covr(m4b)
+
+    @staticmethod
+    def _covr(path: Path) -> bytes:
+        from mutagen.mp4 import MP4
+
+        tags = MP4(str(path)).tags
+        assert tags is not None and "covr" in tags
+        return bytes(tags["covr"][0])
+
+    def _chapters(self, m4b: Path) -> list[Chapter]:
+        return [Chapter(index=1, start_time=0.0, title="One", source_file=m4b)]
+
+    def test_new_cover_replaces_embedded(self, tmp_path):
+        m4b, old = self._m4b_with_cover(tmp_path)
+        new_art = self._image(tmp_path / "new.png", "blue")
+
+        save_m4b_chapters(m4b, self._chapters(m4b), 2.0, m4b, _FFMPEG, cover=new_art)
+
+        assert self._covr(m4b) == new_art.read_bytes()
+        assert self._covr(m4b) != old
+
+    def test_unchanged_cover_survives_save(self, tmp_path):
+        m4b, old = self._m4b_with_cover(tmp_path)
+
+        save_m4b_chapters(m4b, self._chapters(m4b), 2.0, m4b, _FFMPEG)
+
+        assert self._covr(m4b) == old

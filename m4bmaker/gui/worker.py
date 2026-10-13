@@ -407,6 +407,7 @@ class SaveChaptersWorker(QThread):
         total_duration: float,
         dest: Path,
         metadata: BookMetadata | None = None,
+        cover: Path | None = None,
     ) -> None:
         super().__init__()
         self._source = source
@@ -414,6 +415,7 @@ class SaveChaptersWorker(QThread):
         self._total_duration = total_duration
         self._dest = dest
         self._metadata = metadata
+        self._cover = cover
 
     def run(self) -> None:
         try:
@@ -427,6 +429,7 @@ class SaveChaptersWorker(QThread):
                 self._dest,
                 ffmpeg,
                 metadata=self._metadata,
+                cover=self._cover,
             )
             self.result_ready.emit(self._dest)
         except M4BError as exc:
