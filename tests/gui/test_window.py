@@ -2263,3 +2263,113 @@ class TestExtraWindowsCleanup:
         shiboken6.delete(extra)
         w._forget_extra_windows()
         assert extra not in w._extra_windows
+
+
+# ── embedded source chapters in build mode (#28) ─────────────────────────────
+
+
+def _make_embedded_book(tmp_path: Path) -> Book:
+    """Two files: a.m4b (60 s) with chapters at 0/20/40, b.mp3 (30 s)."""
+    a, b = tmp_path / "a.m4b", tmp_path / "b.mp3"
+    for f in (a, b):
+        f.write_bytes(b"\x00" * 128)
+    return Book(
+        files=[a, b],
+        chapters=[
+            Chapter(1, 0.0, "A1", a, 0.0),
+            Chapter(2, 20.0, "A2", a, 20.0),
+            Chapter(3, 40.0, "A3", a, 40.0),
+            Chapter(4, 60.0, "B", b, 0.0),
+        ],
+        metadata=BookMetadata(title="T", author="A", narrator="N", genre="G"),
+        total_duration=90.0,
+    )
+
+
+def _load_embedded(w, tmp_path):
+    book = _make_embedded_book(tmp_path)
+    w._player.load = lambda *a, **kw: None
+    w._player.load_paused = lambda *a, **kw: None
+    w._apply_book_to_ui(book)
+    return book
+
+
+class TestEmbeddedChaptersBuildMode:
+    def test_rows_are_files_for_plain_book(self, win, tmp_path):
+        w, _ = win
+        _load_multi(w, tmp_path)
+        assert w._rows_are_files()
+
+    def test_rows_are_not_files_with_embedded_chapters(self, win, tmp_path):
+        w, _ = win
+        _load_embedded(w, tmp_path)
+        assert not w._rows_are_files()
+
+    def test_rows_are_not_files_after_silence_detection(self, win, tmp_path):
+        """Detected chapters have no source file; file ops must not act on
+        them by row (this was reachable before #28's guard)."""
+        w, _ = win
+        _load_multi(w, tmp_path, n=3)
+        w._on_detect_finished(
+            [Chapter(i + 1, i * 10.0, f"Chapter {i + 1}") for i in range(3)]
+        )
+        assert not w._rows_are_files()
+        assert w._ch_up_btn.isHidden()
+        assert w._ch_remove_btn.isHidden()
+
+    def test_rows_are_not_files_without_book(self, win):
+        w, _ = win
+        w._book = None
+        assert not w._rows_are_files()
+
+    def test_file_ops_hidden_with_embedded_chapters(self, win, tmp_path):
+        w, _ = win
+        _load_embedded(w, tmp_path)
+        w._update_chapter_buttons()
+        assert w._ch_up_btn.isHidden()
+        assert w._ch_down_btn.isHidden()
+        assert w._ch_remove_btn.isHidden()
+        assert not w._ch_merge_btn.isHidden()
+
+    def test_move_and_remove_are_noops_when_rows_are_not_files(self, win, tmp_path):
+        w, _ = win
+        book = _load_embedded(w, tmp_path)
+        files_before = list(book.files)
+        titles_before = [c.title for c in book.chapters]
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        w._on_chapter_move_up()
+        w._on_chapter_move_down()
+        w._remove_chapters_build_mode([1])
+        assert book.files == files_before
+        assert [c.title for c in book.chapters] == titles_before
+
+    def test_selecting_embedded_chapter_seeks_into_its_file(self, win, tmp_path):
+        from unittest.mock import PropertyMock
+
+        w, _ = win
+        book = _load_embedded(w, tmp_path)
+        with (
+            patch.object(
+                type(w._player),
+                "is_playing",
+                new_callable=PropertyMock,
+                return_value=False,
+            ),
+            patch.object(w._player, "load_paused") as mock_load_paused,
+        ):
+            w._on_chapter_selected(2, 0, -1, 0)
+        assert mock_load_paused.call_args[0] == (book.files[0], 40000)
+
+    def test_insert_time_adds_file_start_not_chapter_start(self, win, tmp_path):
+        """Player at 5 s into a.m4b while A2 (20 s into a) is selected → the
+        global time is a's start (0) + 5 s, not A2's start + 5 s."""
+        w, _ = win
+        _load_embedded(w, tmp_path)
+        w._chapter_table.setCurrentCell(1, ChapterTable.COL_TITLE)
+        with patch.object(
+            type(w._player),
+            "current_position_ms",
+            new_callable=lambda: property(lambda self: 25000),
+        ):
+            w._on_insert_time()
+        assert w._chapter_table.times_ms()[1] == 25000

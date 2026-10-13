@@ -32,7 +32,7 @@ import statistics
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from m4bmaker import __version__
 from m4bmaker.errors import M4BError
@@ -424,14 +424,8 @@ def apply_names(remote: list[AudnexusChapter], local: list[Chapter]) -> ApplyRes
     named: list[Chapter] = []
     for i, chapter in enumerate(local):
         title = remote[i].title if i < len(remote) else chapter.title
-        named.append(
-            Chapter(
-                index=chapter.index,
-                start_time=chapter.start_time,
-                title=title,
-                source_file=chapter.source_file,
-            )
-        )
+        # replace() keeps every other field, file_offset included (#28).
+        named.append(replace(chapter, title=title))
 
     if len(remote) == len(local):
         message = f"Applied {len(remote)} chapter name(s); timings unchanged."

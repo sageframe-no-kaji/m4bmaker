@@ -1628,12 +1628,13 @@ class MainWindow(QMainWindow):
         self._ch_next_btn.setEnabled(row < n - 1)
         ch = self._book.chapters[row]
         # In edit mode the source is the single .m4b, so ch.start_time is the
-        # correct seek position within that file.  In build mode each chapter is
-        # its own source file, so we always seek to the beginning of that file.
+        # correct seek position within that file.  In build mode the player
+        # loads the chapter's own source file, so seek to where the chapter
+        # starts inside it — 0 unless the file carried embedded chapters (#28).
         if self._mode == "edit":
             start_ms = int(ch.start_time * 1000)
         else:
-            start_ms = 0
+            start_ms = int(ch.file_offset * 1000)
         if self._mode == "edit" and self._folder_zone.path() is not None:
             src = self._folder_zone.path()
         else:
@@ -1650,17 +1651,19 @@ class MainWindow(QMainWindow):
         """Set the selected chapter's start time to the current player position.
 
         In edit mode the player loads the single .m4b so positions are
-        already global.  In build mode each chapter has its own source
-        file, so the player position is file-local; we add the
-        cumulative offset of that file to get the global chapter time.
+        already global.  In build mode the player holds the chapter's
+        source file, so the position is file-local; we add where that file
+        begins in the final audiobook to get the global chapter time.
         """
         row = self._chapter_table.currentRow()
         if row < 0 or self._book is None:
             return
         ms = self._player.current_position_ms
         if self._mode == "build" and row < len(self._book.chapters):
-            # cumulative offset of this file in the final audiobook
-            ms += int(self._book.chapters[row].start_time * 1000)
+            ch = self._book.chapters[row]
+            # Where this chapter's file begins: its start minus how far into
+            # the file the chapter sits (non-zero for embedded chapters, #28).
+            ms += int((ch.start_time - ch.file_offset) * 1000)
         self._chapter_table.set_chapter_time(row, ms)
 
     def _on_add_chapter(self) -> None:
@@ -1780,8 +1783,9 @@ class MainWindow(QMainWindow):
         has_book = self._book is not None
         in_edit = has_book and self._mode == "edit"
         in_build = has_book and self._mode == "build"
-        # After a merge in build mode files/chapters diverge — hide file-reorder ops.
-        build_merged = in_build and self._chapters_merged
+        # Once rows stop mapping 1:1 to files (a merge, embedded chapters,
+        # silence detection) file-reorder and file-remove ops are meaningless.
+        build_merged = in_build and not self._rows_are_files()
         # Move-up/move-down reorder time slices, which is physically meaningless
         # within a single .m4b — edit mode never shows reorder controls.
         show_reorder = in_build and not build_merged
@@ -1828,11 +1832,28 @@ class MainWindow(QMainWindow):
         )
         self._ch_merge_btn.setEnabled(is_consecutive)
 
+    def _rows_are_files(self) -> bool:
+        """True when chapter row *i* is exactly file *i*, starting at its head.
+
+        Build-mode reorder and remove act on ``book.files`` by row index, so
+        they are only sound while this holds. It stops holding after a merge,
+        when a file contributes embedded chapters (#28), or after chapters are
+        replaced by silence detection or remote timings (no source file).
+        """
+        if self._book is None or self._chapters_merged:
+            return False
+        chapters, files = self._book.chapters, self._book.files
+        return len(chapters) == len(files) and all(
+            ch.source_file == f and ch.file_offset == 0.0
+            for ch, f in zip(chapters, files)
+        )
+
     def _on_chapter_move_up(self) -> None:
         # Reordering time slices within a single .m4b is physically
         # meaningless (edit mode) — the toolbar hides these buttons, but
         # guard the handler too since it may be reached via other paths.
-        if self._mode != "build":
+        # The same holds in build mode once rows are no longer files.
+        if self._mode != "build" or not self._rows_are_files():
             return
         row = self._chapter_table.currentRow()
         if row <= 0 or self._book is None:
@@ -1856,7 +1877,7 @@ class MainWindow(QMainWindow):
         self._chapter_table.setCurrentCell(i - 1, ChapterTable.COL_TITLE)
 
     def _on_chapter_move_down(self) -> None:
-        if self._mode != "build":
+        if self._mode != "build" or not self._rows_are_files():
             return
         if self._book is None:
             return
@@ -1909,6 +1930,8 @@ class MainWindow(QMainWindow):
     def _remove_chapters_build_mode(self, selected: list[int]) -> None:
         """Remove chapters (= files) and cumulatively rebuild the timeline."""
         assert self._book is not None
+        if not self._rows_are_files():
+            return  # rows are not files; deleting by row would drop the wrong audio
         for row in reversed(selected):
             del self._chapter_durations[row]
             del self._book.files[row]

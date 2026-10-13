@@ -450,6 +450,20 @@ class TestReconcileOffsets:
 
 
 class TestApplyNames:
+    def test_keeps_source_file_and_offset(self, tmp_path) -> None:
+        """#28: naming must not reset where a chapter sits in its file."""
+        src = tmp_path / "a.m4b"
+        local = [
+            Chapter(index=1, start_time=0.0, title="L1", source_file=src),
+            Chapter(index=2, start_time=30.0, title="L2", source_file=src,
+                    file_offset=30.0),
+        ]  # fmt: skip
+        result = apply_names(_remote([("One", 0), ("Two", 1)]), local)
+        assert [(c.source_file, c.file_offset) for c in result.chapters] == [
+            (src, 0.0),
+            (src, 30.0),
+        ]
+
     def test_preserves_every_local_start_time(self) -> None:
         local = _local([0.0, 100.25, 250.5])
         remote = _remote([("One", 5000), ("Two", 99_000), ("Three", 260_000)])

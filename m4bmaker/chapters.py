@@ -7,6 +7,7 @@ import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 from m4bmaker.errors import M4BError
 from m4bmaker.models import BookMetadata, Chapter
@@ -23,8 +24,18 @@ def _strip_chapter_prefix(stem: str) -> str:
     return cleaned if cleaned else stem
 
 
-def _probe_file(file: Path, ffprobe: str) -> tuple[float, str | None]:
-    """Run ffprobe on *file* and return (duration_seconds, title_tag_or_None)."""
+class _Probe(NamedTuple):
+    """What :func:`_probe_file` reads from one audio file."""
+
+    duration: float
+    title: str | None
+    # (start_seconds, title_or_None) for each chapter marker embedded in the
+    # file, in order; empty when the file carries none.
+    chapters: list[tuple[float, str | None]]
+
+
+def _probe_file(file: Path, ffprobe: str) -> _Probe:
+    """Run ffprobe on *file*: duration, title tag, and embedded chapters."""
     cmd = [
         ffprobe,
         "-v",
@@ -32,6 +43,7 @@ def _probe_file(file: Path, ffprobe: str) -> tuple[float, str | None]:
         "-print_format",
         "json",
         "-show_format",
+        "-show_chapters",
         str(file),
     ]
     try:
@@ -63,7 +75,14 @@ def _probe_file(file: Path, ffprobe: str) -> tuple[float, str | None]:
         ) from exc
 
     title = data.get("format", {}).get("tags", {}).get("title") or None
-    return duration, title
+    embedded: list[tuple[float, str | None]] = []
+    for raw in data.get("chapters", []):
+        try:
+            start = float(raw["start_time"])
+        except (KeyError, TypeError, ValueError):
+            continue  # a marker without a usable start time cannot be placed
+        embedded.append((start, raw.get("tags", {}).get("title") or None))
+    return _Probe(duration, title, embedded)
 
 
 def get_duration(file: Path, ffprobe: str) -> float:
@@ -80,6 +99,11 @@ def build_chapters(
 
     Chapters are indexed sequentially starting at 1, with *start_time* in
     seconds (float).  *source_file* is set to the corresponding input path.
+
+    A file contributes one chapter, titled from its title tag or filename —
+    unless it carries its own chapter markers (an M4B, typically), in which
+    case those are kept, shifted to the file's position in the book (#28).
+    Merging chaptered books must not flatten each one to a single chapter.
     """
     chapters: list[Chapter] = []
     cursor_s: float = 0.0
@@ -88,19 +112,44 @@ def build_chapters(
     for i, path in enumerate(files, 1):
         if progress_fn is not None:
             progress_fn(i, total, path.name)
-        duration_sec, tag_title = _probe_file(path, ffprobe)
-        title = tag_title if tag_title else _strip_chapter_prefix(path.stem)
-        chapters.append(
-            Chapter(
-                index=i,
-                start_time=cursor_s,
-                title=title,
-                source_file=path,
+        probe = _probe_file(path, ffprobe)
+        file_title = probe.title if probe.title else _strip_chapter_prefix(path.stem)
+        for offset, title in _file_chapters(probe, file_title):
+            chapters.append(
+                Chapter(
+                    index=len(chapters) + 1,
+                    start_time=cursor_s + offset,
+                    title=title,
+                    source_file=path,
+                    file_offset=offset,
+                )
             )
-        )
-        cursor_s += duration_sec
+        cursor_s += probe.duration
 
     return chapters
+
+
+def _file_chapters(probe: _Probe, file_title: str) -> list[tuple[float, str]]:
+    """Return ``(offset_in_file, title)`` for each chapter *probe*'s file adds.
+
+    Embedded markers at or past the end of the audio are dropped, and the
+    first kept marker is pinned to 0.0 so no audio at the head of the file
+    falls outside a chapter. A marker without a title takes the file's
+    title, numbered when the file has more than one chapter.
+    """
+    markers = sorted(
+        (start, title)
+        for start, title in probe.chapters
+        if 0.0 <= start < probe.duration
+    )
+    if not markers:
+        return [(0.0, file_title)]
+    numbered = len(markers) > 1
+    result: list[tuple[float, str]] = []
+    for n, (start, title) in enumerate(markers, 1):
+        fallback = f"{file_title} {n}" if numbered else file_title
+        result.append((0.0 if n == 1 else start, title or fallback))
+    return result
 
 
 def _format_time(seconds: float) -> str:

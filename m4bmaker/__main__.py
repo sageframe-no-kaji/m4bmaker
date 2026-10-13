@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import tempfile
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 
 from m4bmaker import __version__
@@ -79,14 +80,7 @@ def _edit_chapters_inline(chapters: list[Chapter]) -> list[Chapter]:
     edited: list[Chapter] = []
     for ch in chapters:
         value = safe_input(f"  Chapter {ch.index} [{ch.title}]: ").strip()
-        edited.append(
-            Chapter(
-                index=ch.index,
-                start_time=ch.start_time,
-                title=value if value else ch.title,
-                source_file=ch.source_file,
-            )
-        )
+        edited.append(replace(ch, title=value if value else ch.title))
     return edited
 
 
