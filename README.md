@@ -33,7 +33,7 @@ Drag in a folder, adjust your chapters, hit Convert. m4Bookmaker handles the res
 
 ## What it does
 
-- **Automatic chapters** from filenames — track numbers and prefixes stripped
+- **Automatic chapters** from filenames — track numbers and prefixes stripped. Source files that already have chapter markers (M4Bs) keep them, so merging books keeps every chapter
 - **Chapter editor** — rename, reorder, merge, split, adjust timestamps inline
 - **Built-in audio player** — scrub through source audio, seek to any chapter boundary
 - **Edit existing M4Bs** — rename chapters and adjust timestamps without re-encoding
@@ -131,7 +131,7 @@ m4bmaker <folder> [options]
 
 ## Supported formats
 
-**Input:** mp3 · m4a · aac · flac · wav · ogg — formats can be mixed in the same folder.
+**Input:** mp3 · m4a · m4b · aac · flac · wav · ogg — formats can be mixed in the same folder. Each input file becomes one chapter, unless it carries its own chapter markers — those are kept and shifted into place in the merged book.
 
 **Output:** `.m4b` (AAC in MP4 container with chapter metadata)
 

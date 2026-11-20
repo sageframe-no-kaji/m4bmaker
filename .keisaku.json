@@ -1,5 +1,5 @@
 {
-  "keisaku": 1,
+  "keisaku": 2,
   "works": [
     {
       "id": "m4bookmaker",
@@ -41,7 +41,7 @@
       ],
       "tech_stack": "Python (mutagen, natsort, platformdirs)",
       "created": "2026-02-05",
-      "last_updated": "2026-07-14",
+      "last_updated": "2026-10-13",
       "conceived": "2026-03-01",
       "short_description": "A desktop app that converts folders of MP3 (or other audio) files into clean, properly chaptered M4B audiobooks you own outright.",
       "substantive_description": [
@@ -61,15 +61,8 @@
       ],
       "availability": "shipped",
       "usage": "others",
-      "state": {
-        "stage": "production",
-        "last": "Full security/correctness/optimization review of the codebase, then all findings fixed across four commits (`c518f54` core hardening: M4BError exception layer replacing library sys.exit, atomic encode via .partial + os.replace, FFMETADATA escaping, narrator ©nrt/©wrt fix incl. the reported \"narrator not saved\" bug (root cause: comment tag masked the saved composer atom on reload), post-repair chapter retiming, codec-uniformity check, probe caching; `328b2ee` build supply chain: SHA-256 pin on the third-party ffmpeg zip, hash-locked requirements-build.lock, entitlements documented; `d90d7ba` GUI thread lifecycle: quit/close cancels+waits workers, queue Stop→Start race fixed, bound-method signal connections (fatal quit-during-load crash), stylesheet quadratic-repolish fix; `dcef544` GUI edit-mode/widgets: timeline-preserving chapter remove, time edits honoured on Convert, output-path sanitization, async pickers/downloads, player seek-timer + release-before-save). Verification: 992 tests green (~10s), coverage 90% total, mypy 54→30 (rest is pre-existing window.py debt), live E2E smoke with hostile metadata passed.",
-        "next": "finish 1.1.0 release: test the DMG by launching it, test the Windows installer from the CI artifact, publish the draft GitHub Release (this triggers in-app update notifications), upload both installers to Payhip, close issue #20 referencing 1.1.0.",
-        "holdup": "Released so far: PyPI 1.1.0 live; tag v1.1.0 pushed (merge commit f357cb6, PR #21); signed+notarized+stapled DMG attached to DRAFT GitHub release. Two hash-locked-build lessons committed: static_ffmpeg 3.0 stdout chatter (SF_DIR capture) and Pillow 11 has no universal2 wheels (excluded from bundle — app ships Pillow-free as 1.0.5 did). Open bugs NOT in this release: #15/#16 \"output marked Protected\" (DRM-origin metadata via -map_metadata) — candidate next ho. Hygiene ho candidate: ~30 window.py mypy-strict errors, 15 E501s. Entitlements re-test on next PyInstaller/PySide6 major bump.",
-        "as_of": "2026-07-12"
-      },
       "_keisaku": {
-        "generated_at": "2026-07-19T11:32:58",
+        "generated_at": "2026-11-17T15:26:28",
         "generator_version": "1",
         "sources": {
           "readme": "README.md",

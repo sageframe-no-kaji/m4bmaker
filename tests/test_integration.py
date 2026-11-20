@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from m4bmaker.__main__ import _output_path, _confirm_output, main
+from m4bmaker.chapters import _Probe
 from m4bmaker.errors import M4BError
 
 # ---------------------------------------------------------------------------
@@ -170,7 +171,7 @@ def _run_pipeline(
 
     with (
         patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
-        patch("m4bmaker.chapters._probe_file", return_value=(duration, None)),
+        patch("m4bmaker.chapters._probe_file", return_value=_Probe(duration, None, [])),
         patch("m4bmaker.pipeline.get_duration", return_value=duration),
         patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_ffmpeg_popen),
         patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
@@ -262,7 +263,7 @@ class TestFullPipeline:
 
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
-            patch("m4bmaker.chapters._probe_file", return_value=(5.0, None)),
+            patch("m4bmaker.chapters._probe_file", return_value=_Probe(5.0, None, [])),
             patch("m4bmaker.pipeline.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
@@ -307,7 +308,7 @@ class TestFullPipeline:
 
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
-            patch("m4bmaker.chapters._probe_file", return_value=(5.0, None)),
+            patch("m4bmaker.chapters._probe_file", return_value=_Probe(5.0, None, [])),
             patch("m4bmaker.pipeline.get_duration", return_value=5.0),
             patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
@@ -763,6 +764,17 @@ class TestConfirmCover:
 
 
 class TestEditChaptersInline:
+    def test_file_offset_preserved(self, tmp_path) -> None:
+        """#28: renaming must keep where an embedded chapter sits in its file."""
+        from m4bmaker.__main__ import _edit_chapters_inline
+        from m4bmaker.models import Chapter
+
+        src = tmp_path / "a.m4b"
+        chapters = [Chapter(2, 30.0, "Ch", source_file=src, file_offset=30.0)]
+        with patch("builtins.input", return_value="Renamed"):
+            result = _edit_chapters_inline(chapters)
+        assert (result[0].title, result[0].file_offset) == ("Renamed", 30.0)
+
     def test_enter_keeps_existing_title(self) -> None:
         from m4bmaker.__main__ import _edit_chapters_inline
         from m4bmaker.models import Chapter
@@ -898,7 +910,7 @@ class TestInteractiveChapterEdit:
 
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
-            patch("m4bmaker.chapters._probe_file", return_value=(10.0, None)),
+            patch("m4bmaker.chapters._probe_file", return_value=_Probe(10.0, None, [])),
             patch("m4bmaker.pipeline.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
@@ -959,7 +971,7 @@ class TestChaptersFileIntegration:
 
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
-            patch("m4bmaker.chapters._probe_file", return_value=(10.0, None)),
+            patch("m4bmaker.chapters._probe_file", return_value=_Probe(10.0, None, [])),
             patch("m4bmaker.pipeline.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),
@@ -1058,7 +1070,7 @@ class TestMainRepairFlow:
 
         with (
             patch("m4bmaker.utils.shutil.which", return_value="/usr/bin/ffmpeg"),
-            patch("m4bmaker.chapters._probe_file", return_value=(10.0, None)),
+            patch("m4bmaker.chapters._probe_file", return_value=_Probe(10.0, None, [])),
             patch("m4bmaker.pipeline.get_duration", return_value=10.0),
             patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
             patch("m4bmaker.preflight.subprocess.run", side_effect=_fake_preflight_run),

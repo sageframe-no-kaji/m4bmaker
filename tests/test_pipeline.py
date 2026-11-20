@@ -9,7 +9,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from m4bmaker.errors import M4BError
 from m4bmaker.models import Book, BookMetadata, Chapter, PipelineResult
-from m4bmaker.pipeline import load_audiobook, run_pipeline
+from m4bmaker.pipeline import (
+    _retime_chapters_after_repair,
+    load_audiobook,
+    run_pipeline,
+)
+from m4bmaker.repair import RepairResult
 from m4bmaker.preflight import AudioAnalysis
 
 # ---------------------------------------------------------------------------
@@ -450,3 +455,109 @@ class TestRunPipeline:
         ):
             result = run_pipeline(book, out, ffmpeg="ffmpeg", ffprobe="ffprobe")
         assert abs(result.duration_seconds - 5.0) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Embedded chapters (#28): several chapters per source file
+# ---------------------------------------------------------------------------
+
+
+class TestEmbeddedChapterTiming:
+    @staticmethod
+    def _files(tmp_path: Path) -> tuple[Path, Path]:
+        a, b = tmp_path / "a.m4b", tmp_path / "b.m4b"
+        a.write_bytes(b"\x00")
+        b.write_bytes(b"\x00")
+        return a, b
+
+    @staticmethod
+    def _chapters(a: Path, b: Path) -> list[Chapter]:
+        # a is 60s with chapters at 0/20/40; b is 30s with chapters at 0/10.
+        return [
+            Chapter(1, 0.0, "A1", a, 0.0),
+            Chapter(2, 20.0, "A2", a, 20.0),
+            Chapter(3, 40.0, "A3", a, 40.0),
+            Chapter(4, 60.0, "B1", b, 0.0),
+            Chapter(5, 70.0, "B2", b, 10.0),
+        ]
+
+    def test_load_total_counts_from_last_file_start(self, tmp_path: Path) -> None:
+        """The last chapter sits 10s into b; total is b's start + b's length,
+        not the last chapter's start + b's length."""
+        a, b = self._files(tmp_path)
+        with (
+            patch("m4bmaker.pipeline.scan_audio_files", return_value=[a, b]),
+            patch("m4bmaker.pipeline.find_cover", return_value=None),
+            patch("m4bmaker.pipeline.extract_metadata", return_value={}),
+            patch("m4bmaker.pipeline.extract_cover_from_audio", return_value=None),
+            patch("m4bmaker.pipeline.find_ffmpeg", return_value="ffmpeg"),
+            patch(
+                "m4bmaker.pipeline.build_chapters", return_value=self._chapters(a, b)
+            ),
+            patch("m4bmaker.pipeline.get_duration", return_value=30.0),
+        ):
+            book = load_audiobook(tmp_path, "ffprobe")
+        assert book.total_duration == pytest.approx(90.0)
+
+    def test_retime_shifts_by_file_not_by_row(self, tmp_path: Path) -> None:
+        """Repair shortens a from 60s to 50s: every b chapter moves back 10s,
+        a's chapters keep their offsets, and sources become the active files.
+        Chapters name the originals and resolve through the repair mapping —
+        the shape both the GUI and the CLI (which swaps book.files to the
+        repaired copies first) hand the pipeline."""
+        a, b = self._files(tmp_path)
+        cleaned_a = tmp_path / "repaired_a.m4b"
+        durations = {cleaned_a: 50.0, b: 30.0}
+        with patch(
+            "m4bmaker.pipeline.get_duration", side_effect=lambda p, _f: durations[p]
+        ):
+            retimed = _retime_chapters_after_repair(
+                self._chapters(a, b), [cleaned_a, b], {a: cleaned_a}, "ffprobe"
+            )
+        assert [c.start_time for c in retimed] == [0.0, 20.0, 40.0, 50.0, 60.0]
+        assert [c.source_file for c in retimed] == [cleaned_a] * 3 + [b, b]
+        assert [c.title for c in retimed] == ["A1", "A2", "A3", "B1", "B2"]
+
+    def test_retime_clamps_offset_past_shortened_end(self, tmp_path: Path) -> None:
+        a, b = self._files(tmp_path)
+        cleaned_a = tmp_path / "repaired_a.m4b"
+        durations = {cleaned_a: 35.0, b: 30.0}
+        with patch(
+            "m4bmaker.pipeline.get_duration", side_effect=lambda p, _f: durations[p]
+        ):
+            retimed = _retime_chapters_after_repair(
+                self._chapters(a, b), [cleaned_a, b], {a: cleaned_a}, "ffprobe"
+            )
+        # A3 sat at 40s but the repaired a is only 35s long.
+        assert retimed[2].start_time < 35.0
+        assert retimed[2].file_offset == pytest.approx(retimed[2].start_time)
+        assert retimed[3].start_time == pytest.approx(35.0)
+
+    def test_retime_leaves_unknown_source_unchanged(self, tmp_path: Path) -> None:
+        a, b = self._files(tmp_path)
+        stray = Chapter(9, 99.0, "Stray", tmp_path / "gone.m4b", 0.0)
+        with patch("m4bmaker.pipeline.get_duration", return_value=60.0):
+            retimed = _retime_chapters_after_repair([stray], [a], {}, "ffprobe")
+        assert retimed == [stray]
+
+    def test_run_pipeline_total_from_last_file_start(self, tmp_path: Path) -> None:
+        a, b = self._files(tmp_path)
+        book = Book(
+            files=[a, b],
+            chapters=self._chapters(a, b),
+            metadata=BookMetadata(title="T", author="A", narrator="N"),
+            cover=None,
+        )
+        with (
+            patch("m4bmaker.pipeline.get_duration", return_value=30.0),
+            patch("m4bmaker.pipeline._check_codec_uniformity"),
+            patch("m4bmaker.encoder.subprocess.Popen", side_effect=_fake_encode_popen),
+        ):
+            result = run_pipeline(
+                book,
+                tmp_path / "out.m4b",
+                ffmpeg="ffmpeg",
+                ffprobe="ffprobe",
+                repair_result=RepairResult(total=2),
+            )
+        assert result.duration_seconds == pytest.approx(90.0)
