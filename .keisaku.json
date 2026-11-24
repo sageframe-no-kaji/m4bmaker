@@ -24,7 +24,7 @@
         "software"
       ],
       "status": "shipped",
-      "repo": "git@github-no-kaji:sageframe-no-kaji/m4bmaker.git",
+      "repo": "https://github.com/sageframe-no-kaji/m4bmaker",
       "license": "GPL-3.0",
       "deployment": [
         {
@@ -62,7 +62,7 @@
       "availability": "shipped",
       "usage": "others",
       "_keisaku": {
-        "generated_at": "2026-11-17T15:26:28",
+        "generated_at": "2026-11-24T17:07:22",
         "generator_version": "1",
         "sources": {
           "readme": "README.md",
