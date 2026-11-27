@@ -13,12 +13,19 @@ class Chapter:
     *start_time* is in seconds (float).  *source_file* is the audio file that
     contributes this chapter; it is ``None`` for chapters loaded from an
     external ``--chapters-file``.
+
+    *file_offset* is where the chapter starts inside *source_file*, in
+    seconds. It is ``0.0`` when a file contributes one chapter, and non-zero
+    for the second and later chapters carried over from a source file's own
+    chapter markers (#28). ``start_time - file_offset`` is therefore the
+    position in the book where *source_file* begins.
     """
 
     index: int
     start_time: float  # seconds
     title: str
     source_file: Path | None = field(default=None)
+    file_offset: float = 0.0  # seconds into source_file
 
 
 @dataclass
